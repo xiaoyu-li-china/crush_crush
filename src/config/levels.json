@@ -1,0 +1,287 @@
+[
+  {
+    "id": 1,
+    "seed": 20250812,
+    "moves": 12,
+    "board": { "rows": 6, "cols": 6 },
+    "shape": "diamond",
+    "goals": [{ "type": "collect", "kind": 1, "count": 12 }],
+    "crushEnabled": true,
+    "crushDurationMs": 14000
+  },
+  {
+    "id": 2,
+    "seed": 20250813,
+    "moves": 13,
+    "board": { "rows": 6, "cols": 6 },
+    "shape": "heart",
+    "ice": { "bottomRows": 1 },
+    "goals": [
+      { "type": "collect", "kind": 2, "count": 12 },
+      { "type": "clear_ice", "count": 6 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 13000
+  },
+  {
+    "id": 3,
+    "seed": 20250811,
+    "moves": 15,
+    "board": { "rows": 6, "cols": 6 },
+    "ice": { "bottomRows": 2 },
+    "goals": [
+      { "type": "collect", "kind": 3, "count": 10 },
+      { "type": "clear_ice", "count": 12 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 12000
+  },
+  {
+    "id": 4,
+    "seed": 20250814,
+    "moves": 20,
+    "board": { "rows": 7, "cols": 7 },
+    "ice": { "bottomRows": 3 },
+    "goals": [
+      { "type": "collect", "kind": 4, "count": 12 },
+      { "type": "clear_ice", "count": 21 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 12000
+  },
+  {
+    "id": 5,
+    "seed": 20250815,
+    "moves": 18,
+    "board": { "rows": 7, "cols": 7 },
+    "ice": { "bottomRows": 4 },
+    "goals": [
+      { "type": "collect", "kind": 1, "count": 14 },
+      { "type": "clear_ice", "count": 28 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 12000
+  },
+  {
+    "id": 6,
+    "seed": 20250816,
+    "moves": 20,
+    "board": { "rows": 7, "cols": 7 },
+    "cloudGems": 8,
+    "cloudRows": 2,
+    "goals": [{ "type": "collect_gems", "count": 8 }],
+    "crushEnabled": true,
+    "crushDurationMs": 12000
+  },
+  {
+    "id": 7,
+    "seed": 20250817,
+    "moves": 20,
+    "board": { "rows": 7, "cols": 7 },
+    "cloudGems": 10,
+    "cloudRows": 3,
+    "starterSpecials": { "sparkles": 1 },
+    "goals": [{ "type": "collect_gems", "count": 10 }],
+    "crushEnabled": true,
+    "crushDurationMs": 11000
+  },
+  {
+    "id": 8,
+    "seed": 20250818,
+    "moves": 18,
+    "board": { "rows": 7, "cols": 7 },
+    "shape": "diamond",
+    "cloudGems": 10,
+    "cloudRows": 3,
+    "starterSpecials": { "sparkles": 1 },
+    "goals": [{ "type": "collect_gems", "count": 10 }],
+    "crushEnabled": true,
+    "crushDurationMs": 11000
+  },
+  {
+    "id": 9,
+    "seed": 20250819,
+    "moves": 20,
+    "board": { "rows": 8, "cols": 8 },
+    "shape": "plus",
+    "cloudGems": 8,
+    "cloudRows": 2,
+    "starterSpecials": { "sparkles": 2 },
+    "goals": [{ "type": "collect_gems", "count": 8 }],
+    "crushEnabled": true,
+    "crushDurationMs": 11000
+  },
+  {
+    "id": 10,
+    "seed": 20250820,
+    "moves": 16,
+    "board": { "rows": 7, "cols": 7 },
+    "cloud": { "skipTopRows": 1 },
+    "cloudGems": 16,
+    "starterSpecials": { "sparkles": 2 },
+    "goals": [
+      { "type": "collect_gems", "count": 16 },
+      { "type": "clear_cloud", "count": 42 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 11000
+  },
+  {
+    "id": 11,
+    "seed": 20250911,
+    "moves": 22,
+    "board": { "rows": 7, "cols": 7 },
+    "shape": "heart",
+    "starterSpecials": { "owls": 1, "sparkles": 3 },
+    "goals": [
+      { "type": "collect", "kind": 4, "count": 14 },
+      { "type": "collect", "kind": 1, "count": 12 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 13000
+  },
+  {
+    "id": 12,
+    "seed": 20250912,
+    "moves": 22,
+    "board": { "rows": 8, "cols": 8 },
+    "shape": "plus",
+    "cloudGems": 8,
+    "cloudRows": 2,
+    "starterSpecials": { "owls": 1, "sparkles": 2 },
+    "goals": [{ "type": "collect_gems", "count": 8 }],
+    "crushEnabled": true,
+    "crushDurationMs": 12000
+  },
+  {
+    "id": 13,
+    "seed": 20250913,
+    "moves": 22,
+    "board": { "rows": 7, "cols": 7 },
+    "shape": "double_ring",
+    "ice": { "bottomRows": 2 },
+    "starterSpecials": { "owls": 1, "sparkles": 2 },
+    "goals": [
+      { "type": "collect", "kind": 3, "count": 10 },
+      { "type": "clear_ice", "count": 14 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 12000
+  },
+  {
+    "id": 14,
+    "seed": 20250914,
+    "moves": 18,
+    "board": { "rows": 7, "cols": 7 },
+    "shape": "split_3_4",
+    "cloudGems": 10,
+    "cloudRows": 2,
+    "starterSpecials": { "owls": 1, "sparkles": 2 },
+    "goals": [
+      { "type": "collect_gems", "count": 10 },
+      { "type": "collect", "kind": 2, "count": 10 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 11000
+  },
+  {
+    "id": 15,
+    "seed": 20250915,
+    "moves": 20,
+    "board": { "rows": 7, "cols": 7 },
+    "shape": "heart",
+    "ice": { "bottomRows": 3 },
+    "cloudGems": 12,
+    "cloudRows": 2,
+    "starterSpecials": { "owls": 2, "sparkles": 3 },
+    "goals": [
+      { "type": "collect_gems", "count": 12 },
+      { "type": "clear_ice", "count": 21 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 13000
+  },
+  {
+    "id": 16,
+    "seed": 20250916,
+    "moves": 22,
+    "board": { "rows": 7, "cols": 7 },
+    "ice": { "bottomRows": 3 },
+    "starterSpecials": { "owls": 1, "sparkles": 2 },
+    "goals": [
+      { "type": "collect", "kind": 4, "count": 10 },
+      { "type": "clear_ice", "count": 21 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 12000
+  },
+  {
+    "id": 17,
+    "seed": 20250917,
+    "moves": 22,
+    "board": { "rows": 7, "cols": 7 },
+    "ice": { "skipTopRows": 3 },
+    "buried": { "snowmen": 0, "penguins": 2 },
+    "starterSpecials": { "owls": 1, "sparkles": 2 },
+    "goals": [
+      { "type": "collect_penguins", "count": 2 },
+      { "type": "clear_ice", "count": 28 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 12000
+  },
+  {
+    "id": 18,
+    "seed": 20250918,
+    "moves": 20,
+    "board": { "rows": 7, "cols": 7 },
+    "ice": { "skipTopRows": 2 },
+    "iceStyle": "encase",
+    "buried": { "snowmen": 0, "penguins": 3 },
+    "starterSpecials": { "owls": 1, "sparkles": 2 },
+    "goals": [
+      { "type": "collect_penguins", "count": 3 },
+      { "type": "clear_ice", "count": 35 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 11000
+  },
+  {
+    "id": 19,
+    "seed": 20250919,
+    "moves": 20,
+    "board": { "rows": 7, "cols": 7 },
+    "shape": "double_ring",
+    "ice": { "skipTopRows": 2 },
+    "iceStyle": "encase",
+    "buried": { "snowmen": 2, "penguins": 2 },
+    "starterSpecials": { "owls": 1, "sparkles": 3 },
+    "goals": [
+      { "type": "collect_snowmen", "count": 2 },
+      { "type": "collect_penguins", "count": 2 },
+      { "type": "clear_ice", "count": 26 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 11000
+  },
+  {
+    "id": 20,
+    "seed": 20250920,
+    "moves": 20,
+    "board": { "rows": 7, "cols": 7 },
+    "shape": "hourglass",
+    "ice": { "skipTopRows": 1 },
+    "iceStyle": "encase",
+    "cloudGems": 8,
+    "cloudRows": 2,
+    "buried": { "snowmen": 2, "penguins": 4 },
+    "starterSpecials": { "owls": 2, "sparkles": 4 },
+    "goals": [
+      { "type": "collect_gems", "count": 8 },
+      { "type": "collect_penguins", "count": 4 },
+      { "type": "clear_ice", "count": 28 }
+    ],
+    "crushEnabled": true,
+    "crushDurationMs": 14000
+  }
+]

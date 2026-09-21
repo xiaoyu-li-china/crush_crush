@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "envId": "mengchong-prod-d6ge57eisb268a264",
+  "collection": "player_saves",
+  "_comment": "player_saves 仅创建者可读写。邀请人锤子由云函数 claimInvite 写入 invite.creditHammer；invite_claims 防重复领取。"
+}

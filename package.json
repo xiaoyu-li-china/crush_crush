@@ -1,0 +1,24 @@
+{
+  "name": "crush-crush",
+  "version": "0.1.0",
+  "description": "萌宠粉碎消 - 微信小游戏（三消闯关 + 粉碎奖励 · IAA）",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/logic/**/*.test.ts tests/presentation/**/*.test.ts tests/core/**/*.test.ts",
+    "test:coverage": "c8 --reporter=text --reporter=text-summary --include=src/logic/** --include=src/core/utils/math.ts --include=src/core/pool/ObjectPool.ts --include=src/core/utils/adForeground.ts --include=src/core/utils/perfBudget.ts --include=src/core/utils/wxHost.ts --include=src/core/utils/foregroundGate.ts --include=src/core/adapters/WxAudioAdapter.ts tsx --test tests/logic/**/*.test.ts tests/presentation/**/*.test.ts tests/core/**/*.test.ts",
+    "test:coverage:critical": "c8 --check-coverage --lines 100 --functions 100 --branches 100 --include=src/core/utils/adForeground.ts --include=src/core/utils/perfBudget.ts --include=src/core/utils/foregroundGate.ts --include=src/core/utils/lobbyBanner.ts --include=src/logic/economy/AdPlacementPolicy.ts tsx --test tests/core/adForeground.test.ts tests/core/perfBudget.test.ts tests/core/foregroundGate.test.ts tests/logic/LobbyBanner.test.ts tests/logic/AdPlacementPolicy.test.ts",
+    "build:wechat": "node scripts/build-wechat.mjs",
+    "dev:wechat": "node scripts/build-wechat.mjs --watch"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "c8": "^12.0.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.4.5"
+  }
+}

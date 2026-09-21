@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2018",
+    "module": "ES2015",
+    "moduleResolution": "node",
+    "lib": ["ES2018"],
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "skipLibCheck": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "declaration": false,
+    "sourceMap": true,
+    "outDir": "./out",
+    "rootDir": "./",
+    "baseUrl": ".",
+    "paths": {
+      "@core/*": ["src/core/*"],
+      "@logic/*": ["src/logic/*"],
+      "@presentation/*": ["src/presentation/*"],
+      "@services/*": ["src/services/*"],
+      "@config/*": ["src/config/*"]
+    },
+    "types": []
+  },
+  "include": ["src/**/*.ts", "types/**/*.d.ts"],
+  "exclude": ["node_modules", "out", "build", "library", "temp", "tests"]
+}

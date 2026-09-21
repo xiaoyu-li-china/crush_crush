@@ -1,0 +1,12 @@
+node_modules/
+out/
+coverage/
+*.log
+.DS_Store
+game.js.map
+.idea/
+.vscode/
+library/
+temp/
+local/
+build/

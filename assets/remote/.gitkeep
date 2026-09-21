@@ -1,0 +1,2 @@
+# 远程资源占位（CDN）：大图、过场、BGM
+# TODO: 配置 downloadFile 合法域名；运行时由 ResourceLoader 拉取

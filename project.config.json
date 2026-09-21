@@ -1,0 +1,162 @@
+{
+  "description": "粉碎消消乐 - 微信小游戏工程配置",
+  "packOptions": {
+    "ignore": [
+      {
+        "value": "docs",
+        "type": "folder"
+      },
+      {
+        "value": "tests",
+        "type": "folder"
+      },
+      {
+        "value": "node_modules",
+        "type": "folder"
+      },
+      {
+        "value": "src",
+        "type": "folder"
+      },
+      {
+        "value": "scripts",
+        "type": "folder"
+      },
+      {
+        "value": "types",
+        "type": "folder"
+      },
+      {
+        "value": "subpackages",
+        "type": "folder"
+      },
+      {
+        "value": "assets/brand",
+        "type": "folder"
+      },
+      {
+        "value": "assets/bundle-fx",
+        "type": "folder"
+      },
+      {
+        "value": "assets/bundle-game",
+        "type": "folder"
+      },
+      {
+        "value": "assets/remote",
+        "type": "folder"
+      },
+      {
+        "value": "package-lock.json",
+        "type": "file"
+      },
+      {
+        "value": "package.json",
+        "type": "file"
+      },
+      {
+        "value": "tsconfig.json",
+        "type": "file"
+      },
+      {
+        "value": "game.js.map",
+        "type": "file"
+      },
+      {
+        "value": "assets/main/bg/level.prev.jpg",
+        "type": "file"
+      },
+      {
+        "value": "assets/main/bg/lobby.prev.jpg",
+        "type": "file"
+      },
+      {
+        "value": "assets/main/bg/lobby.prev-title.jpg",
+        "type": "file"
+      },
+      {
+        "value": ".git",
+        "type": "folder"
+      },
+      {
+        "value": ".cursor",
+        "type": "folder"
+      },
+      {
+        "value": "coverage",
+        "type": "folder"
+      },
+      {
+        "value": ".DS_Store",
+        "type": "file"
+      },
+      {
+        "value": "assets/main/audio/bgm_main.wav",
+        "type": "file"
+      },
+      {
+        "value": "assets/main/audio/sfx_good.wav",
+        "type": "file"
+      },
+      {
+        "value": "assets/main/audio/sfx_great.wav",
+        "type": "file"
+      },
+      {
+        "value": "assets/main/audio/sfx_excellent.wav",
+        "type": "file"
+      },
+      {
+        "value": "tmp-",
+        "type": "prefix"
+      }
+    ],
+    "include": []
+  },
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": false,
+    "newFeature": true,
+    "coverView": true,
+    "nodeModules": false,
+    "autoAudits": false,
+    "showShadowRootInWxmlPanel": true,
+    "scopeDataCheck": false,
+    "uglifyFileName": false,
+    "checkInvalidKey": true,
+    "checkSiteMap": false,
+    "uploadWithSourceMap": true,
+    "compileHotReLoad": false,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    },
+    "compileWorklet": false,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": true,
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "useCompilerPlugins": false,
+    "condition": false,
+    "swc": false,
+    "disableSWC": true
+  },
+  "compileType": "game",
+  "cloudfunctionRoot": "cloudfunctions/",
+  "libVersion": "3.17.0",
+  "appid": "wx9981ffe7ee6e1c8d",
+  "projectname": "crush-crush",
+  "condition": {},
+  "editorSetting": {
+    "tabIndent": "insertSpaces",
+    "tabSize": 2
+  },
+  "simulatorPluginLibVersion": {},
+  "isGameTourist": false
+}

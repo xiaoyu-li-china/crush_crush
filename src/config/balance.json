@@ -1,0 +1,7 @@
+{
+  "reviveMovesGranted": 5,
+  "crushDefaultTapPower": 1,
+  "crushFinaleMaxBursts": 64,
+  "cleanScoreThreshold": 1500,
+  "cleanDurationMs": 20000
+}

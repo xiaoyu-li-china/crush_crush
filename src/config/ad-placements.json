@@ -1,0 +1,25 @@
+{
+  "rewarded_revive": {
+    "adUnitId": "adunit-b45fc692f54f6086",
+    "maxPerLevel": 0
+  },
+  "rewarded_crush_extend": {
+    "adUnitId": "adunit-8cc66b74ed456e3a",
+    "extraMs": 5000
+  },
+  "interstitial_settle": {
+    "adUnitId": "adunit-dd3dd998375e3c09",
+    "everyNLevels": 2,
+    "cooldownSeconds": 60
+  },
+  "interstitial_launch": {
+    "enabled": true,
+    "delayMs": 2500,
+    "retryMs": 2500,
+    "timeoutMs": 45000
+  },
+  "banner_lobby": {
+    "adUnitId": "adunit-8f450e80c0ee8f6d",
+    "enabled": true
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "lobby": {
+    "imageUrlId": "",
+    "imageUrl": "assets/main/share/lobby-500x400.jpg"
+  },
+  "playing": {
+    "imageUrlId": "",
+    "imageUrl": "assets/main/share/playing-500x400.jpg"
+  },
+  "sparkle": {
+    "imageUrlId": "",
+    "imageUrl": "assets/main/share/sparkle-500x400.jpg"
+  }
+}
