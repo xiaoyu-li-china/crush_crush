@@ -7,7 +7,7 @@ import { describe, it } from 'node:test';
 import { hasAnyValidMove } from '../../src/logic/board/BoardShuffle';
 import { MoveValidator } from '../../src/logic/board/MoveValidator';
 import { GameSession } from '../../src/services/GameSession';
-import { createMemoryDeps, miniLevels, paintSwapMatch } from '../helpers/memory-deps';
+import { createMemoryDeps, miniLevels, paintSwapMatch, unlockBoosterAds } from '../helpers/memory-deps';
 
 function assertPlayable(session: GameSession): void {
   assert.equal(session.fsm.getCurrent(), 'PlayerInput');
@@ -30,6 +30,7 @@ describe('广告开关与关卡恢复', () => {
     await session.init();
     await session.startLevel(1);
     assert.equal(session.fsm.getCurrent(), 'PlayerInput');
+    unlockBoosterAds(session, 'shuffle');
     assert.equal(await session.watchAdForBooster('shuffle'), 'revived');
     assert.equal(session.getBoosterCount('shuffle'), 0);
     assert.equal(session.fsm.getCurrent(), 'PlayerInput');
@@ -52,6 +53,7 @@ describe('广告开关与关卡恢复', () => {
     await session.init();
     await session.startLevel(1);
     const moves = session.getMovesLeft();
+    unlockBoosterAds(session, 'extraMoves');
     assert.equal(await session.watchAdToAddMoves(), 'skipped');
     next = 'error';
     assert.equal(await session.watchAdToAddMoves(), 'error');
@@ -73,6 +75,8 @@ describe('广告开关与关卡恢复', () => {
     session.setLevelTable(miniLevels());
     await session.init();
     await session.startLevel(1);
+    session.claimBoosterShare('hammer');
+    session.claimBoosterShare('hammer');
     for (let i = 0; i < 5; i += 1) {
       assert.equal(await session.watchAdForBooster('hammer'), 'revived');
     }
@@ -133,6 +137,7 @@ describe('广告开关与关卡恢复', () => {
     session.resumeFromBackground();
     assert.equal(suspended, 1);
     assert.equal(resumed, 1);
+    unlockBoosterAds(session, 'extraMoves');
     assert.equal(await session.watchAdToAddMoves(), 'revived');
     session.suspendForBackground();
     session.resumeFromBackground();
@@ -153,6 +158,8 @@ describe('广告开关与关卡恢复', () => {
     await session.init();
     assert.equal(await session.watchAdForBooster('shuffle'), 'unavailable');
     await session.startLevel(1);
+    assert.equal(await session.watchAdForBooster('shuffle'), 'unavailable');
+    unlockBoosterAds(session, 'shuffle');
     assert.equal(await session.watchAdForBooster('shuffle'), 'revived');
     assert.equal(session.quitToLobby(), true);
     assert.equal(session.fsm.getCurrent(), 'Lobby');
@@ -203,6 +210,7 @@ describe('广告开关与关卡恢复', () => {
     await session.init();
     await session.startLevel(1);
     const moves = session.getMovesLeft();
+    unlockBoosterAds(session, 'extraMoves');
     assert.equal(await session.watchAdToAddMoves(), 'revived');
     assert.equal(session.getMovesLeft(), moves + 5);
     for (let i = 0; i < 8; i += 1) {
@@ -280,6 +288,7 @@ describe('广告开关与关卡恢复', () => {
     session.setLevelTable(miniLevels());
     await session.init();
     await session.startLevel(1);
+    unlockBoosterAds(session, 'extraMoves');
     const pending = session.watchAdToAddMoves();
     for (let i = 0; i < 6; i += 1) {
       session.suspendForBackground();
@@ -360,6 +369,7 @@ describe('广告开关与关卡恢复', () => {
     session.setLevelTable(miniLevels());
     await session.init();
     await session.startLevel(1);
+    unlockBoosterAds(session, 'hammer');
     assert.equal(await session.watchAdForBooster('hammer'), 'revived');
     assert.equal(session.getBoosterCount('hammer') >= 1, true);
     assertPlayable(session);
@@ -481,6 +491,7 @@ describe('广告开关与关卡恢复', () => {
     await session.startLevel(1);
     assert.equal(await session.showLobbyBanner(), 'error');
     assert.equal(await session.watchAdToExtendCrush(), 'unavailable');
+    unlockBoosterAds(session, 'extraMoves');
     assert.equal(await session.watchAdForBooster('extraMoves'), 'revived');
     assert.equal(shown.at(-1), 'rewarded_revive');
     session.fsm.forceTo('LevelFailed');

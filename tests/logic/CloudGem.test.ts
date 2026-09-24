@@ -61,6 +61,79 @@ describe('cloud gems', () => {
     assert.equal(board.countCloud(), 24);
   });
 
+  it('coverMiddleRowsWithCloud lays a centered band with clear top and bottom', () => {
+    const board = new BoardModel({ rows: 7, cols: 7 });
+    assert.equal(board.coverMiddleRowsWithCloud(3), 21);
+    // 行 0 为底：底 2 + 中 3 + 顶 2
+    assert.equal(board.getCloud(0, 0), 0);
+    assert.equal(board.getCloud(1, 3), 0);
+    assert.equal(board.getCloud(2, 0), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(4, 6), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(5, 0), 0);
+    assert.equal(board.getCloud(6, 3), 0);
+    assert.equal(board.countCloud(), 21);
+  });
+
+  it('coverMiddleRowsWithCloud bottomCenterGap: 4 层且最底一层中间 3 格留空', () => {
+    const board = new BoardModel({ rows: 7, cols: 7 });
+    // midRows=4 → r=1..4；最底 r=1 中间列 2/3/4 留空 → 28-3=25
+    assert.equal(board.coverMiddleRowsWithCloud(4, 3), 25);
+    assert.equal(board.getCloud(0, 3), 0);
+    assert.equal(board.getCloud(1, 1), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(1, 2), 0);
+    assert.equal(board.getCloud(1, 3), 0);
+    assert.equal(board.getCloud(1, 4), 0);
+    assert.equal(board.getCloud(1, 5), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(2, 3), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(4, 0), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(5, 3), 0);
+  });
+
+  it('coverBottomRowsWithCloudTopGap: 底 4 层，最上层中间 3 格留空', () => {
+    const board = new BoardModel({ rows: 7, cols: 7 });
+    assert.equal(board.coverBottomRowsWithCloudTopGap(4, 3), 25);
+    assert.equal(board.getCloud(0, 3), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(2, 0), CLOUD_HIT_LAYERS);
+    // 最上层 r=3：中间列 2/3/4 留空
+    assert.equal(board.getCloud(3, 1), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(3, 2), 0);
+    assert.equal(board.getCloud(3, 3), 0);
+    assert.equal(board.getCloud(3, 4), 0);
+    assert.equal(board.getCloud(3, 5), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(4, 3), 0);
+  });
+
+  it('coverBottomRowsWithCloudTopGap+rightClear: 三块红框有棉，右侧列清空', () => {
+    const board = new BoardModel({ rows: 7, cols: 7 });
+    // 底 3 层各 6 格 + 最上层两侧 4 格 = 22
+    assert.equal(board.coverBottomRowsWithCloudTopGap(4, 3, 1), 22);
+    // 下层右侧清空
+    assert.equal(board.getCloud(0, 5), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(0, 6), 0);
+    assert.equal(board.getCloud(2, 5), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(2, 6), 0);
+    // 最上层：左 2 + 右 2（含最右列）
+    assert.equal(board.getCloud(3, 0), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(3, 1), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(3, 2), 0);
+    assert.equal(board.getCloud(3, 5), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(3, 6), CLOUD_HIT_LAYERS);
+  });
+
+  it('coverBottomRowsWithCloudCap: 底满铺 + 上一行居中盖 N 格', () => {
+    const board = new BoardModel({ rows: 7, cols: 7 });
+    assert.equal(board.coverBottomRowsWithCloudCap(2, 3), 17);
+    assert.equal(board.getCloud(0, 0), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(1, 6), CLOUD_HIT_LAYERS);
+    // 第三层（r=2）仅居中 3 格：列 2/3/4
+    assert.equal(board.getCloud(2, 1), 0);
+    assert.equal(board.getCloud(2, 2), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(2, 3), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(2, 4), CLOUD_HIT_LAYERS);
+    assert.equal(board.getCloud(2, 5), 0);
+    assert.equal(board.getCloud(3, 3), 0);
+  });
+
   it('coverBottomCloudGems lays two cloud layers over pink balls from the bottom', () => {
     const board = new BoardModel({ rows: 3, cols: 3 });
     board.setTile(0, 0, TileKind.Hole);

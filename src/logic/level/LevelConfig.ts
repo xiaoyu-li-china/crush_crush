@@ -17,7 +17,12 @@ export type LevelIce =
   | 'all'
   | { bottomRows: number }
   | { skipTopRows: number };
-export type LevelCloud = 'all' | { bottomRows: number } | { skipTopRows: number };
+export type LevelCloud =
+  | 'all'
+  | { bottomRows: number; centerCap?: number; topCenterGap?: number; rightClear?: number }
+  | { skipTopRows: number }
+  /** 居中半层；bottomCenterGap = 最底一层中间留空若干格 */
+  | { midRows: number; bottomCenterGap?: number };
 export type IceStyle = 'under' | 'encase';
 
 export interface LevelConfig {
@@ -35,7 +40,7 @@ export interface LevelConfig {
   cloudGems?: number;
   /** 从底部向上铺几行连绵棉花云（与粉球可分开） */
   cloudRows?: number;
-  /** 棉花：all = 全盘一层；{ bottomRows } 从底向上若干行；{ skipTopRows } 留出顶部窗口 */
+  /** 棉花：all = 全盘；{ bottomRows, centerCap? } 底满铺并可在上一行居中盖 N 格；{ midRows } 居中半层；{ skipTopRows } 留顶窗 */
   cloud?: LevelCloud;
   /** 冰下埋藏的雪人 / 企鹅 */
   buried?: { snowmen: number; penguins: number };

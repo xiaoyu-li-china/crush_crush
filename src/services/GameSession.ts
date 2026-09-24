@@ -27,9 +27,9 @@ import {
 } from '../core/utils/wxHost';
 import {
   applyDailyLogin,
+  claimDailyShuffle,
   EMPTY_DAILY_LOOP,
   recordDailyClear,
-  DAILY_GOAL_CLEARS,
   type DailyLoopData,
 } from '../logic/economy/DailyLoop';
 import {
@@ -54,10 +54,13 @@ import {
 } from '../logic/economy/BoosterInventory';
 import {
   addBoosterToWallet,
+  boosterRefillChannel,
   bumpBoosterAd,
   clampBoosterWallet,
   EMPTY_BOOSTER_WALLET,
   LEFTOVER_MOVES_FOR_EXTRA,
+  markBoosterShare,
+  type BoosterRefillChannel,
 } from '../logic/economy/BoosterEconomy';
 import { GameEventBus } from '../logic/events/GameEvents';
 import { GameStateMachine } from '../logic/fsm/GameStateMachine';
@@ -82,6 +85,18 @@ import levelsJson from '../config/levels.json';
 import adPlacementsJson from '../config/ad-placements.json';
 import balanceJson from '../config/balance.json';
 import itemsJson from '../config/items.json';
+import noticeJson from '../config/notice.json';
+import type { IChallengeApi } from '../core/ports/IChallengeApi';
+import {
+  formatLeaderboardLine,
+  leaderboardRewardText,
+  rankFriends,
+} from '../logic/economy/FriendLeaderboard';
+import type { LeaderboardView } from '../logic/economy/FriendLeaderboard';
+import {
+  ensureWxUserProfile,
+  readCachedWxProfile,
+} from '../core/adapters/WxUserProfile';
 
 export interface GameSessionDeps {
   storage: IStorage;
@@ -90,6 +105,7 @@ export interface GameSessionDeps {
   analytics: IAnalytics;
   platform: IPlatform;
   cloudSave?: IPlayerCloudSave;
+  challengeApi?: IChallengeApi;
 }
 
 /** 看广告复活结果。 */
@@ -340,10 +356,44 @@ export class GameSession {
     // 棉花在结算之后再铺，避免开局三消把旁边的棉花削掉
     if (config.cloud === 'all') {
       this.cloudsAtStart = this.board.coverPlayableWithCloud();
+    } else if (config.cloud && typeof config.cloud === 'object' && 'midRows' in config.cloud) {
+      const bottomCenterGap =
+        'bottomCenterGap' in config.cloud && typeof config.cloud.bottomCenterGap === 'number'
+          ? config.cloud.bottomCenterGap
+          : 0;
+      this.cloudsAtStart = this.board.coverMiddleRowsWithCloud(
+        config.cloud.midRows,
+        bottomCenterGap,
+      );
     } else if (config.cloud && typeof config.cloud === 'object' && 'skipTopRows' in config.cloud) {
       this.cloudsAtStart = this.board.coverPlayableSkippingTopRowsWithCloud(config.cloud.skipTopRows);
     } else if (config.cloud && typeof config.cloud === 'object' && 'bottomRows' in config.cloud) {
-      this.cloudsAtStart = this.board.coverBottomRowsWithCloud(config.cloud.bottomRows);
+      const centerCap =
+        'centerCap' in config.cloud && typeof config.cloud.centerCap === 'number'
+          ? config.cloud.centerCap
+          : 0;
+      const topCenterGap =
+        'topCenterGap' in config.cloud && typeof config.cloud.topCenterGap === 'number'
+          ? config.cloud.topCenterGap
+          : 0;
+      if (topCenterGap > 0) {
+        const rightClear =
+          'rightClear' in config.cloud && typeof config.cloud.rightClear === 'number'
+            ? config.cloud.rightClear
+            : 0;
+        this.cloudsAtStart = this.board.coverBottomRowsWithCloudTopGap(
+          config.cloud.bottomRows,
+          topCenterGap,
+          rightClear,
+        );
+      } else if (centerCap > 0) {
+        this.cloudsAtStart = this.board.coverBottomRowsWithCloudCap(
+          config.cloud.bottomRows,
+          centerCap,
+        );
+      } else {
+        this.cloudsAtStart = this.board.coverBottomRowsWithCloud(config.cloud.bottomRows);
+      }
     } else if (typeof config.cloudRows === 'number' && config.cloudRows > 0) {
       this.cloudsAtStart = this.board.coverBottomRowsWithCloud(config.cloudRows);
     }
@@ -412,6 +462,107 @@ export class GameSession {
 
   public getInviteCode(): string {
     return this.invite.code;
+  }
+
+  /**
+   * 在用户点击「好友排行」手势里尝试拉微信头像/昵称。
+   * 未授权时返回 false，需 UI 弹出 createUserInfoButton。
+   * 真实微信号永远拿不到，只用邀请码。
+   */
+  public async ensureWxUserProfile(): Promise<boolean> {
+    const wxId = this.getInviteCode() || '';
+    const profile = await ensureWxUserProfile(wxId);
+    return !!profile?.avatarUrl || !!(profile && profile.nickName && profile.nickName !== '微信玩家');
+  }
+
+  /**
+   * 玩家排行：拉取所有玩过本小游戏的用户。
+   * 展示排名、头像、昵称、微信号、分数；接口不可用时至少展示自己。
+   */
+  public async loadFriendLeaderboard(): Promise<LeaderboardView> {
+    const userId = this.getInviteCode() || 'me';
+    const maxLevel = this.getMaxClearedLevelId();
+    const profile = this.readWxProfile();
+    const selfInput = {
+      userId,
+      maxLevel,
+      bestTimeMs: null as number | null,
+      completed: false,
+      isSelf: true,
+      nickName: profile.nickName || '微信玩家',
+      avatarUrl: profile.avatarUrl,
+      wxId: profile.wxId || userId,
+      score: maxLevel,
+    };
+
+    const api = this.deps.challengeApi;
+    if (api) {
+      try {
+        const res = await api.leaderboard(userId, maxLevel, {
+          nickName:
+            profile.nickName && profile.nickName !== '微信玩家'
+              ? profile.nickName
+              : undefined,
+          avatarUrl: profile.avatarUrl || undefined,
+        });
+        if (res.ok && res.rows && res.rows.length > 0) {
+          const rows = res.rows.map((row) =>
+            formatLeaderboardLine({
+              ...row,
+              nickName:
+                row.nickName
+                || (row.isSelf ? profile.nickName || '微信玩家' : undefined),
+              avatarUrl: row.avatarUrl || (row.isSelf ? profile.avatarUrl : undefined),
+              wxId: row.wxId || row.userId,
+              score: row.score ?? row.maxLevel,
+            }),
+          );
+          return {
+            title: noticeJson.leaderboard.title,
+            hint: res.hint ?? '',
+            rewardText: res.rewardText ?? leaderboardRewardText(),
+            selfRank: res.selfRank ?? res.rows.find((r) => r.isSelf)?.rank ?? 0,
+            rows,
+          };
+        }
+        if (res.ok) {
+          return {
+            title: noticeJson.leaderboard.title,
+            hint: res.hint ?? '',
+            rewardText: res.rewardText ?? leaderboardRewardText(),
+            selfRank: res.selfRank ?? 1,
+            rows: [
+              ...rankFriends([selfInput]).map(formatLeaderboardLine),
+              { tag: '提示', text: noticeJson.leaderboard.empty, kind: 'meta' },
+            ],
+          };
+        }
+      } catch {
+        // 走本地兜底
+      }
+    }
+
+    const ranked = rankFriends([selfInput]);
+    return {
+      title: noticeJson.leaderboard.title,
+      hint: '',
+      rewardText: leaderboardRewardText(),
+      selfRank: 1,
+      rows: ranked.map(formatLeaderboardLine),
+    };
+  }
+
+  private readWxProfile(): { nickName: string; avatarUrl?: string; wxId: string } {
+    const wxId = this.getInviteCode();
+    const cached = readCachedWxProfile(wxId);
+    if (cached && cached.avatarUrl) {
+      return {
+        nickName: cached.nickName || '微信玩家',
+        avatarUrl: cached.avatarUrl,
+        wxId: cached.wxId || wxId,
+      };
+    }
+    return { nickName: '微信玩家', wxId };
   }
 
   /** 从分享卡片绑定邀请人；仅新用户且非自己。 */
@@ -571,10 +722,6 @@ export class GameSession {
 
   private noteDailyClear(): void {
     this.daily = recordDailyClear(this.daily, Date.now());
-    if (this.daily.clearsToday >= DAILY_GOAL_CLEARS && !this.daily.playShuffleGranted) {
-      this.boosters.add('shuffle', 1);
-      this.daily = { ...this.daily, playShuffleGranted: true };
-    }
     if (this.movesLeft >= LEFTOVER_MOVES_FOR_EXTRA && !this.daily.playExtraGranted) {
       this.boosters.add('extraMoves', 1);
       this.daily = { ...this.daily, playExtraGranted: true };
@@ -582,6 +729,20 @@ export class GameSession {
     this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
     void this.persistDaily();
     void this.persistBoosters();
+  }
+
+  /** 大厅进度条满 3 格后，玩家点领取才发重排。 */
+  public claimDailyShuffle(): boolean {
+    const claimed = claimDailyShuffle(this.daily);
+    if (!claimed.granted) {
+      return false;
+    }
+    this.daily = claimed.data;
+    this.boosters.add('shuffle', 1);
+    this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
+    void this.persistDaily();
+    void this.persistBoosters();
+    return true;
   }
 
   private commitLevelCleared(): void {
@@ -808,11 +969,49 @@ export class GameSession {
     return this.allowsRewardedBooster('extraMoves');
   }
 
+  /** 空库存补给通道：好友 → 群 → 广告。非对局返回 none。 */
+  public getBoosterRefillChannel(id: BoosterId): BoosterRefillChannel | 'none' {
+    if (!this.allowsRewardedBooster(id)) {
+      return 'none';
+    }
+    return boosterRefillChannel(this.daily, id);
+  }
+
   /**
-   * 库存为 0 时看广告：锤子/重排 +1 入包；加步立刻 +5。次数不限，看完就发。
+   * 转发好友 / 群成功后发 1 个道具。每个道具每天各允许 1 次。
+   */
+  public claimBoosterShare(id: BoosterId): boolean {
+    const channel = this.getBoosterRefillChannel(id);
+    if (channel !== 'friend' && channel !== 'group') {
+      return false;
+    }
+    this.applyBoosterRefill(id, id === 'shuffle');
+    this.daily = { ...this.daily, ...markBoosterShare(this.daily, id, channel) };
+    void this.persistDaily();
+    this.deps.analytics.track('booster_share', {
+      boosterId: id,
+      channel,
+      levelId: this.level?.id ?? 0,
+    });
+    return true;
+  }
+
+  /** 只推进好友/群阶梯，不发道具（测试解锁广告通道用）。 */
+  public markBoosterShareStep(id: BoosterId): boolean {
+    const channel = this.getBoosterRefillChannel(id);
+    if (channel !== 'friend' && channel !== 'group') {
+      return false;
+    }
+    this.daily = { ...this.daily, ...markBoosterShare(this.daily, id, channel) };
+    void this.persistDaily();
+    return true;
+  }
+
+  /**
+   * 库存为 0 且已用完当日好友/群转发后看广告：锤子/重排 +1；加步立刻 +5。
    */
   public async watchAdForBooster(id: BoosterId): Promise<ReviveAdResult> {
-    if (!this.allowsRewardedBooster(id)) {
+    if (this.getBoosterRefillChannel(id) !== 'ad') {
       return 'unavailable';
     }
     this.deps.analytics.track('ad_show', {
@@ -822,39 +1021,48 @@ export class GameSession {
     });
     const result = await this.deps.ads.show('rewarded_revive');
     if (result === 'completed') {
-      if (id === 'extraMoves') {
-        this.movesLeft += this.extraMovesGrant;
-        this.playSfx('sfx_extra');
-      } else if (id === 'shuffle') {
-        this.boosters.add('shuffle', 1);
-        this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
-        this.useShuffle();
-      } else {
-        this.boosters.add(id, 1);
-        this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
-        void this.persistBoosters();
-        this.playSfx('sfx_hammer');
-      }
+      this.applyBoosterRefill(id, true);
       this.daily = { ...this.daily, ...bumpBoosterAd(this.daily, id) };
       void this.persistDaily();
       this.deps.analytics.track('ad_complete', {
         placement: 'rewarded_revive',
         reason: `booster_${id}`,
       });
-      if (id === 'extraMoves') {
-        this.events.emit({
-          type: 'BoosterUsed',
-          boosterId: id,
-          remaining: this.boosters.getCount(id),
-          movesGranted: this.extraMovesGrant,
-        });
-      }
       return 'revived';
     }
     if (result === 'skipped') {
       return 'skipped';
     }
     return result === 'not_ready' ? 'unavailable' : 'error';
+  }
+
+  private applyBoosterRefill(id: BoosterId, consumeShuffle: boolean): void {
+    if (id === 'extraMoves') {
+      this.movesLeft += this.extraMovesGrant;
+      this.playSfx('sfx_extra');
+      this.events.emit({
+        type: 'BoosterUsed',
+        boosterId: id,
+        remaining: this.boosters.getCount(id),
+        movesGranted: this.extraMovesGrant,
+      });
+      return;
+    }
+    if (id === 'shuffle') {
+      this.boosters.add('shuffle', 1);
+      this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
+      if (consumeShuffle) {
+        this.useShuffle();
+      } else {
+        void this.persistBoosters();
+        this.playSfx('sfx_shuffle');
+      }
+      return;
+    }
+    this.boosters.add(id, 1);
+    this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
+    void this.persistBoosters();
+    this.playSfx('sfx_hammer');
   }
 
   /**
@@ -964,6 +1172,19 @@ export class GameSession {
   public isLevelCleared(levelId: number): boolean {
     return this.progress.isLevelCleared(levelId);
   }
+
+  /** 已通关的最高关卡。highestLevelId 是下一关，所以要减 1，再和每关分数对一下。 */
+  public getMaxClearedLevelId(): number {
+    const data = this.progress.getData();
+    const scored = Object.keys(data.levelScores ?? {})
+      .map((key) => Number(key))
+      .filter((id) => Number.isFinite(id) && this.progress.isLevelCleared(id));
+    const fromScores = scored.length > 0 ? Math.max(...scored) : 0;
+    const fromHighest = Math.max(0, data.highestLevelId - 1);
+    return Math.max(fromScores, fromHighest);
+  }
+
+
 
   /** 大厅藤蔓：当前节点的 5 关（兼容旧逻辑） */
   public getVineNode(): VineNodeInfo {

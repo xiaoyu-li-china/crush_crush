@@ -33,6 +33,7 @@ export const StorageKeys = {
   Boosters: 'crush.player.boosters',
   NoticeSeen: 'crush.player.noticeSeen',
   Invite: 'crush.player.invite',
+  DeviceId: 'crush.player.device',
 } as const;
 
 export type StorageKey = (typeof StorageKeys)[keyof typeof StorageKeys];

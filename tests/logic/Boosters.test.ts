@@ -108,10 +108,17 @@ describe('Boosters', () => {
     assert.equal(session.getMovesLeft(), before + 5);
     assert.equal(session.getBoosterCount('extraMoves'), 0);
     assert.equal(session.useExtraMoves(), false);
-    assert.equal(await session.watchAdForBooster('extraMoves'), 'revived');
+    assert.equal(session.getBoosterRefillChannel('extraMoves'), 'friend');
+    assert.equal(session.claimBoosterShare('extraMoves'), true);
     assert.equal(session.getMovesLeft(), before + 10);
-    assert.equal(await session.watchAdForBooster('extraMoves'), 'revived');
+    assert.equal(session.getBoosterRefillChannel('extraMoves'), 'group');
+    assert.equal(session.claimBoosterShare('extraMoves'), true);
     assert.equal(session.getMovesLeft(), before + 15);
+    assert.equal(session.getBoosterRefillChannel('extraMoves'), 'ad');
+    assert.equal(await session.watchAdForBooster('extraMoves'), 'revived');
+    assert.equal(session.getMovesLeft(), before + 20);
+    assert.equal(await session.watchAdForBooster('extraMoves'), 'revived');
+    assert.equal(session.getMovesLeft(), before + 25);
   });
 
   it('锤子清除一格并扣库存', async () => {
@@ -148,6 +155,10 @@ describe('Boosters', () => {
       }
     });
     assert.equal(session.getBoosterCount('shuffle'), 0);
+    assert.equal(session.getBoosterRefillChannel('shuffle'), 'friend');
+    assert.equal(await session.watchAdForBooster('shuffle'), 'unavailable');
+    assert.equal(session.claimBoosterShare('shuffle'), true);
+    assert.equal(session.claimBoosterShare('shuffle'), true);
     assert.equal(await session.watchAdForBooster('shuffle'), 'revived');
     assert.equal(session.getBoosterCount('shuffle'), 0);
     assert.equal(shuffled, true);
@@ -167,8 +178,10 @@ describe('Boosters', () => {
         used.push(e.boosterId);
       }
     });
+    assert.equal(session.claimBoosterShare('shuffle'), true);
+    assert.equal(session.claimBoosterShare('shuffle'), true);
     assert.equal(await session.watchAdForBooster('shuffle'), 'revived');
-    assert.deepEqual(used, ['shuffle']);
+    assert.deepEqual(used, ['shuffle', 'shuffle', 'shuffle']);
     assert.equal(session.getBoosterCount('shuffle'), 0);
   });
 });

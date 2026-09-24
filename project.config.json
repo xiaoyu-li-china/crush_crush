@@ -63,16 +63,12 @@
         "type": "file"
       },
       {
-        "value": "assets/main/bg/level.prev.jpg",
-        "type": "file"
+        "value": "server",
+        "type": "folder"
       },
       {
-        "value": "assets/main/bg/lobby.prev.jpg",
-        "type": "file"
-      },
-      {
-        "value": "assets/main/bg/lobby.prev-title.jpg",
-        "type": "file"
+        "value": "cloudfunctions",
+        "type": "folder"
       },
       {
         "value": ".git",
@@ -109,6 +105,18 @@
       {
         "value": "tmp-",
         "type": "prefix"
+      },
+      {
+        "value": ".preview-qr.png",
+        "type": "file"
+      },
+      {
+        "value": ".preview-info.json",
+        "type": "file"
+      },
+      {
+        "value": "agent-transcripts",
+        "type": "folder"
       }
     ],
     "include": []
@@ -128,7 +136,7 @@
     "uglifyFileName": false,
     "checkInvalidKey": true,
     "checkSiteMap": false,
-    "uploadWithSourceMap": true,
+    "uploadWithSourceMap": false,
     "compileHotReLoad": false,
     "babelSetting": {
       "ignore": [],

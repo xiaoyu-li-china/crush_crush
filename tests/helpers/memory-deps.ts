@@ -7,6 +7,7 @@ import type {
 } from '../../src/core';
 import { TileKind } from '../../src/logic/board/TileType';
 import type { LevelConfig } from '../../src/logic/level/LevelConfig';
+import type { BoosterId } from '../../src/logic/economy/BoosterInventory';
 import { GameSession, type GameSessionDeps } from '../../src/services/GameSession';
 
 export function createMemoryDeps(
@@ -110,4 +111,10 @@ export function paintSwapMatch(session: GameSession): void {
       }
     }
   }
+}
+
+/** 每个道具每天先转好友、再转群，之后才能看广告补给（只推进阶梯，不发道具）。 */
+export function unlockBoosterAds(session: GameSession, id: BoosterId): void {
+  session.markBoosterShareStep(id);
+  session.markBoosterShareStep(id);
 }

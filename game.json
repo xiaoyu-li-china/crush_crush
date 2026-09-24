@@ -2,6 +2,7 @@
   "deviceOrientation": "portrait",
   "showStatusBar": false,
   "iOSHighPerformance": true,
+  "officialPrivacyAuthorizationShowingGap": 10,
   "networkTimeout": {
     "request": 10000,
     "connectSocket": 10000,

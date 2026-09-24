@@ -17,33 +17,77 @@ import {
   lobbyCamFromDrag,
   lobbyCameraMax,
   lobbyCaptionY,
-  lobbyMacaronRadius,
+  lobbyCloudDecorPoints,
+  lobbyLevelBandTop,
+  lobbyLevelHitRect,
+  lobbyFirstScreenLadderLayout,
+  lobbyLadderSideTrailPoints,
+  lobbyBarSize,
   lobbyMaxPageIndex,
   lobbyComingSoonLine,
   lobbyPageCaption,
   lobbyPageIndex,
   lobbySnapCamY,
   lobbySnapTarget,
+  layoutLobbyMoreLevelsHint,
+  lobbySwipeHintOpacity,
+  ladderThemeForLevel,
+  LOBBY_BRAND_SUBTITLE,
+  LOBBY_BRAND_TITLE,
+  LOBBY_MORE_LEVELS_HINT,
   LOBBY_SNAP_MS,
-  MACARON_SPRITE_FILL,
+  LOBBY_SUBTITLE_UY,
+  LOBBY_TITLE_UY,
+  lobbyBrandAnchorY,
   type LobbyLevelNode,
 } from '../ui/LobbyLevelMap';
+import {
+  layoutLobbyNoticeBubble,
+  lobbyNoticeBubbleCycle,
+  lobbyNoticeBubbleDrift,
+  lobbyNoticeBubbleLines,
+} from '../ui/LobbyNoticeBubble';
 import noticeJson from '../../config/notice.json';
+import { levelDifficultyArt } from '../../logic/level/levelDifficultyTip';
 import { formatHudGoals } from '../ui/HudGoalText';
 import { matchPraiseForScore } from '../../logic/fx/MatchPraise';
-import { lobbyDailyHint, DAILY_GOAL_CLEARS } from '../../logic/economy/DailyLoop';
+import { buildShareQuery, buildShareTitle, type ShareScene } from '../../logic/share/shareCopy';
 import {
-  inviteSettingsHint,
-  lobbyInviteHint,
-} from '../../logic/economy/InviteLoop';
-import { buildShareQuery, buildShareTitle } from '../../logic/share/shareCopy';
+  boosterRefillBadge,
+  type BoosterRefillChannel,
+} from '../../logic/economy/BoosterEconomy';
+import type { BoosterId } from '../../logic/economy/BoosterInventory';
+import {
+  isPanelBackLabel,
+  isPanelCloseLabel,
+  panelBackButton,
+  panelCloseButton,
+} from '../ui/PanelChrome';
+import { layoutLeaderboardPanel, clampLeaderboardScroll } from '../ui/LeaderboardPanel';
+import type { LeaderboardView } from '../../logic/economy/FriendLeaderboard';
+import type { LeaderboardLine } from '../../logic/economy/FriendLeaderboard';
+import {
+  hasAskedWxProfile,
+  hasRealWxProfile,
+  markWxProfileAsked,
+  mountWxUserInfoAuthButton,
+  readCachedWxProfile,
+  showAuthFailModal,
+  type WxUserInfoButtonHandle,
+} from '../../core/adapters/WxUserProfile';
 import { readWxLaunchQuery } from '../../core/utils/wxLaunchQuery';
 import { toNativeViewStyle } from '../../core/utils/lobbyBanner';
 import {
+  LOBBY_GEAR_X,
   LOBBY_NAV_CHIP_H,
-  LOBBY_NAV_CHIP_MIN_W,
   LOBBY_NAV_HIT_PAD,
+  LOBBY_SIDE_ACTION_FONT,
+  layoutLobbyBottom,
+  layoutLobbyGear,
+  layoutLobbySideActions,
   lobbyNavBottomGap,
+  lobbySideActionsTop,
+  type LobbySideActionFrame,
 } from '../../core/utils/lobbyNav';
 import {
   canCreateWxFullscreenAds,
@@ -80,7 +124,7 @@ import {
 } from './SharePoster';
 
 type ScreenMode = 'lobby' | 'playing' | 'crush' | 'clean' | 'result';
-type PageOverlay = 'none' | 'settings' | 'howto' | 'notice';
+type PageOverlay = 'none' | 'settings' | 'howto' | 'notice' | 'leaderboard' | 'profile_welcome';
 
 interface UiButton {
   id:
@@ -105,7 +149,10 @@ interface UiButton {
     | 'recommend'
     | 'post'
     | 'invite'
-    | 'resume';
+    | 'leaderboard'
+    | 'claim_shuffle'
+    | 'resume'
+    | 'profile_skip';
   x: number;
   y: number;
   w: number;
@@ -223,6 +270,14 @@ const BG_SRC = {
   lobbyCloudMintC: 'assets/main/bg/lobby-clouds-mint-c.jpg',
 } as const;
 
+const LOBBY_LADDER_ICON_SRC = {
+  check: 'assets/main/ui/lobby-ladder/icon-check.png',
+  star: 'assets/main/ui/lobby-ladder/icon-star.png',
+  lock: 'assets/main/ui/lobby-ladder/icon-lock.png',
+  cloud: 'assets/main/ui/lobby-ladder/deco-cloud.png',
+  cloudSm: 'assets/main/ui/lobby-ladder/deco-cloud-sm.png',
+} as const;
+
 const BOOSTER_ICON_SRC = {
   hammer: 'assets/main/ui/icon-hammer.png',
   shuffle: 'assets/main/ui/icon-shuffle.png',
@@ -264,48 +319,18 @@ const MACARON_NUM_STROKE = [
   '#2f6d82',
 ] as const;
 
-function lobbyBottomHint(
-  vine: {
-    unlocked: boolean;
-    clearedInNode: number;
-    levelIds: number[];
-    startLevelId: number;
-    endLevelId: number;
-  },
-  totalLevels: number,
-): string {
-  if (!vine.unlocked) {
-    return '通关上一段全部关卡后解锁这里';
-  }
-  if (vine.clearedInNode <= 0) {
-    if (vine.startLevelId > 1) {
-      return `先通关第 ${vine.startLevelId} 关，才能解锁后面的关卡`;
-    }
-    return '先通关第 1 关，才能解锁后面的关卡';
-  }
-  if (vine.clearedInNode >= vine.levelIds.length) {
-    if (vine.endLevelId >= totalLevels) {
-      return noticeJson.body;
-    }
-    return '本段已通关，继续挑战云朵上的新关卡';
-  }
-  if (vine.startLevelId > 5) {
-    return '糖果云朵里藏着下一关，点它开始';
-  }
-  return '粉光晕=可挑战 · 绿勾=已通关 · 灰锁=未解锁';
-}
-
 /** 一屏就能看完的玩法速查，不翻页。 */
 const HOWTO_LINES: ReadonlyArray<{ tag: string; text: string }> = [
-  { tag: '消除', text: '滑动交换相邻萌宠，横竖 3 个同色就会消，还能连消。' },
-  { tag: '过关', text: '头顶列出的目标都要做完。滑一次算一步，没步了可重开，或反复看广告每次补 5 步。' },
-  { tag: '冰块', text: '三消打到冰块就会碎。被冻住的格子不能滑，先消旁边或连到冰上。' },
-  { tag: '棉花', text: '盖住的不能滑。旁边小动物消掉后棉花才掉一层，消两次清掉。下面有时藏粉球，再消一次才能收。' },
-  { tag: '伙伴', text: '雪人、企鹅藏在冰下，各占 2～4 格。这几格的冰全碎了才能收下。企鹅一只一只算；两只雪人都露出才算，还会震碎周围冰。' },
-  { tag: '大招', text: '连 4 个出闪光会爆炸；连 5 个出猫头鹰清同色。过关后限时点格子粉碎加分。' },
-  { tag: '道具', text: '锤子砸一格，重排打乱棋盘，加步 +5。开局不送。按钮空了就看广告，看完就给，能一直看。' },
-  { tag: '领取', text: '每天登录送锤子，过 3 关送重排，剩 6 步通关送加步。带到下一关，各最多 9 个。' },
-  { tag: '邀请', text: '把游戏发给没玩过的好友。对方通关后双方各得 1 锤子。看广告领道具仍然马上到账。' },
+  { tag: '消除', text: '滑动交换相邻萌宠。同色横或竖连成 3 个及以上即可消除，下落填空后还能连锁。' },
+  { tag: '过关', text: '完成头顶全部目标即通关。每次合法交换扣 1 步；步数用尽可重开，或看广告每次补 5 步继续。' },
+  { tag: '冰块', text: '消除波及冰块会碎一层。冰封格上的萌宠不能滑动，需先打碎冰块。' },
+  { tag: '棉花', text: '棉花盖住的格子不能交换。邻消削一层，两次清掉；云下可能藏粉球，云清后再消才算收集。' },
+  { tag: '伙伴', text: '雪人、企鹅藏在冰下，各占多格。占地冰块全碎后才露出并收获；雪人露出时会震碎周围一圈冰。' },
+  { tag: '大招', text: '四连或 L/T 形出闪光（范围爆炸）；五连出超级猫头鹰（清同色）。两枚闪光互滑可同时引爆。' },
+  { tag: '粉碎', text: '通关后进入限时点击粉碎加分，可看广告加时。总分够高时还可选清洁小游戏（不加主线分）。' },
+  { tag: '道具', text: '锤子砸一格、重排洗盘、加步 +5，开局不送。库存空时：先转发好友 → 再转发群 → 再看广告领取。' },
+  { tag: '奖励', text: '每日登录送锤子；当日通关满 3 关领重排；某次剩 ≥6 步通关送加步。道具可带入下关，各最多 9 个。' },
+  { tag: '邀请', text: '分享给没玩过的好友，对方通关后双方各得 1 锤子。' },
 ];
 
 /** 闯关成功庆祝图 */
@@ -315,12 +340,12 @@ const WIN_CELEBRATE_CROP_TOP = 0.36;
 /** 粉横幅中心（相对裁剪后图片） */
 const WIN_BANNER_CY = 0.82;
 
-/** 开心消消乐式浅色木板槽位 */
-const SLOT_FILL_BOTTOM = 'rgba(255, 236, 220, 0.88)';
-const SLOT_LINE = 'rgba(255, 170, 140, 0.42)';
-const BOARD_PANEL_TOP = 'rgba(255, 252, 255, 0.96)';
-const BOARD_PANEL_BOTTOM = 'rgba(255, 246, 250, 0.94)';
-const BOARD_PANEL_OUTER = 'rgba(232, 214, 220, 0.95)';
+/** 关卡棋盘槽：冷色浅台，贴合薄荷绿关卡底图 */
+const SLOT_FILL_BOTTOM = 'rgba(232, 248, 252, 0.9)';
+const SLOT_LINE = 'rgba(140, 198, 220, 0.42)';
+const BOARD_PANEL_TOP = 'rgba(255, 255, 255, 0.97)';
+const BOARD_PANEL_BOTTOM = 'rgba(232, 248, 255, 0.95)';
+const BOARD_PANEL_OUTER = 'rgba(160, 210, 230, 0.92)';
 
 /**
  * 微信小游戏 Canvas 壳：大厅 / 对局 / 结算，接通现有 GameSession。
@@ -357,12 +382,27 @@ export class WxCanvasGameApp {
   private overlay: PageOverlay = 'none';
   /** 从设置点进玩法 / 公告时，关闭后回到设置 */
   private overlayFromSettings = false;
+  private boardViewModel: LeaderboardView | null = null;
+  private readonly avatarCache = new Map<string, WxImage>();
+  /** 好友排行列表纵向滚动偏移（像素） */
+  private leaderboardScrollY = 0;
+  /** 排行榜列表拖拽：起点与是否已滑动（滑动则不触发关闭按钮） */
+  private leaderboardDrag: { startY: number; lastY: number; scrolled: boolean } | null = null;
+  /** 首次进入大厅：可选授权头像昵称（原生按钮，关闭面板时销毁） */
+  private userInfoAuthButton: WxUserInfoButtonHandle | null = null;
   private buttons: UiButton[] = [];
   private raf = 0;
   private statusText = '';
   /** 点道具后贴在按钮上方的短提示 */
   private toastText = '';
   private toastUntilMs = 0;
+  /** 进关「难度提升」艺术字提示 */
+  private difficultyArt: {
+    title: string;
+    subtitle: string | null;
+    startMs: number;
+    durationMs: number;
+  } | null = null;
   /** 锤子选格模式 */
   private hammerTargeting = false;
   /** 锤子光标屏幕坐标（选中后跟随手指/鼠标） */
@@ -456,6 +496,7 @@ export class WxCanvasGameApp {
     if (inviteToast) {
       this.notifyUser(inviteToast, '锤子到账');
     }
+    this.settlePendingBoosterShare();
   };
   private readonly onAudioInterruptionBeginBound = (): void => {
     this.session.suspendForBackground();
@@ -479,6 +520,15 @@ export class WxCanvasGameApp {
   private lobbyCamSnapFrom = 0;
   private lobbyCamSnapAtMs = 0;
   private lobbyCamVel = 0;
+  /** 「更多关卡」把手首次亮起的时刻；0 表示尚未计时。 */
+  private lobbySwipeHintShownAtMs = 0;
+  /** 首次滑动或淡出结束后不再画把手。 */
+  private lobbySwipeHintDismissed = false;
+  /** 空道具转发补给：从分享页返回后发奖 */
+  private pendingBoosterShare: BoosterId | null = null;
+  private pendingBoosterShareAtMs = 0;
+  private boosterShareScene: Extract<ShareScene, 'booster_friend' | 'booster_group'> | null =
+    null;
   private lobbyDrag: {
     startX: number;
     startY: number;
@@ -644,6 +694,14 @@ export class WxCanvasGameApp {
         }
       });
     }
+    for (const [key, src] of Object.entries(LOBBY_LADDER_ICON_SRC)) {
+      jobs.push(async () => {
+        const img = await this.loadBgImage(src);
+        if (img) {
+          this.uiIcons.set(`ladder-${key}`, img);
+        }
+      });
+    }
     MACARON_SRC.forEach((src, index) => {
       jobs.push(async () => {
         const img = await this.loadBgImage(src);
@@ -680,6 +738,18 @@ export class WxCanvasGameApp {
     }
     this.requestPaint();
     void this.preloadDeferredAssets();
+    // iOS：大批量贴图加载完后首帧 drawImage 偶发黑屏，补踢两帧
+    if (!isWxDesktopIdeHost()) {
+      setTimeout(() => {
+        this.sceneBg.layout(this.width, this.height);
+        this.needsPaint = true;
+        this.kickRenderLoop();
+      }, 40);
+      setTimeout(() => {
+        this.needsPaint = true;
+        this.kickRenderLoop();
+      }, 200);
+    }
     console.info(
       '[crush-crush] assets loaded tiles=',
       this.tileImages.size,
@@ -734,6 +804,7 @@ export class WxCanvasGameApp {
     this.leavingLobby = false;
     this.mode = 'lobby';
     this.statusText = '';
+    this.difficultyArt = null;
     this.pendingResult = null;
     this.offerCleanPrompt = false;
     this.hammerTargeting = false;
@@ -746,11 +817,13 @@ export class WxCanvasGameApp {
     this.pendingPlayback = null;
     this.closeOverlay();
     this.prepareLobbyCamera();
-    this.maybeOpenLobbyNotice();
+    this.lobbySwipeHintShownAtMs = 0;
+    this.lobbySwipeHintDismissed = false;
     this.syncLobbyBanner();
     this.boardView.bindInput((_a, _b, _c, _d) => {
       /* 大厅无棋盘交换 */
     });
+    this.maybeOfferLaunchProfileAuth();
   }
 
   private resolveEntryLevelId(): number {
@@ -1005,6 +1078,12 @@ export class WxCanvasGameApp {
     if (this.toastText && now < this.toastUntilMs) {
       return true;
     }
+    if (
+      this.difficultyArt &&
+      now < this.difficultyArt.startMs + this.difficultyArt.durationMs
+    ) {
+      return true;
+    }
     if (this.floatingScores.length || this.crushSparks.length || this.crushBursts.length) {
       return true;
     }
@@ -1020,13 +1099,29 @@ export class WxCanvasGameApp {
     return false;
   }
 
-  /** 大厅呼吸、结算彩带、粉碎倒计时需要持续转；对局静止盘面可停循环。 */
+  /** 大厅呼吸、结算彩带、粉碎倒计时、公告泡泡需要持续转；对局静止盘面可停循环。 */
   private wantsAmbientFx(): boolean {
     return (
       this.mode === 'lobby' ||
       this.mode === 'result' ||
       this.mode === 'crush' ||
       this.mode === 'clean'
+    );
+  }
+
+  /** 首页公告泡泡在漂：开发者工具空闲停循环时也要慢速续画，避免冻在半路。 */
+  private lobbyNoticeBubbleNeedsTick(): boolean {
+    if (this.mode !== 'lobby' || this.overlay !== 'none') {
+      return false;
+    }
+    if (this.lobbyCamY > this.height * 0.18) {
+      return false;
+    }
+    return (
+      lobbyNoticeBubbleLines({
+        body: noticeJson.body,
+        bubbles: (noticeJson as { bubbles?: string[] }).bubbles,
+      }).length > 0
     );
   }
 
@@ -1109,21 +1204,27 @@ export class WxCanvasGameApp {
         this.session.tickCrushReward(dt);
       }
       const animating = this.sceneIsBusy();
+      const ambientBubble = this.lobbyNoticeBubbleNeedsTick();
       const desktopIde = isWxDesktopIdeHost();
-      const busy = shouldKeepRenderLoop({
-        animating,
-        lastInteractMs: this.lastInteractMs,
-        nowMs: now,
-        idleStopMs: resolveRenderIdleStopMs({
-          desktopIde,
-          ambientFx: this.wantsAmbientFx(),
-        }),
-      });
+      const busy =
+        shouldKeepRenderLoop({
+          animating,
+          lastInteractMs: this.lastInteractMs,
+          nowMs: now,
+          idleStopMs: resolveRenderIdleStopMs({
+            desktopIde,
+            ambientFx: this.wantsAmbientFx(),
+          }),
+        }) || ambientBubble;
       this.frameDelayMs = resolveNextFrameDelayMs({
         animating,
         desktopIde,
         baseDelayMs: this.baseFrameDelayMs,
       });
+      // 仅泡泡在漂：降到约 11～14fps，模拟器不占满主线程
+      if (ambientBubble && !animating) {
+        this.frameDelayMs = Math.max(this.frameDelayMs, desktopIde ? 90 : 70);
+      }
       if (this.needsPaint || busy) {
         this.draw();
         this.frameErrors = 0;
@@ -1219,6 +1320,22 @@ export class WxCanvasGameApp {
           const expected = Math.max(1, Math.floor(this.width * this.dpr));
           recover(shouldFollowupRestoreCanvas(this.canvas.width, expected));
         }, 360) as unknown as number,
+      );
+      // iOS 返回首页：再补一帧，避免进度/大厅停在黑缓冲
+      this.resumeFollowupTimers.push(
+        setTimeout(() => {
+          if (token !== this.resumeToken || this.foregroundHidden) {
+            return;
+          }
+          this.sceneBg.layout(this.width, this.height);
+          this.needsPaint = true;
+          try {
+            this.draw();
+          } catch (err) {
+            console.error('[crush-crush] resume lobby redraw failed', err);
+          }
+          this.kickRenderLoop();
+        }, 120) as unknown as number,
       );
     }
     if (
@@ -1419,7 +1536,7 @@ export class WxCanvasGameApp {
     }
     if (event.type === 'LevelFailed') {
       this.pendingResult = 'failed';
-      this.statusText = '步数用完了，再试一次也很轻松';
+      this.statusText = '步数用完了，就差一点！';
       if (!this.animator.isPlaying() && !this.swapSlide) {
         this.afterLevelResolved();
       }
@@ -2210,6 +2327,16 @@ export class WxCanvasGameApp {
     if (this.isInputMuted()) {
       return;
     }
+    if (this.overlay === 'leaderboard') {
+      const p = this.readTouchPoint(e, false);
+      if (!p) {
+        return;
+      }
+      this.lastPointerX = p.x;
+      this.lastPointerY = p.y;
+      this.beginLeaderboardScroll(p.x, p.y);
+      return;
+    }
     if (this.overlay !== 'none') {
       return;
     }
@@ -2249,6 +2376,16 @@ export class WxCanvasGameApp {
     if (this.isInputMuted()) {
       return;
     }
+    if (this.overlay === 'leaderboard') {
+      const p = this.readTouchPoint(e, false);
+      if (!p) {
+        return;
+      }
+      this.lastPointerX = p.x;
+      this.lastPointerY = p.y;
+      this.moveLeaderboardScroll(p.y);
+      return;
+    }
     if (this.overlay !== 'none') {
       return;
     }
@@ -2275,6 +2412,7 @@ export class WxCanvasGameApp {
     if (this.isInputMuted()) {
       this.boardView.onPointerCancel();
       this.lobbyDrag = null;
+      this.leaderboardDrag = null;
       this.crushTapOnDown = false;
       return;
     }
@@ -2285,6 +2423,19 @@ export class WxCanvasGameApp {
     const x = p.x;
     const y = p.y;
     this.ensureBoardLayoutSynced();
+
+    if (this.overlay === 'leaderboard') {
+      const scrolled = this.endLeaderboardScroll();
+      this.lobbyDrag = null;
+      this.crushTapOnDown = false;
+      if (!scrolled) {
+        const overlayHit = this.hitButton(x, y);
+        if (overlayHit) {
+          void this.onButton(overlayHit.id, overlayHit.levelId);
+        }
+      }
+      return;
+    }
 
     if (this.overlay !== 'none') {
       this.lobbyDrag = null;
@@ -2362,6 +2513,7 @@ export class WxCanvasGameApp {
   private handleTouchCancel(_e: WxTouchEvent): void {
     this.crushTapOnDown = false;
     this.lobbyDrag = null;
+    this.leaderboardDrag = null;
     this.lobbyCamVel = 0;
     this.boardView.onPointerCancel();
     if (this.hammerTargeting) {
@@ -2440,7 +2592,7 @@ export class WxCanvasGameApp {
     this.boardView.updateLayout(this.computeBoardLayout(board));
   }
 
-  /** 按当前页面生成转发 / 朋友圈文案 */
+  /** 按当前页面生成转发 / 朋友圈文案。 */
   private buildSharePayload(): {
     title: string;
     imageUrl: string;
@@ -2450,13 +2602,14 @@ export class WxCanvasGameApp {
     const level = this.session.getLevelConfig();
     const levelId = level?.id ?? 1;
     const score = this.session.getScore();
-    const scene =
-      this.mode === 'playing' ||
+    const scene: ShareScene =
+      this.boosterShareScene ??
+      (this.mode === 'playing' ||
       this.mode === 'crush' ||
       this.mode === 'clean' ||
       this.mode === 'result'
         ? this.mode
-        : 'lobby';
+        : 'lobby');
     const title = buildShareTitle(scene, levelId, score);
     const query = buildShareQuery(
       scene,
@@ -2486,14 +2639,49 @@ export class WxCanvasGameApp {
     return imageUrlId ? { imageUrl, imageUrlId } : { imageUrl };
   }
 
-  /** 左下角导航标签尺寸，供道具栏避让。 */
+  /** 左下角导航槽位尺寸，供道具栏避让；与底部胶囊行垂直居中。 */
   private getNavChipFrame(): { x: number; y: number; w: number; h: number } {
-    const w = 88;
-    const h = LOBBY_NAV_CHIP_H;
-    const banner =
-      this.mode === 'lobby' ? this.session.getLobbyBannerReservePx() : 0;
+    if (this.mode !== 'lobby') {
+      const layout = this.getInLevelBottomNavLayout();
+      return {
+        x: layout.muteX,
+        y: layout.muteY,
+        w: layout.muteSize,
+        h: layout.muteSize,
+      };
+    }
+    const banner = this.session.getLobbyBannerReservePx();
     const bottom = lobbyNavBottomGap(banner, this.safeAreaBottom);
-    return { x: 12, y: this.height - h - bottom, w, h };
+    const chipY = this.height - LOBBY_NAV_CHIP_H - bottom;
+    return layoutLobbyGear(chipY, LOBBY_NAV_CHIP_H);
+  }
+
+  /** 局内左下：音效与道具栏底边对齐，「回首页」叠在音效上方。 */
+  private getInLevelBottomNavLayout(): {
+    muteX: number;
+    muteY: number;
+    muteSize: number;
+    homeX: number;
+    homeY: number;
+    homeW: number;
+    homeH: number;
+  } {
+    const boosterSize = 58;
+    const boosterY = this.height - boosterSize - 22;
+    const muteSize = 42;
+    const muteX = LOBBY_GEAR_X;
+    const muteY = boosterY + (boosterSize - muteSize) / 2;
+    const homeW = Math.max(56, muteSize + 14);
+    const homeH = 28;
+    return {
+      muteX,
+      muteY,
+      muteSize,
+      homeX: muteX + (muteSize - homeW) / 2,
+      homeY: muteY - homeH - 6,
+      homeW,
+      homeH,
+    };
   }
 
   private hitLobbyNavChip(x: number, y: number): boolean {
@@ -2501,115 +2689,169 @@ export class WxCanvasGameApp {
     return !!hit && hit.id !== 'level';
   }
 
-  /** 左下角「设置」；大厅再并排「推荐 / 圈子」。玩法在设置里。 */
+  /** 大厅 / 局内左下角：音效开关。局内与道具栏同高，上方附「回首页」。 */
   private drawNavChips(): void {
-    const frame = this.getNavChipFrame();
     if (this.mode !== 'lobby') {
       this.hideGameClubNativeButton();
-      const settingsBtn: UiButton = {
-        id: 'settings',
-        x: frame.x,
-        y: frame.y,
-        w: frame.w,
-        h: frame.h,
-        label: '设置',
-        hitPad: LOBBY_NAV_HIT_PAD,
+      const layout = this.getInLevelBottomNavLayout();
+      this.pushMuteNavButton(
+        layout.muteX,
+        layout.muteY,
+        layout.muteSize,
+        layout.muteSize,
+        LOBBY_NAV_HIT_PAD,
+      );
+      const homeBtn: UiButton = {
+        id: 'lobby',
+        x: layout.homeX,
+        y: layout.homeY,
+        w: layout.homeW,
+        h: layout.homeH,
+        label: '回首页',
+        hitPad: 6,
       };
-      this.buttons.push(settingsBtn);
-      this.drawCuteButton(settingsBtn, {
-        top: '#b197fc',
-        bottom: '#7950f2',
+      this.buttons.push(homeBtn);
+      this.drawCuteButton(homeBtn, {
+        top: '#a5d8ff',
+        bottom: '#339af0',
         border: '#ffffff',
         gloss: true,
+        fontSize: 12,
       });
       return;
     }
 
-    const gap = 8;
-    const side = 12;
-    const items: Array<{
-      id: 'settings' | 'recommend' | 'club';
-      label: string;
-      palette: { top: string; bottom: string; border: string; gloss: boolean };
-    }> = [
-      {
-        id: 'settings',
-        label: '设置',
-        palette: { top: '#b197fc', bottom: '#7950f2', border: '#ffffff', gloss: true },
-      },
-      {
-        id: 'recommend',
-        label: '推荐',
-        palette: { top: '#ffa8a8', bottom: '#fa5252', border: '#ffffff', gloss: true },
-      },
-      {
-        id: 'club',
-        label: '圈子',
-        palette: { top: '#74c0fc', bottom: '#1c7ed6', border: '#ffffff', gloss: true },
-      },
-    ];
-    const chipW = Math.max(
-      LOBBY_NAV_CHIP_MIN_W,
-      Math.floor((this.width - side * 2 - gap * (items.length - 1)) / items.length),
+    const daily = this.session.getDailyLoop();
+    const chrome = layoutLobbyBottom({
+      width: this.width,
+      height: this.height,
+      bannerReserve: this.session.getLobbyBannerReservePx(),
+      safeBottom: this.safeAreaBottom,
+      clearsToday: daily.clearsToday,
+      shuffleGranted: daily.playShuffleGranted,
+    });
+    this.pushMuteNavButton(
+      chrome.settings.x,
+      chrome.settings.y,
+      chrome.settings.w,
+      chrome.settings.h,
+      8,
     );
-    for (let i = 0; i < items.length; i += 1) {
-      const item = items[i];
+
+    if (chrome.claim) {
+      const claimBtn: UiButton = {
+        id: 'claim_shuffle',
+        x: chrome.claim.x,
+        y: chrome.claim.y,
+        w: chrome.claim.w,
+        h: chrome.claim.h,
+        label: chrome.claim.label,
+        hitPad: 6,
+      };
+      this.buttons.push(claimBtn);
+      this.drawCuteButton(claimBtn, {
+        top: '#ffe066',
+        bottom: '#f59f00',
+        border: '#ffffff',
+        gloss: true,
+      });
+    }
+
+    const palettes: Record<
+      'recommend' | 'club',
+      { top: string; bottom: string; border: string; gloss: boolean }
+    > = {
+      recommend: { top: '#8ce99a', bottom: '#37b24d', border: '#ffffff', gloss: true },
+      club: { top: '#74c0fc', bottom: '#1c7ed6', border: '#ffffff', gloss: true },
+    };
+    for (const item of chrome.chips) {
       const btn: UiButton = {
         id: item.id,
-        x: side + i * (chipW + gap),
-        y: frame.y,
-        w: chipW,
-        h: frame.h,
+        x: item.x,
+        y: item.y,
+        w: item.w,
+        h: item.h,
         label: item.label,
-        hitPad: LOBBY_NAV_HIT_PAD,
+        hitPad: 8,
       };
       this.buttons.push(btn);
-      this.drawCuteButton(btn, item.palette);
+      this.drawCuteButton(btn, palettes[item.id]);
       if (item.id === 'club') {
         this.syncGameClubNativeButton(btn);
       }
     }
-    this.drawLobbyNavHint(frame);
   }
 
-  /** 每日目标提示贴在设置、推荐、圈子这一排上面。 */
-  private drawLobbyNavHint(frame: { y: number }): void {
-    if (this.overlay !== 'none') {
+  /** 左下角音效：开=彩色喇叭，关=灰色静音。 */
+  private pushMuteNavButton(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    hitPad: number,
+  ): void {
+    const size = Math.max(w, h, 42);
+    const btn: UiButton = {
+      id: 'mute',
+      x: x + w / 2 - size / 2,
+      y: y + h / 2 - size / 2,
+      w: size,
+      h: size,
+      label: '',
+      hitPad,
+    };
+    this.buttons.push(btn);
+    this.drawMuteToggleButton(btn, this.session.isMuted());
+  }
+
+  /** 首页左上角糖果列表（邀请 / 排行 / 怎么玩）。 */
+  private drawLobbySideActions(): void {
+    if (this.mode !== 'lobby') {
       return;
     }
-    const { ctx, width } = this;
-    const daily = this.session.getDailyLoop();
-    const page = lobbyPageIndex(this.lobbyCamY, this.height);
-    const vine =
-      this.session.listLobbyVineNodes().find((node) => node.nodeIndex === page) ??
-      this.session.getVineNode();
-    const inviteTip = lobbyInviteHint(this.session.getInviteState());
-    const tip =
-      inviteTip ??
-      (daily.clearsToday >= DAILY_GOAL_CLEARS
-        ? lobbyBottomHint(vine, this.session.getLevelCount())
-        : lobbyDailyHint(daily.clearsToday, daily.playShuffleGranted));
-    ctx.font = 'bold 13px sans-serif';
-    const tipW = Math.min(width - 48, ctx.measureText(tip).width + 36);
-    const tipH = 32;
-    const tipX = (width - tipW) / 2;
-    const bob = Math.sin((this.nowMs || Date.now()) / 420) * 2;
-    const tipY = frame.y - tipH - 10 + bob;
-    this.drawHudPill(
-      tipX,
-      tipY,
-      tipW,
-      tipH,
-      'rgba(255,255,255,0.9)',
-      'rgba(255,150,200,0.85)',
-    );
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#7a3e6a';
-    ctx.fillText(tip, width / 2, tipY + tipH / 2);
-    ctx.restore();
+    const top = lobbySideActionsTop(this.statusBarHeight);
+    const frames = layoutLobbySideActions(top, this.width);
+    const palettes: Record<
+      LobbySideActionFrame['id'],
+      { top: string; bottom: string; border: string; gloss: boolean; fontSize: number }
+    > = {
+      invite: {
+        top: '#63e6be',
+        bottom: '#12b886',
+        border: '#ffffff',
+        gloss: true,
+        fontSize: LOBBY_SIDE_ACTION_FONT,
+      },
+      leaderboard: {
+        top: '#d0bfff',
+        bottom: '#845ef7',
+        border: '#ffffff',
+        gloss: true,
+        fontSize: LOBBY_SIDE_ACTION_FONT,
+      },
+      howto: {
+        top: '#ffc078',
+        bottom: '#f76707',
+        border: '#ffffff',
+        gloss: true,
+        fontSize: LOBBY_SIDE_ACTION_FONT,
+      },
+    };
+    for (const frame of frames) {
+      const btn: UiButton = {
+        id: frame.id,
+        x: frame.x,
+        y: frame.y,
+        w: frame.w,
+        h: frame.h,
+        label: frame.label,
+        hitPad: 6,
+      };
+      this.buttons.push(btn);
+      this.drawCuteButton(btn, palettes[frame.id]);
+    }
   }
+
 
   private hideGameClubNativeButton(): void {
     if (this.gameClubButtonKey === 'hidden') {
@@ -2775,7 +3017,388 @@ export class WxCanvasGameApp {
       this.drawNoticePanel();
       return;
     }
+    if (this.overlay === 'leaderboard') {
+      this.drawLeaderboardPanel();
+      return;
+    }
+    if (this.overlay === 'profile_welcome') {
+      this.drawProfileWelcomePanel();
+      return;
+    }
     this.drawSettingsPanel();
+  }
+
+  /** 好友排行：标题/奖励固定，玩家列表可滑动。 */
+  private drawLeaderboardPanel(): void {
+    this.ctx.font = '12px sans-serif';
+    const view = this.boardViewModel;
+    const layout = layoutLeaderboardPanel({
+      width: this.width,
+      height: this.height,
+      hint: view?.hint ?? '',
+      rewardText: view?.rewardText ?? '',
+      rows: view?.rows ?? [],
+      wrap: (text, maxWidth) => this.wrapText(text, maxWidth),
+    });
+    this.leaderboardScrollY = clampLeaderboardScroll(this.leaderboardScrollY, layout);
+    const { ctx } = this;
+    const { panel } = layout;
+    this.drawCuteCard(panel.x, panel.y, panel.w, panel.h, {
+      radius: 24,
+      fillTop: 'rgba(255,255,255,0.98)',
+      fillBottom: 'rgba(232, 248, 255, 0.97)',
+      border: 'rgba(116, 192, 252, 0.95)',
+      borderWidth: 3,
+      shadow: true,
+      sparkle: true,
+      sparkleColor: '#a5d8ff',
+      nowMs: this.nowMs || Date.now(),
+    });
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillStyle = '#1864ab';
+    ctx.fillText(layout.title, panel.x + panel.w / 2, panel.y + 28);
+    ctx.restore();
+
+    let ty = layout.bodyTop;
+    for (const row of layout.headerRows) {
+      if (row.kind === 'reward') {
+        const rewardW = panel.w - 28;
+        ctx.font = '12px sans-serif';
+        const lines = this.wrapText(row.text, rewardW);
+        const rowH = Math.max(layout.metaRowH, lines.length * 16 + 8);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.font = '12px sans-serif';
+        ctx.fillStyle = '#fa5252';
+        let ly = ty + 2;
+        const cx = panel.x + panel.w / 2;
+        for (const line of lines) {
+          ctx.fillText(line, cx, ly);
+          ly += 16;
+        }
+        ty += rowH + 6;
+        continue;
+      }
+      ctx.font = '12px sans-serif';
+      const lines = this.wrapText(row.text, layout.textWidth + 56);
+      const rowH = Math.max(layout.metaRowH, lines.length * 16 + 10);
+      ctx.fillStyle = '#74c0fc';
+      this.roundRectPath(layout.tagX, ty, 44, 24, 12);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(row.tag, layout.tagX + 22, ty + 12);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = '#1864ab';
+      let ly = ty + 2;
+      for (const line of lines) {
+        ctx.fillText(line, layout.textX - 20, ly);
+        ly += 16;
+      }
+      ty += rowH + 6;
+    }
+
+    // 可滑动玩家列表
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(panel.x + 6, layout.listTop, panel.w - 12, layout.listViewportH);
+    ctx.clip();
+    let py = layout.listTop - this.leaderboardScrollY;
+    for (const row of layout.playerRows) {
+      const rowH = layout.rowH;
+      const nextY = py + rowH + 6;
+      if (nextY > layout.listTop && py < layout.listBottom) {
+        this.drawLeaderboardPlayerRow(row, layout, py, rowH);
+      }
+      py = nextY;
+    }
+    ctx.restore();
+
+    // 可滑时画右侧细滚动条
+    const maxScroll = Math.max(0, layout.listContentH - layout.listViewportH);
+    if (maxScroll > 4 && layout.listViewportH > 20) {
+      const trackX = panel.x + panel.w - 10;
+      const trackTop = layout.listTop + 4;
+      const trackH = layout.listViewportH - 8;
+      const thumbH = Math.max(18, (layout.listViewportH / layout.listContentH) * trackH);
+      const thumbY = trackTop + (this.leaderboardScrollY / maxScroll) * (trackH - thumbH);
+      ctx.fillStyle = 'rgba(116, 192, 252, 0.25)';
+      this.roundRectPath(trackX, trackTop, 3, trackH, 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(28, 126, 214, 0.55)';
+      this.roundRectPath(trackX, thumbY, 3, thumbH, 2);
+      ctx.fill();
+    }
+
+    for (const spec of layout.buttons) {
+      const btn: UiButton = {
+        id: spec.id,
+        x: spec.x,
+        y: spec.y,
+        w: spec.w,
+        h: spec.h,
+        label: spec.label,
+      };
+      this.buttons.push(btn);
+      if (isPanelCloseLabel(spec.label) || isPanelBackLabel(spec.label)) {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 22px sans-serif';
+        ctx.fillStyle = '#74c0fc';
+        ctx.fillText(spec.label, spec.x + spec.w / 2, spec.y + spec.h / 2);
+      } else {
+        this.drawCuteButton(btn, spec.palette);
+      }
+    }
+  }
+
+  private resolveLeaderboardLayout() {
+    const view = this.boardViewModel;
+    return layoutLeaderboardPanel({
+      width: this.width,
+      height: this.height,
+      hint: view?.hint ?? '',
+      rewardText: view?.rewardText ?? '',
+      rows: view?.rows ?? [],
+      wrap: (text, maxWidth) => this.wrapText(text, maxWidth),
+    });
+  }
+
+  private beginLeaderboardScroll(x: number, y: number): void {
+    const layout = this.resolveLeaderboardLayout();
+    const inList =
+      x >= layout.panel.x
+      && x <= layout.panel.x + layout.panel.w
+      && y >= layout.listTop
+      && y <= layout.listBottom;
+    if (!inList || layout.listContentH <= layout.listViewportH + 1) {
+      this.leaderboardDrag = null;
+      return;
+    }
+    this.leaderboardDrag = { startY: y, lastY: y, scrolled: false };
+  }
+
+  private moveLeaderboardScroll(y: number): void {
+    if (!this.leaderboardDrag) {
+      return;
+    }
+    const dy = this.leaderboardDrag.lastY - y;
+    this.leaderboardDrag.lastY = y;
+    if (Math.abs(y - this.leaderboardDrag.startY) > 6) {
+      this.leaderboardDrag.scrolled = true;
+    }
+    if (Math.abs(dy) < 0.5) {
+      return;
+    }
+    const layout = this.resolveLeaderboardLayout();
+    this.leaderboardScrollY = clampLeaderboardScroll(
+      this.leaderboardScrollY + dy,
+      layout,
+    );
+    this.requestPaint();
+  }
+
+  /** @returns 是否发生了滑动（滑动则不当作点击） */
+  private endLeaderboardScroll(): boolean {
+    const scrolled = !!this.leaderboardDrag?.scrolled;
+    this.leaderboardDrag = null;
+    return scrolled;
+  }
+
+  /** 首次进入：可选授权头像昵称（不强制）。 */
+  private drawProfileWelcomePanel(): void {
+    const { ctx, width, height } = this;
+    const welcome = (noticeJson as { profileWelcome?: {
+      title?: string;
+      body?: string;
+      skip?: string;
+    } }).profileWelcome;
+    const panelW = Math.min(320, width - 40);
+    const body = welcome?.body ?? '授权后，好友排行会显示你的头像和昵称。也可跳过，不影响游玩。';
+    ctx.font = '13px sans-serif';
+    const lines = this.wrapText(body, panelW - 40);
+    const panelH = 168 + lines.length * 18;
+    const x = (width - panelW) / 2;
+    const y = Math.max(80, height * 0.28);
+    this.drawCuteCard(x, y, panelW, panelH, {
+      radius: 22,
+      fillTop: 'rgba(255,255,255,0.98)',
+      fillBottom: 'rgba(232, 248, 255, 0.97)',
+      border: 'rgba(116, 192, 252, 0.95)',
+      borderWidth: 3,
+      shadow: true,
+      sparkle: true,
+      sparkleColor: '#a5d8ff',
+      nowMs: this.nowMs || Date.now(),
+    });
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillStyle = '#1864ab';
+    ctx.fillText(welcome?.title ?? '展示微信头像', x + panelW / 2, y + 32);
+    ctx.font = '13px sans-serif';
+    ctx.fillStyle = '#495057';
+    ctx.textBaseline = 'top';
+    let ly = y + 56;
+    for (const line of lines) {
+      ctx.fillText(line, x + panelW / 2, ly);
+      ly += 18;
+    }
+    const skip: UiButton = {
+      id: 'profile_skip',
+      x: x + 24,
+      y: y + panelH - 36,
+      w: panelW - 48,
+      h: 28,
+      label: welcome?.skip ?? '暂不授权',
+    };
+    this.buttons.push(skip);
+    ctx.textBaseline = 'middle';
+    ctx.font = '13px sans-serif';
+    ctx.fillStyle = '#74c0fc';
+    ctx.fillText(skip.label, skip.x + skip.w / 2, skip.y + skip.h / 2);
+  }
+
+  private drawLeaderboardPlayerRow(
+    row: LeaderboardLine,
+    layout: ReturnType<typeof layoutLeaderboardPanel>,
+    ty: number,
+    rowH: number,
+  ): void {
+    const { ctx } = this;
+    const { panel } = layout;
+    if (row.highlight) {
+      ctx.fillStyle = 'rgba(208, 235, 255, 0.95)';
+      this.roundRectPath(panel.x + 8, ty - 2, panel.w - 16, rowH, 14);
+      ctx.fill();
+    }
+    // 排名圆
+    const rankCx = layout.tagX + 12;
+    const rankCy = ty + rowH / 2;
+    ctx.beginPath();
+    ctx.arc(rankCx, rankCy, 11, 0, Math.PI * 2);
+    ctx.fillStyle = row.highlight ? '#1c7ed6' : '#74c0fc';
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(row.tag, rankCx, rankCy);
+
+    // 头像
+    const ax = layout.avatarX;
+    const ay = rankCy;
+    const ar = layout.avatarR;
+    const avatar = row.avatarUrl ? this.avatarCache.get(row.avatarUrl) : null;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(ax, ay, ar, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    if (avatar && (avatar.width || 0) > 0) {
+      ctx.drawImage(avatar, ax - ar, ay - ar, ar * 2, ar * 2);
+    } else {
+      ctx.fillStyle = row.highlight ? '#1c7ed6' : '#a5d8ff';
+      ctx.fillRect(ax - ar, ay - ar, ar * 2, ar * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText(row.badge || (row.nickName || '玩').slice(0, 1), ax, ay);
+      if (row.avatarUrl && !this.avatarCache.has(row.avatarUrl)) {
+        this.prefetchAvatar(row.avatarUrl);
+      }
+    }
+    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(ax, ay, ar, 0, Math.PI * 2);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 昵称 + 微信号
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillStyle = '#1864ab';
+    const name = row.nickName || '微信玩家';
+    ctx.fillText(name, layout.textX, ty + rowH * 0.36);
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = '#4c6ef5';
+    ctx.fillText(`邀请码 ${row.wxId || '—'}`, layout.textX, ty + rowH * 0.68);
+
+    // 分数
+    ctx.textAlign = 'right';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillStyle = '#1864ab';
+    ctx.fillText(String(row.score ?? 0), layout.scoreX, rankCy);
+    ctx.font = '10px sans-serif';
+    ctx.fillStyle = '#74c0fc';
+    ctx.fillText('关卡', layout.scoreX, rankCy + 14);
+  }
+
+  private prefetchAvatar(url: string): void {
+    if (!url || this.avatarCache.has(url) || typeof wx === 'undefined') {
+      return;
+    }
+    try {
+      const img = wx.createImage();
+      this.avatarCache.set(url, img);
+      img.onload = () => this.requestPaint();
+      img.onerror = () => {
+        // createImage 失败时改走 downloadFile（需后台配置 downloadFile 合法域名）
+        this.avatarCache.delete(url);
+        this.downloadAvatar(url);
+      };
+      img.src = url;
+    } catch {
+      this.downloadAvatar(url);
+    }
+  }
+
+  private downloadAvatar(url: string): void {
+    if (!url || this.avatarCache.has(url) || typeof wx === 'undefined') {
+      return;
+    }
+    const download = (wx as typeof wx & {
+      downloadFile?: (opts: {
+        url: string;
+        success?: (res: { tempFilePath?: string; statusCode?: number }) => void;
+        fail?: () => void;
+      }) => void;
+    }).downloadFile;
+    if (typeof download !== 'function') {
+      return;
+    }
+    try {
+      download({
+        url,
+        success: (res) => {
+          const path = res.tempFilePath;
+          if (!path || (res.statusCode != null && res.statusCode !== 200)) {
+            return;
+          }
+          try {
+            const img = wx.createImage();
+            this.avatarCache.set(url, img);
+            img.onload = () => this.requestPaint();
+            img.onerror = () => {
+              this.avatarCache.delete(url);
+            };
+            img.src = path;
+          } catch {
+            // ignore
+          }
+        },
+      });
+    } catch {
+      // ignore
+    }
   }
 
   private drawNoticePanel(): void {
@@ -2783,219 +3406,143 @@ export class WxCanvasGameApp {
     const panelW = Math.min(300, width - 48);
     ctx.font = 'bold 16px sans-serif';
     const bodyLines = this.wrapText(noticeJson.body, panelW - 48);
-    const panelH = 168 + Math.max(0, bodyLines.length - 1) * 22;
+    const panelH = 120 + Math.max(0, bodyLines.length - 1) * 22;
     const x = (width - panelW) / 2;
     const y = Math.max(24, height * 0.28);
 
     this.drawCuteCard(x, y, panelW, panelH, {
       radius: 24,
       fillTop: 'rgba(255,255,255,0.98)',
-      fillBottom: 'rgba(255,236,245,0.97)',
-      border: 'rgba(255, 170, 210, 0.95)',
+      fillBottom: 'rgba(232, 248, 255, 0.97)',
+      border: 'rgba(116, 192, 252, 0.95)',
       borderWidth: 3,
       shadow: true,
       sparkle: true,
+      sparkleColor: '#a5d8ff',
       nowMs: this.nowMs || Date.now(),
     });
+
+    this.paintPanelCornerChrome(
+      this.overlayFromSettings
+        ? panelBackButton({ x, y })
+        : panelCloseButton({ x, y, w: panelW }),
+      '#1c7ed6',
+    );
 
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = 'bold 22px sans-serif';
-    ctx.fillStyle = '#c2255c';
+    ctx.fillStyle = '#1864ab';
     ctx.fillText(noticeJson.title, x + panelW / 2, y + 38);
     ctx.font = 'bold 16px sans-serif';
-    ctx.fillStyle = '#5c3d4a';
+    ctx.fillStyle = '#1c7ed6';
     let ty = y + 82;
     for (const line of bodyLines) {
       ctx.fillText(line, x + panelW / 2, ty);
       ty += 22;
     }
     ctx.restore();
-
-    const btnW = Math.min(220, panelW - 48);
-    const closeBtn: UiButton = {
-      id: 'resume',
-      x: x + (panelW - btnW) / 2,
-      y: y + panelH - 62,
-      w: btnW,
-      h: 46,
-      label: this.overlayFromSettings ? '返回设置' : noticeJson.confirm,
-    };
-    this.buttons.push(closeBtn);
-    this.drawCuteButton(closeBtn, {
-      top: '#ffd43b',
-      bottom: '#fab005',
-      border: '#ffffff',
-      gloss: true,
-    });
   }
 
   private drawSettingsPanel(): void {
     const { ctx, width, height } = this;
     const inLobby = this.mode === 'lobby';
-    const panelW = Math.min(300, width - 48);
-    const hint = inviteSettingsHint(this.session.getInviteState());
-    const panelH = inLobby ? 492 : 548;
+    const panelW = Math.min(280, width - 48);
+    const padX = 16;
+    const titleH = 44;
+    // 音效已挪到左下角；设置页仅保留局内「返回首页」
+    const footH = inLobby ? 72 : 100;
+    const panelH = titleH + footH;
     const x = (width - panelW) / 2;
-    const y = Math.max(12, Math.min(height * 0.16, height - panelH - 12));
+    const y = Math.max(12, Math.min(height * 0.28, height - panelH - 12));
 
     this.drawCuteCard(x, y, panelW, panelH, {
       radius: 24,
       fillTop: 'rgba(255,255,255,0.98)',
-      fillBottom: 'rgba(255,236,245,0.97)',
-      border: 'rgba(255, 170, 210, 0.95)',
+      fillBottom: 'rgba(232, 248, 255, 0.97)',
+      border: 'rgba(116, 192, 252, 0.95)',
       borderWidth: 3,
       shadow: true,
       sparkle: true,
+      sparkleColor: '#a5d8ff',
       nowMs: this.nowMs || Date.now(),
     });
+
+    this.paintPanelCornerChrome(panelCloseButton({ x, y, w: panelW }), '#1c7ed6');
 
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = 'bold 22px sans-serif';
-    ctx.fillStyle = '#c2255c';
-    ctx.fillText('设置', x + panelW / 2, y + 32);
+    ctx.fillStyle = '#1864ab';
+    ctx.fillText('设置', x + panelW / 2, y + 26);
     ctx.restore();
 
-    ctx.save();
-    ctx.font = '12px sans-serif';
-    ctx.fillStyle = '#a61e4d';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    const hintLines = this.wrapText(hint, panelW - 36);
-    let hintY = y + 50;
-    for (const line of hintLines.slice(0, 2)) {
-      ctx.fillText(line, x + panelW / 2, hintY);
-      hintY += 16;
-    }
-    ctx.restore();
-
-    const muted = this.session.isMuted();
-    const btnW = Math.min(220, panelW - 48);
-    const btnX = x + (panelW - btnW) / 2;
-    let btnY = y + 88;
-
-    const muteBtn: UiButton = {
-      id: 'mute',
-      x: btnX,
-      y: btnY,
-      w: btnW,
-      h: 46,
-      label: muted ? '音效：关' : '音效：开',
-    };
-    this.buttons.push(muteBtn);
-    this.drawCuteButton(
-      muteBtn,
-      muted
-        ? { top: '#ced4da', bottom: '#868e96', border: '#ffffff', gloss: true }
-        : { top: '#8ce99a', bottom: '#37b24d', border: '#ffffff', gloss: true },
-    );
-
-    btnY += 56;
-    const inviteBtn: UiButton = {
-      id: 'invite',
-      x: btnX,
-      y: btnY,
-      w: btnW,
-      h: 46,
-      label: '邀请好友',
-    };
-    this.buttons.push(inviteBtn);
-    this.drawCuteButton(inviteBtn, {
-      top: '#b197fc',
-      bottom: '#7950f2',
-      border: '#ffffff',
-      gloss: true,
-    });
-
-    btnY += 56;
-    const postBtn: UiButton = {
-      id: 'post',
-      x: btnX,
-      y: btnY,
-      w: btnW,
-      h: 46,
-      label: '发表贴图',
-    };
-    this.buttons.push(postBtn);
-    this.drawCuteButton(postBtn, {
-      top: '#ffd43b',
-      bottom: '#fab005',
-      border: '#ffffff',
-      gloss: true,
-    });
-
-    btnY += 56;
-    const howtoBtn: UiButton = {
-      id: 'howto',
-      x: btnX,
-      y: btnY,
-      w: btnW,
-      h: 46,
-      label: '怎么玩',
-    };
-    this.buttons.push(howtoBtn);
-    this.drawCuteButton(howtoBtn, {
-      top: '#ffc078',
-      bottom: '#fd7e14',
-      border: '#ffffff',
-      gloss: true,
-    });
-
-    btnY += 56;
-    const noticeBtn: UiButton = {
-      id: 'notice',
-      x: btnX,
-      y: btnY,
-      w: btnW,
-      h: 46,
-      label: noticeJson.title,
-    };
-    this.buttons.push(noticeBtn);
-    this.drawCuteButton(noticeBtn, {
-      top: '#ffa8d4',
-      bottom: '#f06595',
-      border: '#ffffff',
-      gloss: true,
-    });
-
-    if (!inLobby) {
-      btnY += 56;
-      const homeBtn: UiButton = {
-        id: 'lobby',
-        x: btnX,
-        y: btnY,
-        w: btnW,
-        h: 46,
-        label: '返回首页',
-      };
-      this.buttons.push(homeBtn);
-      this.drawCuteButton(homeBtn, {
-        top: '#ffa8d4',
-        bottom: '#ff6baf',
-        border: '#ffffff',
-        gloss: true,
-      });
+    if (inLobby) {
+      ctx.save();
+      ctx.font = '13px sans-serif';
+      ctx.fillStyle = '#1c7ed6';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('音效开关在左下角哦', x + panelW / 2, y + titleH + 28);
+      ctx.restore();
+      return;
     }
 
-    btnY += 56;
-    const closeBtn: UiButton = {
-      id: 'resume',
-      x: btnX,
-      y: btnY,
-      w: btnW,
-      h: 46,
-      label: inLobby ? '关闭' : '继续游戏',
+    const homeBtn: UiButton = {
+      id: 'lobby',
+      x: x + padX,
+      y: y + titleH + 18,
+      w: panelW - padX * 2,
+      h: 44,
+      label: '返回首页',
     };
-    this.buttons.push(closeBtn);
-    this.drawCuteButton(closeBtn, {
+    this.buttons.push(homeBtn);
+    this.drawCuteButton(homeBtn, {
       top: '#a5d8ff',
-      bottom: '#4dabf7',
+      bottom: '#339af0',
       border: '#ffffff',
       gloss: true,
     });
+  }
+
+  /** 关卡同款音效钮：彩色 = 开，灰色 = 关（贴图自带立体壳）。 */
+  private drawMuteToggleButton(btn: UiButton, muted: boolean): void {
+    const { ctx } = this;
+    const key = muted ? 'mute' : 'sound';
+    const img = this.uiIcons.get(key);
+    const cx = btn.x + btn.w / 2;
+    const cy = btn.y + btn.h / 2;
+    if (img && (img.width || 0) > 0) {
+      ctx.save();
+      ctx.drawImage(img, btn.x, btn.y, btn.w, btn.h);
+      ctx.restore();
+      return;
+    }
+    // 贴图未就绪时的兜底：有色 / 灰色圆钮
+    ctx.save();
+    const grad = ctx.createLinearGradient(btn.x, btn.y, btn.x, btn.y + btn.h);
+    if (muted) {
+      grad.addColorStop(0, '#e9ecef');
+      grad.addColorStop(1, '#adb5bd');
+    } else {
+      grad.addColorStop(0, '#ffa8a8');
+      grad.addColorStop(1, '#f06595');
+    }
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, btn.w / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(muted ? '静' : '音', cx, cy);
+    ctx.restore();
   }
 
   /** 首页玩法：一屏速查，打开就能看完。 */
@@ -3005,8 +3552,7 @@ export class WxCanvasGameApp {
     const padX = 16;
     const tagW = 44;
     const titleH = 46;
-    const btnH = 46;
-    const footH = 70;
+    const footH = 16;
     const gap = 8;
     ctx.font = '12px sans-serif';
     const textW = panelW - padX * 2 - tagW - 10;
@@ -3021,19 +3567,27 @@ export class WxCanvasGameApp {
     this.drawCuteCard(x, y, panelW, panelH, {
       radius: 24,
       fillTop: 'rgba(255,255,255,0.98)',
-      fillBottom: 'rgba(255,236,245,0.97)',
-      border: 'rgba(255, 170, 210, 0.95)',
+      fillBottom: 'rgba(230, 246, 255, 0.97)',
+      border: 'rgba(116, 192, 252, 0.95)',
       borderWidth: 3,
       shadow: true,
       sparkle: true,
+      sparkleColor: '#a5d8ff',
       nowMs: this.nowMs || Date.now(),
     });
+
+    this.paintPanelCornerChrome(
+      this.overlayFromSettings
+        ? panelBackButton({ x, y })
+        : panelCloseButton({ x, y, w: panelW }),
+      '#339af0',
+    );
 
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = 'bold 22px sans-serif';
-    ctx.fillStyle = '#c2255c';
+    ctx.fillStyle = '#1c7ed6';
     ctx.fillText('怎么玩', x + panelW / 2, y + 26);
     ctx.restore();
 
@@ -3045,7 +3599,7 @@ export class WxCanvasGameApp {
       if (ty + rowH > maxY) {
         break;
       }
-      ctx.fillStyle = '#ff8cc8';
+      ctx.fillStyle = '#4dabf7';
       this.roundRectPath(x + padX, ty, tagW, 24, 12);
       ctx.fill();
       ctx.fillStyle = '#ffffff';
@@ -3057,7 +3611,7 @@ export class WxCanvasGameApp {
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
       ctx.font = '12px sans-serif';
-      ctx.fillStyle = '#5c3d4a';
+      ctx.fillStyle = '#3b5166';
       let ly = ty + 2;
       for (const line of lines) {
         ctx.fillText(line, x + padX + tagW + 10, ly);
@@ -3065,23 +3619,6 @@ export class WxCanvasGameApp {
       }
       ty += rowH + gap;
     }
-
-    const btnW = Math.min(200, panelW - 48);
-    const closeBtn: UiButton = {
-      id: 'resume',
-      x: x + (panelW - btnW) / 2,
-      y: y + panelH - 58,
-      w: btnW,
-      h: btnH,
-      label: this.overlayFromSettings ? '返回设置' : '知道了，去玩',
-    };
-    this.buttons.push(closeBtn);
-    this.drawCuteButton(closeBtn, {
-      top: '#ffd43b',
-      bottom: '#fab005',
-      border: '#ffffff',
-      gloss: true,
-    });
   }
 
   /** 按宽度逐字折行（中文规则说明用）。 */
@@ -3103,6 +3640,90 @@ export class WxCanvasGameApp {
     }
     return lines;
   }
+
+
+  /** 弹窗角标：左上「<」返回 / 右上「×」关闭。 */
+  private paintPanelCornerChrome(
+    spec: {
+      id: UiButton['id'];
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      label: string;
+    },
+    accent = '#1c7ed6',
+  ): void {
+    const btn: UiButton = {
+      id: spec.id,
+      x: spec.x,
+      y: spec.y,
+      w: spec.w,
+      h: spec.h,
+      label: spec.label,
+      hitPad: 12,
+    };
+    this.buttons.push(btn);
+    if (isPanelCloseLabel(spec.label)) {
+      this.drawPanelCloseX(btn, accent);
+    } else {
+      this.drawPanelBackChevron(btn, accent);
+    }
+  }
+
+  /** 弹窗返回：无圆底，大张角折线箭头。 */
+  private drawPanelBackChevron(btn: UiButton, accent = '#1c7ed6'): void {
+    const { ctx } = this;
+    const cx = btn.x + btn.w * 0.52;
+    const cy = btn.y + btn.h / 2;
+    // 张角更大：横向跨度更大、竖向更扁
+    const armX = Math.min(11, btn.w * 0.32);
+    const armY = Math.min(9, btn.h * 0.28);
+    ctx.save();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx + armX * 0.15, cy - armY);
+    ctx.lineTo(cx - armX, cy);
+    ctx.lineTo(cx + armX * 0.15, cy + armY);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** 弹窗关闭：无圆底，描线 ×。 */
+  private drawPanelCloseX(btn: UiButton, accent = '#1c7ed6'): void {
+    const { ctx } = this;
+    const cx = btn.x + btn.w / 2;
+    const cy = btn.y + btn.h / 2;
+    const arm = Math.min(9, btn.w * 0.28);
+    ctx.save();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx - arm, cy - arm);
+    ctx.lineTo(cx + arm, cy + arm);
+    ctx.moveTo(cx + arm, cy - arm);
+    ctx.lineTo(cx - arm, cy + arm);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   /** 启动或续上循环 BGM（静音时跳过；按钮音效后微信常把 BGM 掐掉） */
   private tryStartBgm(): void {
@@ -3174,6 +3795,93 @@ export class WxCanvasGameApp {
     return '广告还在加载';
   }
 
+  private boosterIdFromButton(
+    id: 'booster_hammer' | 'booster_shuffle' | 'booster_extra',
+  ): BoosterId {
+    if (id === 'booster_hammer') {
+      return 'hammer';
+    }
+    if (id === 'booster_shuffle') {
+      return 'shuffle';
+    }
+    return 'extraMoves';
+  }
+
+  private async requestBoosterRefill(id: BoosterId): Promise<void> {
+    const channel = this.session.getBoosterRefillChannel(id);
+    if (channel === 'none') {
+      this.notifyUser('现在不能领道具', '暂时不能领');
+      return;
+    }
+    if (channel === 'ad') {
+      this.notifyUser('正在打开广告…', '正在打开广告');
+      const result = await this.runDuringAd(() => this.session.watchAdForBooster(id));
+      this.clearAdPrompt();
+      if (result === 'revived') {
+        this.onBoosterRefillGranted(id, 'ad');
+      } else {
+        this.notifyUser(this.adWatchTip(result), this.adWatchNativeTitle(result));
+      }
+      return;
+    }
+    this.boosterShareScene = channel === 'friend' ? 'booster_friend' : 'booster_group';
+    this.pendingBoosterShare = id;
+    this.pendingBoosterShareAtMs = this.nowMs || Date.now();
+    const opened = this.share.shareToFriend();
+    this.boosterShareScene = null;
+    if (!opened) {
+      this.pendingBoosterShareAtMs = 0;
+      this.settlePendingBoosterShare();
+      return;
+    }
+    this.notifyUser(
+      channel === 'friend' ? '转发给 1 个好友就能领' : '转发到群就能再领 1 个',
+      channel === 'friend' ? '转发好友' : '转发到群',
+    );
+    setTimeout(() => {
+      this.settlePendingBoosterShare();
+    }, 700);
+  }
+
+  private settlePendingBoosterShare(): void {
+    const id = this.pendingBoosterShare;
+    if (!id) {
+      return;
+    }
+    const elapsed = (this.nowMs || Date.now()) - this.pendingBoosterShareAtMs;
+    if (elapsed < 280) {
+      return;
+    }
+    this.pendingBoosterShare = null;
+    const channel = this.session.getBoosterRefillChannel(id);
+    if (channel !== 'friend' && channel !== 'group') {
+      return;
+    }
+    if (!this.session.claimBoosterShare(id)) {
+      return;
+    }
+    this.onBoosterRefillGranted(id, channel);
+  }
+
+  private onBoosterRefillGranted(id: BoosterId, channel: BoosterRefillChannel): void {
+    if (id === 'hammer') {
+      this.hammerTargeting = true;
+      this.hammerCursor = { x: this.width / 2, y: this.height * 0.45 };
+      this.notifyUser(
+        channel === 'ad' ? '看广告获得锤子，点一格砸掉' : '已获得锤子，点一格砸掉',
+        '已获得锤子',
+      );
+      return;
+    }
+    if (id === 'shuffle') {
+      this.boardView.clearSelection();
+      this.syncBoardView();
+      this.notifyUser('小动物重新排列啦！', '已重排');
+      return;
+    }
+    this.notifyUser(`步数 +${5} · 剩余 ${this.session.getMovesLeft()}`, '步数+5');
+  }
+
   /** 画布提示 + 微信 Toast，点底部广告时一定看得到。 */
   private notifyUser(text: string, nativeTitle?: string): void {
     this.statusText = text;
@@ -3211,6 +3919,7 @@ export class WxCanvasGameApp {
       id === 'recommend' ||
       id === 'post' ||
       id === 'invite' ||
+      id === 'claim_shuffle' ||
       id === 'resume'
     ) {
       this.session.playUiSfx();
@@ -3248,6 +3957,13 @@ export class WxCanvasGameApp {
       return;
     }
 
+    if (id === 'claim_shuffle') {
+      if (this.session.claimDailyShuffle()) {
+        this.notifyUser('重排 x1 已到账', '领取成功');
+      }
+      return;
+    }
+
     if (id === 'club') {
       this.openGameClub();
       return;
@@ -3281,7 +3997,22 @@ export class WxCanvasGameApp {
 
     if (id === 'invite') {
       this.share.shareToFriend();
-      this.notifyUser('发给新朋友，对方通关后双方各得锤子', '邀请好友');
+      return;
+    }
+
+    if (id === 'leaderboard') {
+      void (async () => {
+        await this.session.ensureWxUserProfile();
+        await this.refreshLeaderboardView();
+        this.openOverlay('leaderboard');
+      })();
+      return;
+    }
+
+    if (id === 'profile_skip') {
+      markWxProfileAsked();
+      this.destroyUserInfoAuthButton();
+      this.closeOverlay();
       return;
     }
 
@@ -3307,18 +4038,7 @@ export class WxCanvasGameApp {
 
     if (id === 'booster_hammer') {
       if (this.session.getBoosterCount('hammer') <= 0) {
-        this.notifyUser('正在打开广告…', '正在打开广告');
-        const result = await this.runDuringAd(() =>
-          this.session.watchAdForBooster('hammer'),
-        );
-        this.clearAdPrompt();
-        if (result === 'revived') {
-          this.hammerTargeting = true;
-          this.hammerCursor = { x: this.width / 2, y: this.height * 0.45 };
-          this.notifyUser('看广告获得锤子，点一格砸掉', '已获得锤子');
-        } else {
-          this.notifyUser(this.adWatchTip(result), this.adWatchNativeTitle(result));
-        }
+        await this.requestBoosterRefill('hammer');
         return;
       }
       this.hammerTargeting = !this.hammerTargeting;
@@ -3340,18 +4060,7 @@ export class WxCanvasGameApp {
         return;
       }
       if (this.session.getBoosterCount('shuffle') <= 0) {
-        this.notifyUser('正在打开广告…', '正在打开广告');
-        const result = await this.runDuringAd(() =>
-          this.session.watchAdForBooster('shuffle'),
-        );
-        this.clearAdPrompt();
-        if (result === 'revived') {
-          this.boardView.clearSelection();
-          this.syncBoardView();
-          this.notifyUser('小动物重新排列啦！', '已重排');
-        } else {
-          this.notifyUser(this.adWatchTip(result), this.adWatchNativeTitle(result));
-        }
+        await this.requestBoosterRefill('shuffle');
         return;
       }
       if (!this.session.useShuffle()) {
@@ -3375,17 +4084,7 @@ export class WxCanvasGameApp {
         }
         return;
       }
-      this.notifyUser('正在打开广告…', '正在打开广告');
-      const result = await this.runDuringAd(() => this.session.watchAdToAddMoves());
-      this.clearAdPrompt();
-      if (result === 'revived') {
-        this.notifyUser(
-          `看广告 +${5} 步 · 剩余 ${this.session.getMovesLeft()}`,
-          '步数+5',
-        );
-      } else {
-        this.notifyUser(this.adWatchTip(result), this.adWatchNativeTitle(result));
-      }
+      await this.requestBoosterRefill('extraMoves');
       return;
     }
 
@@ -3454,6 +4153,7 @@ export class WxCanvasGameApp {
         this.notifyUser(this.adWatchTip(result), this.adWatchNativeTitle(result));
       }
       if (result === 'revived') {
+        this.closeOverlay();
         this.mode = 'playing';
         this.pendingResult = null;
         this.resultFx.stop();
@@ -3470,7 +4170,7 @@ export class WxCanvasGameApp {
       await this.session.retryLevel();
       this.mode = 'playing';
       this.buriedFx.clear();
-      this.statusText = '';
+      this.applyLevelEntryTip(this.session.getLevelConfig()?.id ?? 0);
       this.pendingResult = null;
       this.offerCleanPrompt = false;
       this.resultFx.stop();
@@ -3497,7 +4197,7 @@ export class WxCanvasGameApp {
         return;
       }
       this.mode = 'playing';
-      this.statusText = '';
+      this.applyLevelEntryTip(this.session.getLevelConfig()?.id ?? 0);
       this.pendingResult = null;
       this.offerCleanPrompt = false;
       this.resultFx.stop();
@@ -3511,8 +4211,105 @@ export class WxCanvasGameApp {
     }
   }
 
-  private openOverlay(kind: 'settings' | 'howto' | 'notice'): void {
+  private async refreshLeaderboardView(): Promise<void> {
+    const view = await this.session.loadFriendLeaderboard();
+    this.boardViewModel = view;
+    for (const row of view.rows) {
+      if (row.avatarUrl) {
+        this.prefetchAvatar(row.avatarUrl);
+      }
+    }
+    this.requestPaint();
+  }
+
+  /**
+   * 首次进入 / 冷启动进大厅：可选授权头像昵称。
+   * 已授权或已问过则不再打扰。
+   */
+  private maybeOfferLaunchProfileAuth(): void {
+    if (this.mode !== 'lobby') {
+      return;
+    }
+    if (hasAskedWxProfile()) {
+      return;
+    }
+    const cached = readCachedWxProfile(this.session.getInviteCode());
+    if (hasRealWxProfile(cached)) {
+      markWxProfileAsked();
+      return;
+    }
+    // 延后一帧，等大厅画完再挂原生按钮
+    setTimeout(() => {
+      if (this.mode !== 'lobby' || this.overlay !== 'none') {
+        return;
+      }
+      if (hasAskedWxProfile() || hasRealWxProfile(readCachedWxProfile(this.session.getInviteCode()))) {
+        return;
+      }
+      this.openOverlay('profile_welcome');
+      this.mountLaunchProfileAuthButton();
+    }, 400);
+  }
+
+  private mountLaunchProfileAuthButton(): void {
+    this.destroyUserInfoAuthButton();
+    if (this.overlay !== 'profile_welcome') {
+      return;
+    }
+    const panelW = Math.min(320, this.width - 40);
+    const body = ((noticeJson as { profileWelcome?: { body?: string } }).profileWelcome)?.body
+      ?? '授权后，好友排行会显示你的头像和昵称。也可跳过，不影响游玩。';
+    this.ctx.font = '13px sans-serif';
+    const lines = this.wrapText(body, panelW - 40);
+    const panelH = 168 + lines.length * 18;
+    const panelY = Math.max(80, this.height * 0.28);
+    const btnW = Math.min(220, panelW - 48);
+    const btnH = 40;
+    // 原生按钮叠在「暂不授权」上方，与 drawProfileWelcomePanel 对齐
+    const left = (this.width - btnW) / 2;
+    const top = panelY + panelH - 36 - 12 - btnH;
+    const welcome = (noticeJson as { profileWelcome?: { btn?: string; ok?: string; fail?: string } }).profileWelcome;
+    this.userInfoAuthButton = mountWxUserInfoAuthButton({
+      left,
+      top,
+      width: btnW,
+      height: btnH,
+      text: welcome?.btn ?? '授权头像昵称',
+      onProfile: () => {
+        markWxProfileAsked();
+        this.destroyUserInfoAuthButton();
+        this.closeOverlay();
+        this.notifyUser(welcome?.ok ?? '头像昵称已保存', '授权成功');
+      },
+      onFail: (message) => {
+        // 失败不阻断；记为已问过，避免每次进大厅都弹
+        markWxProfileAsked();
+        this.destroyUserInfoAuthButton();
+        this.closeOverlay();
+        showAuthFailModal(welcome?.fail ?? message);
+      },
+    });
+  }
+
+  private destroyUserInfoAuthButton(): void {
+    if (!this.userInfoAuthButton) {
+      return;
+    }
+    try {
+      this.userInfoAuthButton.destroy();
+    } catch {
+      // ignore
+    }
+    this.userInfoAuthButton = null;
+  }
+
+  private openOverlay(kind: Exclude<PageOverlay, 'none'>): void {
+    if (kind !== 'profile_welcome') {
+      this.destroyUserInfoAuthButton();
+    }
     this.overlay = kind;
+    this.leaderboardScrollY = 0;
+    this.leaderboardDrag = null;
     this.hammerTargeting = false;
     this.hammerCursor = null;
     this.boardView.onPointerCancel();
@@ -3520,18 +4317,19 @@ export class WxCanvasGameApp {
     this.requestPaint();
   }
 
+  /** 进游戏不再自动弹公告；设置里仍可手动打开。 */
   private maybeOpenLobbyNotice(): void {
-    if (this.mode !== 'lobby' || this.session.hasSeenNotice(noticeJson.id)) {
-      return;
-    }
-    this.openOverlay('notice');
+    return;
   }
 
   private closeOverlay(): void {
     if (this.overlay === 'notice') {
       void this.session.markNoticeSeen(noticeJson.id);
     }
+    this.destroyUserInfoAuthButton();
     this.overlayFromSettings = false;
+    this.leaderboardScrollY = 0;
+    this.leaderboardDrag = null;
     this.overlay = 'none';
     this.syncLobbyBanner();
     this.requestPaint();
@@ -3543,7 +4341,7 @@ export class WxCanvasGameApp {
     this.kickRenderLoop();
   }
 
-  /** 设置里「发表贴图」：合成带小游戏码的海报，不截设置弹窗。 */
+  /** 首页「发表贴图」：合成带小游戏码的海报。 */
   private async publishOfficialAccountPost(): Promise<void> {
     const post = this.buildOfficialAccountPost();
     this.closeOverlay();
@@ -3565,7 +4363,6 @@ export class WxCanvasGameApp {
       opened = await this.share.sharePoster(shot);
     }
     this.restoreAfterShareSheet();
-    this.openOverlay('settings');
     this.statusText = opened
       ? '可把海报发到公众号 / 朋友圈'
       : '请用右上角 ··· 转发，或到公众号发贴图';
@@ -3644,10 +4441,142 @@ export class WxCanvasGameApp {
     return {
       title: '从想法到上线：我们为什么用微信做一款没有内购的萌宠三消',
       content:
-        '《萌宠粉碎消》是一款微信小游戏：7×7 棋盘滑动红狐、蓝兔、绿蛙、黄鸡、紫猫，三连消除；四连/L/T 出闪光，五连出超级猫头鹰。过关自动进限时粉碎加分，总分满 1500 可选清洁模式（清洁不加主线分）。全程无内购，点树上的马卡龙就能开玩。#来微信做个小程序',
+        '《萌宠粉碎消》是一款微信小游戏：7×7 棋盘滑动红狐、蓝兔、绿蛙、黄鸡、紫猫，三连消除；四连/L/T 出闪光，五连出超级猫头鹰。过关自动进限时粉碎加分，总分满 1500 可选清洁模式（清洁不加主线分）。全程无内购，沿糖果梯子闯关、冲进糖果屋就能开玩。#来微信做个小程序',
       tags,
       recommendTitle,
     };
+  }
+
+  /** 6–20 进关/重试/下一关：艺术字「难度提升」。 */
+  private applyLevelEntryTip(levelId: number): void {
+    const art = levelDifficultyArt(levelId);
+    if (art) {
+      this.statusText = '';
+      this.difficultyArt = {
+        title: art.title,
+        subtitle: art.subtitle,
+        startMs: this.nowMs || Date.now(),
+        durationMs: 2800,
+      };
+      this.requestPaint();
+      return;
+    }
+    this.statusText = '';
+    this.difficultyArt = null;
+  }
+
+  /** 进关艺术字：描边糖果色主标题 + 章节副标，弹入后淡出。 */
+  private drawDifficultyArtTip(): void {
+    const tip = this.difficultyArt;
+    if (!tip || this.mode !== 'playing') {
+      return;
+    }
+    const now = this.nowMs || Date.now();
+    const elapsed = now - tip.startMs;
+    if (elapsed >= tip.durationMs) {
+      this.difficultyArt = null;
+      return;
+    }
+    const t = elapsed / tip.durationMs;
+    // 0–18% 弹入，中间轻晃，末 28% 上飘淡出
+    let scale = 1;
+    let alpha = 1;
+    let lift = 0;
+    if (t < 0.18) {
+      const u = t / 0.18;
+      const bounce = Math.sin(u * Math.PI);
+      scale = 0.55 + 0.55 * bounce + 0.12 * Math.sin(u * Math.PI * 2);
+      alpha = Math.min(1, u * 1.4);
+    } else if (t > 0.72) {
+      const u = (t - 0.72) / 0.28;
+      alpha = 1 - u * u;
+      lift = -18 * u;
+      scale = 1 + 0.06 * u;
+    } else {
+      scale = 1 + 0.03 * Math.sin((now - tip.startMs) * 0.008);
+    }
+
+    const { ctx, width } = this;
+    const cx = width / 2;
+    const cy = this.getHudBottom() + 52 + lift;
+    const titleSize = Math.max(34, Math.min(44, Math.round(width * 0.11)));
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    // 柔光底晕
+    const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, titleSize * 2.2);
+    glow.addColorStop(0, 'rgba(255, 200, 120, 0.45)');
+    glow.addColorStop(0.55, 'rgba(255, 140, 160, 0.18)');
+    glow.addColorStop(1, 'rgba(255, 140, 160, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, tip.subtitle ? -6 : 0, titleSize * 2.1, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.font = `bold ${titleSize}px sans-serif`;
+    ctx.shadowColor = 'rgba(180, 60, 40, 0.35)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 3;
+    // 外圈深描边
+    ctx.strokeStyle = 'rgba(120, 40, 30, 0.88)';
+    ctx.lineWidth = Math.max(8, Math.round(titleSize * 0.22));
+    ctx.strokeText(tip.title, 0, tip.subtitle ? -10 : 0);
+    // 白描边
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = 'rgba(255, 252, 245, 0.98)';
+    ctx.lineWidth = Math.max(5, Math.round(titleSize * 0.12));
+    ctx.strokeText(tip.title, 0, tip.subtitle ? -10 : 0);
+    // 糖果渐变填充
+    const grad = ctx.createLinearGradient(0, -titleSize * 0.55, 0, titleSize * 0.55);
+    grad.addColorStop(0, '#ffe066');
+    grad.addColorStop(0.45, '#ff922b');
+    grad.addColorStop(1, '#ff6b6b');
+    ctx.fillStyle = grad;
+    ctx.fillText(tip.title, 0, tip.subtitle ? -10 : 0);
+
+    if (tip.subtitle) {
+      const subSize = Math.max(13, Math.min(16, Math.round(titleSize * 0.38)));
+      ctx.font = `bold ${subSize}px sans-serif`;
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+      ctx.lineWidth = 3.5;
+      ctx.strokeText(tip.subtitle, 0, titleSize * 0.42);
+      ctx.fillStyle = '#c2255c';
+      ctx.fillText(tip.subtitle, 0, titleSize * 0.42);
+    }
+
+    // 两侧小星点
+    const sparkleT = (now - tip.startMs) * 0.01;
+    for (const side of [-1, 1]) {
+      const sx = side * (titleSize * 1.55 + Math.sin(sparkleT + side) * 3);
+      const sy = -8 + Math.cos(sparkleT * 1.3 + side) * 4;
+      const sr = 3.2 + Math.sin(sparkleT * 2 + side) * 0.8;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.beginPath();
+      for (let i = 0; i < 4; i += 1) {
+        const a = (i / 4) * Math.PI * 2 - Math.PI / 2;
+        const r = i % 2 === 0 ? sr : sr * 0.4;
+        const px = sx + Math.cos(a) * r;
+        const py = sy + Math.sin(a) * r;
+        if (i === 0) {
+          ctx.moveTo(px, py);
+        } else {
+          ctx.lineTo(px, py);
+        }
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.restore();
   }
 
   private async enterLevel(levelId: number): Promise<void> {
@@ -3665,7 +4594,7 @@ export class WxCanvasGameApp {
     this.mode = 'playing';
     this.buriedFx.clear();
     this.interceptLobbyBanner();
-    this.statusText = '';
+    this.applyLevelEntryTip(levelId);
     this.pendingResult = null;
     this.offerCleanPrompt = false;
     this.hammerTargeting = false;
@@ -3684,7 +4613,13 @@ export class WxCanvasGameApp {
   }
 
   private hitButton(x: number, y: number): UiButton | null {
-    // 大厅关卡：圆形热区 + 取圆心最近（容错半径更大）
+    if (this.mode === 'lobby' && this.overlay === 'none') {
+      const side = this.hitLobbySideAction(x, y);
+      if (side) {
+        return side;
+      }
+    }
+    // 大厅关卡：整条矩形热区（含数字圆与云朵），重叠时取中心更近的
     if (this.mode === 'lobby' && this.overlay === 'none') {
       let best: UiButton | null = null;
       let bestDist = Number.POSITIVE_INFINITY;
@@ -3692,35 +4627,24 @@ export class WxCanvasGameApp {
         if (btn.id !== 'level') {
           continue;
         }
+        if (
+          x < btn.x ||
+          x > btn.x + btn.w ||
+          y < btn.y ||
+          y > btn.y + btn.h
+        ) {
+          continue;
+        }
         const cx = btn.x + btn.w / 2;
         const cy = btn.y + btn.h / 2;
-        const r = Math.min(btn.w, btn.h) / 2;
         const dist = Math.hypot(x - cx, y - cy);
-        if (dist <= r && dist < bestDist) {
+        if (dist < bestDist) {
           best = btn;
           bestDist = dist;
         }
       }
       if (best) {
         return best;
-      }
-      // 点按时才吸附；滑动选关会误触
-      let near: UiButton | null = null;
-      let nearDist = 36;
-      for (const btn of this.buttons) {
-        if (btn.id !== 'level') {
-          continue;
-        }
-        const cx = btn.x + btn.w / 2;
-        const cy = btn.y + btn.h / 2;
-        const dist = Math.hypot(x - cx, y - cy);
-        if (dist < nearDist) {
-          near = btn;
-          nearDist = dist;
-        }
-      }
-      if (near) {
-        return near;
       }
     }
 
@@ -3742,76 +4666,127 @@ export class WxCanvasGameApp {
     return null;
   }
 
+  private hitLobbySideAction(x: number, y: number): UiButton | null {
+    for (let i = this.buttons.length - 1; i >= 0; i -= 1) {
+      const btn = this.buttons[i]!;
+      if (
+        btn.id !== 'invite' &&
+        btn.id !== 'howto' &&
+        btn.id !== 'settings' &&
+        btn.id !== 'claim_shuffle' &&
+        btn.id !== 'recommend' &&
+        btn.id !== 'club'
+      ) {
+        continue;
+      }
+      const pad = btn.hitPad ?? 0;
+      if (
+        x >= btn.x - pad &&
+        x <= btn.x + btn.w + pad &&
+        y >= btn.y - pad &&
+        y <= btn.y + btn.h + pad
+      ) {
+        return btn;
+      }
+    }
+    return null;
+  }
+
   private draw(): void {
     const { ctx } = this;
     this.buttons.length = 0;
 
-    const bgMode = this.mode === 'lobby' ? 'lobby' : 'level';
-    this.sceneBg.draw(
-      ctx,
-      {
-        lobby: this.bgLobby,
-        level: this.bgLevel,
-        lobbyCloudPages: this.lobbyCloudPages,
-      },
-      bgMode,
-      this.nowMs || Date.now(),
-      bgMode === 'lobby' ? this.lobbyCamY : 0,
-    );
+    // iOS 刷新 / 切回前台后缓冲常是透明黑；先铺底再画，避免整页黑屏
+    try {
+      ctx.fillStyle = this.mode === 'lobby' ? '#a7f0d4' : '#b6e8fc';
+      ctx.fillRect(0, 0, this.width, this.height);
+    } catch {
+      // ignore
+    }
 
-    if (this.mode === 'lobby') {
-      this.drawLobby();
+    try {
+      const bgMode = this.mode === 'lobby' ? 'lobby' : 'level';
+      this.sceneBg.draw(
+        ctx,
+        {
+          lobby: this.bgLobby,
+          level: this.bgLevel,
+          lobbyCloudPages: this.lobbyCloudPages,
+        },
+        bgMode,
+        this.nowMs || Date.now(),
+        bgMode === 'lobby' ? this.lobbyCamY : 0,
+      );
+
+      if (this.mode === 'lobby') {
+        this.drawLobby();
+        this.drawNavChips();
+        this.drawLobbySideActions();
+        this.drawPageOverlay();
+        return;
+      }
+
+      this.drawHud();
+      if (
+        this.mode === 'playing' ||
+        this.mode === 'result' ||
+        this.mode === 'crush' ||
+        this.mode === 'clean'
+      ) {
+        ctx.save();
+        if (
+          this.shakeMs > 0 &&
+          (this.mode === 'playing' ||
+            this.mode === 'crush' ||
+            this.mode === 'clean' ||
+            this.mode === 'result')
+        ) {
+          const mag =
+            this.mode === 'result'
+              ? Math.min(10, this.shakeMs / 16)
+              : Math.min(7, this.shakeMs / 18);
+          ctx.translate(
+            Math.sin(this.nowMs * 0.08) * mag,
+            Math.cos(this.nowMs * 0.11) * mag,
+          );
+        }
+        this.drawBoard();
+        if (this.mode === 'crush' || this.mode === 'clean') {
+          this.drawCrushOverlays();
+          this.drawCrushGuide();
+        } else if (this.mode === 'playing') {
+          this.drawMatchJuiceOverlays();
+        }
+        ctx.restore();
+      }
+      if (this.mode === 'crush') {
+        this.drawCrushChrome();
+      }
+      if (this.mode === 'clean') {
+        this.drawCleanChrome();
+      }
+      if (this.mode === 'playing') {
+        this.drawBoosterBar();
+      }
+      this.drawActionToast();
+      this.drawDifficultyArtTip();
+      if (this.hammerTargeting) {
+        this.drawHammerCursor();
+      }
+      if (this.mode === 'result') {
+        this.drawResultOverlay();
+      }
       this.drawNavChips();
       this.drawPageOverlay();
-      return;
-    }
-
-    this.drawHud();
-    if (
-      this.mode === 'playing' ||
-      this.mode === 'result' ||
-      this.mode === 'crush' ||
-      this.mode === 'clean'
-    ) {
-      const { ctx } = this;
-      ctx.save();
-      if (this.shakeMs > 0 && (this.mode === 'playing' || this.mode === 'crush' || this.mode === 'clean' || this.mode === 'result')) {
-        const mag =
-          this.mode === 'result'
-            ? Math.min(10, this.shakeMs / 16)
-            : Math.min(7, this.shakeMs / 18);
-        ctx.translate(
-          Math.sin(this.nowMs * 0.08) * mag,
-          Math.cos(this.nowMs * 0.11) * mag,
-        );
+    } catch (err) {
+      console.error('[crush-crush] draw failed', err);
+      try {
+        ctx.fillStyle = this.mode === 'lobby' ? '#a7f0d4' : '#b6e8fc';
+        ctx.fillRect(0, 0, this.width, this.height);
+      } catch {
+        // ignore
       }
-      this.drawBoard();
-      if (this.mode === 'crush' || this.mode === 'clean') {
-        this.drawCrushOverlays();
-        this.drawCrushGuide();
-      } else if (this.mode === 'playing') {
-        this.drawMatchJuiceOverlays();
-      }
-      ctx.restore();
     }
-    if (this.mode === 'crush') {
-      this.drawCrushChrome();
-    }
-    if (this.mode === 'clean') {
-      this.drawCleanChrome();
-    }
-    if (this.mode === 'playing') {
-      this.drawBoosterBar();
-    }
-    this.drawActionToast();
-    if (this.hammerTargeting) {
-      this.drawHammerCursor();
-    }
-    if (this.mode === 'result') {
-      this.drawResultOverlay();
-    }
-    this.drawNavChips();
-    this.drawPageOverlay();
   }
 
   /** 锤子瞄准时绘制跟随指针的锤子光标 */
@@ -3852,7 +4827,7 @@ export class WxCanvasGameApp {
   }
 
   /**
-   * 首页大厅：第 1 屏树上 1-5；其后每 5 关一朵糖果云，按配置表总关数翻页。
+   * 首页大厅：关卡列表夹在标题与底栏提示之间；云朵盖在糖果条之上。
    */
   private drawLobby(): void {
     const { height } = this;
@@ -3861,48 +4836,447 @@ export class WxCanvasGameApp {
     const currentId = this.resolveEntryLevelId();
     const page = lobbyPageIndex(this.lobbyCamY, height);
     const maxPage = lobbyMaxPageIndex(this.session.getLevelCount());
-    const hideBelowY = this.getNavChipFrame().y - 10;
-
-    if (page > 0) {
-      this.drawLobbySkyTitle(page);
-    }
+    const hideBelowY = this.lobbyContentTop();
+    const { bandTop: hideAboveY } = this.getLobbyLadderLayout();
 
     const drawNodes = nodes
       .filter(
         (node) =>
           isLobbyNodeOnScreen(node, height) &&
-          isLobbyNodeExposed(node, this.lobbyCamY, height, hideBelowY),
+          isLobbyNodeExposed(node, this.lobbyCamY, height, hideBelowY, hideAboveY),
       )
-      .sort((a, b) => b.nodeIndex - a.nodeIndex);
+      .sort((a, b) => a.levelId - b.levelId);
+
+    this.drawLobbyLadderTrail(drawNodes, height);
 
     for (const node of drawNodes) {
       const unlocked = this.session.isLevelUnlocked(node.levelId);
       const cleared = this.session.isLevelCleared(node.levelId);
       const isCurrent = unlocked && node.levelId === currentId && !cleared;
-      const r = node.hitR;
 
+      const hit = lobbyLevelHitRect(node);
       this.buttons.push({
         id: 'level',
         levelId: node.levelId,
-        x: node.x - r,
-        y: node.y - r,
-        w: r * 2,
-        h: r * 2,
+        x: hit.x,
+        y: hit.y,
+        w: hit.w,
+        h: hit.h,
         label: String(node.levelId),
       });
 
-      this.drawLobbyMacaronVisual(node, unlocked, cleared, isCurrent, now);
+      this.drawLobbyLevelBar(node, unlocked, cleared, isCurrent, now);
     }
+
+    // 云朵在糖果条上层
+    this.drawLobbyCloudDecors(drawNodes, height);
+
+    // 标题区固定：上滑后仍用左侧品牌样式，不再切到粉字顶栏
+    this.drawLobbyBrandCopy();
 
     this.drawLobbySwipeHint(page, maxPage, now);
     this.drawLobbyPageDots(page, maxPage);
     this.drawLobbyStatusCaption();
-    this.drawLobbyPreviewUnlockHint(page);
+    this.drawLobbyNoticeBubble(now);
   }
 
-  /** 未解锁等提示画在树干标语处，不再压住底部按钮。 */
+  /** 首页公告冷色泡泡：左下↔右上乒乓循环，文案轮播，点一下打开公告。 */
+  private drawLobbyNoticeBubble(nowMs: number): void {
+    if (this.overlay !== 'none' || this.lobbyCamY > this.height * 0.18) {
+      return;
+    }
+    const lines = lobbyNoticeBubbleLines({
+      body: noticeJson.body,
+      bubbles: (noticeJson as { bubbles?: string[] }).bubbles,
+    });
+    if (lines.length === 0) {
+      return;
+    }
+    const cycle = lobbyNoticeBubbleCycle(nowMs, lines.length);
+    const drift = lobbyNoticeBubbleDrift(nowMs);
+    const primary = lines[cycle.index] ?? lines[0]!;
+    const secondary =
+      cycle.nextOpacity > 0.02 ? lines[cycle.nextIndex] ?? '' : '';
+
+    const { ctx } = this;
+    ctx.save();
+    ctx.font = 'bold 12px sans-serif';
+    const frame = layoutLobbyNoticeBubble({
+      width: this.width,
+      height: this.height,
+      statusBarHeight: this.statusBarHeight,
+      contentTop: this.lobbyContentTop(),
+      progress: drift.progress,
+      text: primary.length >= secondary.length ? primary : secondary,
+      measureWidth: (text) => ctx.measureText(text).width,
+    });
+
+    const bob = Math.sin(nowMs / 680) * this.fxAmt(2.2, 1);
+    const x = frame.x;
+    const y = frame.y + bob;
+    const { w, h } = frame;
+    const alpha = drift.opacity;
+
+    // 阴影：与 HUD 糖果枝同系深蓝
+    ctx.globalAlpha = 0.18 * alpha;
+    ctx.fillStyle = '#1c4b7a';
+    this.roundRectPath(x + 1, y + 3, w, h, h / 2);
+    ctx.fill();
+
+    // 填充：对齐对局步数条冷色（lite → mid），白边
+    ctx.globalAlpha = alpha;
+    const fill = ctx.createLinearGradient(x, y, x, y + h);
+    fill.addColorStop(0, 'rgba(255, 255, 255, 0.98)');
+    fill.addColorStop(0.4, 'rgba(232, 248, 255, 0.97)');
+    fill.addColorStop(1, 'rgba(208, 235, 255, 0.96)');
+    ctx.fillStyle = fill;
+    this.roundRectPath(x, y, w, h, h / 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2.4;
+    this.roundRectPath(x + 0.5, y + 0.5, w - 1, h - 1, h / 2 - 0.5);
+    ctx.stroke();
+    // 外圈淡天蓝，贴合棋盘槽描边
+    ctx.strokeStyle = 'rgba(116, 192, 252, 0.55)';
+    ctx.lineWidth = 1;
+    this.roundRectPath(x - 0.5, y - 0.5, w + 1, h + 1, h / 2 + 0.5);
+    ctx.stroke();
+
+    // 顶部高光
+    ctx.globalAlpha = 0.5 * alpha;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    this.roundRectPath(x + 8, y + 3, w - 16, h * 0.34, h * 0.2);
+    ctx.fill();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 12px sans-serif';
+    // 字色对齐 HUD ink
+    const ink = '#1864ab';
+    if (cycle.opacity > 0.02) {
+      ctx.globalAlpha = cycle.opacity * alpha;
+      ctx.fillStyle = ink;
+      ctx.fillText(primary, x + w / 2, y + h / 2 + 0.5);
+    }
+    if (secondary && cycle.nextOpacity > 0.02) {
+      ctx.globalAlpha = cycle.nextOpacity * alpha;
+      ctx.fillStyle = ink;
+      ctx.fillText(secondary, x + w / 2, y + h / 2 + 0.5);
+    }
+    ctx.restore();
+
+    this.buttons.push({
+      id: 'notice',
+      x,
+      y,
+      w,
+      h,
+      label: '',
+      hitPad: 4,
+    });
+  }
+
+  /** 关卡列表左右两侧糖点轨，连接编号糖果（对齐设计稿）。 */
+  private drawLobbyLadderTrail(
+    nodes: ReadonlyArray<LobbyLevelNode>,
+    height: number,
+  ): void {
+    const pts = lobbyLadderSideTrailPoints(nodes, height);
+    if (pts.length === 0) {
+      return;
+    }
+    const { ctx } = this;
+    ctx.save();
+    for (const p of pts) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle =
+        p.tone === 'cream' ? 'rgba(255,236,153,0.86)' : 'rgba(255,255,255,0.92)';
+      ctx.fill();
+      if (p.r >= 3.6) {
+        ctx.beginPath();
+        ctx.arc(p.x - p.r * 0.22, p.y - p.r * 0.28, p.r * 0.35, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  private drawLobbyCloudDecors(
+    nodes: ReadonlyArray<LobbyLevelNode>,
+    height: number,
+  ): void {
+    const pts = lobbyCloudDecorPoints(nodes, height);
+    const cloudBig = this.uiIcons.get('ladder-cloud');
+    const cloudSm = this.uiIcons.get('ladder-cloudSm');
+    const { ctx } = this;
+    for (let i = 0; i < pts.length; i += 1) {
+      const p = pts[i]!;
+      const cloud = i % 2 === 0 ? cloudBig ?? cloudSm : cloudSm ?? cloudBig;
+      // 贴在数字对侧条尾，尺寸跟圆走（略放大，更像设计稿蓬松云）
+      const drawW = Math.max(38, Math.min(68, p.circleR * 2.15));
+      if (cloud && (cloud.width || 0) > 0 && (cloud.height || 0) > 0) {
+        const iw = cloud.width || drawW;
+        const ih = cloud.height || drawW;
+        const drawH = drawW * (ih / Math.max(1, iw));
+        const x = p.x;
+        const y = p.y;
+        ctx.save();
+        ctx.globalAlpha = 0.98;
+        ctx.drawImage(cloud, x - drawW / 2, y - drawH / 2, drawW, drawH);
+        ctx.restore();
+      } else {
+        const r = drawW * 0.28;
+        const x = p.x;
+        const y = p.y;
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,255,255,0.96)';
+        ctx.beginPath();
+        ctx.arc(x, y - r * 0.1, r, 0, Math.PI * 2);
+        ctx.arc(x - r * 0.85, y + r * 0.25, r * 0.78, 0, Math.PI * 2);
+        ctx.arc(x + r * 0.85, y + r * 0.25, r * 0.78, 0, Math.PI * 2);
+        ctx.arc(x - r * 0.3, y - r * 0.55, r * 0.65, 0, Math.PI * 2);
+        ctx.arc(x + r * 0.3, y - r * 0.55, r * 0.65, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  /** 设计稿胶囊关卡条：已通关 / 当前 / 锁定。 */
+  private drawLobbyLevelBar(
+    node: LobbyLevelNode,
+    unlocked: boolean,
+    cleared: boolean,
+    isCurrent: boolean,
+    nowMs: number,
+  ): void {
+    const state = !unlocked ? 'locked' : isCurrent ? 'current' : cleared ? 'cleared' : 'locked';
+    const theme = ladderThemeForLevel(node.levelId, state);
+    const { ctx } = this;
+    const { barX, barY, barW, barH, circleR, x: cx, y: cy } = node;
+    const r = barH / 2;
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(80, 120, 130, 0.22)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 4;
+    this.roundRectPath(barX, barY, barW, barH, r);
+    const barGrad = ctx.createLinearGradient(barX, barY, barX, barY + barH);
+    barGrad.addColorStop(0, theme.barTop);
+    barGrad.addColorStop(1, theme.barBottom);
+    ctx.fillStyle = barGrad;
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+    ctx.stroke();
+
+    if (theme.pattern === 'stripe') {
+      this.drawLobbyBarStripes(barX, barY, barW, barH, r, theme.stripe);
+    } else if (theme.pattern === 'sprinkle') {
+      this.drawLobbyBarSprinkles(barX, barY, barW, barH, node.levelId);
+    }
+
+    ctx.shadowColor = 'rgba(60, 90, 110, 0.28)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, circleR, 0, Math.PI * 2);
+    const cg = ctx.createLinearGradient(cx, cy - circleR, cx, cy + circleR);
+    cg.addColorStop(0, theme.circleTop);
+    cg.addColorStop(1, theme.circleBottom);
+    ctx.fillStyle = cg;
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.lineWidth = Math.max(3, circleR * 0.12);
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+
+    if (state === 'locked') {
+      const lock = this.uiIcons.get('ladder-lock');
+      const s = circleR * 1.1;
+      if (lock && (lock.width || 0) > 0) {
+        ctx.drawImage(lock, cx - s / 2, cy - s / 2, s, s);
+      } else {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.round(circleR * 0.9)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('锁', cx, cy + 1);
+      }
+    } else {
+      ctx.font = `bold ${Math.round(circleR * 1.05)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = Math.max(3, Math.round(circleR * 0.14));
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+      ctx.fillStyle = '#ffffff';
+      const label = String(node.levelId);
+      ctx.strokeText(label, cx, cy + 1);
+      ctx.fillText(label, cx, cy + 1);
+    }
+
+    if (cleared && unlocked) {
+      const check = this.uiIcons.get('ladder-check');
+      const badge = circleR * 0.72;
+      const bx = cx + circleR * 0.62;
+      const by = cy - circleR * 0.62;
+      if (check && (check.width || 0) > 0) {
+        ctx.drawImage(check, bx - badge / 2, by - badge / 2, badge, badge);
+      } else {
+        this.drawLobbyMacaronCheck(bx, by, badge * 0.55);
+      }
+    }
+
+    if (isCurrent) {
+      const star = this.uiIcons.get('ladder-star');
+      const badge = circleR * 0.7;
+      const bx = cx + circleR * 0.55;
+      const by = cy - circleR * 0.78;
+      if (star && (star.width || 0) > 0) {
+        const bob = Math.sin(nowMs * 0.006) * 2;
+        ctx.drawImage(star, bx - badge / 2, by - badge / 2 + bob, badge, badge);
+      }
+      if ('startTop' in theme) {
+        this.drawLobbyStartChip(node, theme.startTop, theme.startBottom);
+      }
+    } else if (cleared && unlocked) {
+      const score = this.session.getBestScore(node.levelId);
+      if (score > 0) {
+        this.drawLobbyScoreChip(node, score);
+      }
+    }
+
+    ctx.restore();
+  }
+
+  private drawLobbyBarStripes(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number,
+    color: string,
+  ): void {
+    const { ctx } = this;
+    ctx.save();
+    this.roundRectPath(x, y, w, h, r);
+    ctx.clip();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(6, h * 0.14);
+    ctx.lineCap = 'butt';
+    for (let i = -2; i < 14; i += 1) {
+      const sx = x + i * h * 0.55;
+      ctx.beginPath();
+      ctx.moveTo(sx, y + h + 4);
+      ctx.lineTo(sx + h * 1.15, y - 4);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  private drawLobbyBarSprinkles(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    seed: number,
+  ): void {
+    const { ctx } = this;
+    ctx.save();
+    this.roundRectPath(x, y, w, h, h / 2);
+    ctx.clip();
+    const colors = ['#ff8fab', '#ffe066', '#ffffff', '#74c0fc'];
+    for (let i = 0; i < 14; i += 1) {
+      const px = x + (((seed * 37 + i * 53) % 97) / 97) * w;
+      const py = y + (((seed * 19 + i * 29) % 71) / 71) * h;
+      ctx.fillStyle = colors[i % colors.length]!;
+      ctx.beginPath();
+      ctx.arc(px, py, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  private drawLobbyStartChip(
+    node: LobbyLevelNode,
+    top: string,
+    bottom: string,
+  ): void {
+    const { ctx } = this;
+    const chipW = Math.min(92, node.barW * 0.28);
+    const chipH = Math.min(34, node.barH * 0.55);
+    const chipX =
+      node.circleSide === 'left'
+        ? node.barX + node.barW - chipW - 16
+        : node.barX + 16;
+    const chipY = node.y - chipH / 2;
+    const g = ctx.createLinearGradient(chipX, chipY, chipX, chipY + chipH);
+    g.addColorStop(0, top);
+    g.addColorStop(1, bottom);
+    ctx.save();
+    ctx.shadowColor = 'rgba(180, 60, 40, 0.35)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 2;
+    this.roundRectPath(chipX, chipY, chipW, chipH, chipH / 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.stroke();
+    ctx.font = `bold ${Math.round(chipH * 0.55)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('开始', chipX + chipW / 2, chipY + chipH / 2 + 1);
+    ctx.restore();
+  }
+
+  private drawLobbyScoreChip(node: LobbyLevelNode, score: number): void {
+    const { ctx } = this;
+    const label = String(Math.max(0, Math.floor(score)));
+    ctx.save();
+    ctx.font = `bold ${Math.max(11, Math.round(node.barH * 0.28))}px sans-serif`;
+    const tw = ctx.measureText(label).width;
+    const chipW = tw + 18;
+    const chipH = Math.min(26, node.barH * 0.42);
+    const chipX =
+      node.circleSide === 'left'
+        ? node.barX + node.barW * 0.42
+        : node.barX + node.barW * 0.22;
+    const chipY = node.y - chipH / 2;
+    this.roundRectPath(chipX, chipY, chipW, chipH, chipH / 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.94)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.98)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#6b5b6e';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, chipX + chipW / 2, chipY + chipH / 2 + 0.5);
+    ctx.restore();
+  }
+
+
+  private lobbyContentTop(): number {
+    const daily = this.session.getDailyLoop();
+    return layoutLobbyBottom({
+      width: this.width,
+      height: this.height,
+      bannerReserve: this.mode === 'lobby' ? this.session.getLobbyBannerReservePx() : 0,
+      safeBottom: this.safeAreaBottom,
+      clearsToday: daily.clearsToday,
+      shuffleGranted: daily.playShuffleGranted,
+    }).contentTop;
+  }
+
+  /** 未解锁等提示画在树干标语处。树屏的文案由 drawLobbyTreePrompt 盖住底图。 */
   private drawLobbyStatusCaption(): void {
-    if (!this.statusText) {
+    if (!this.statusText || lobbyPageIndex(this.lobbyCamY, this.height) === 0) {
       return;
     }
     const { ctx, width } = this;
@@ -3922,26 +5296,6 @@ export class WxCanvasGameApp {
     ctx.strokeText(this.statusText, width / 2, y);
     ctx.fillStyle = '#c2255c';
     ctx.fillText(this.statusText, width / 2, y);
-    ctx.restore();
-  }
-
-  /** 开发/体验版提示：正式上线后仍按通关锁关。 */
-  private drawLobbyPreviewUnlockHint(page: number): void {
-    if (page > 0 || !this.session.isPreviewUnlockAll()) {
-      return;
-    }
-    const { ctx, width } = this;
-    const y = Math.max(this.statusBarHeight + 18, 36);
-    ctx.save();
-    ctx.font = 'bold 12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
-    ctx.lineWidth = 5;
-    ctx.strokeText('测试包：可点任意关', width / 2, y);
-    ctx.fillStyle = '#7048e8';
-    ctx.fillText('测试包：可点任意关', width / 2, y);
     ctx.restore();
   }
 
@@ -4099,8 +5453,7 @@ export class WxCanvasGameApp {
 
   private getLobbyLevelNodes(): LobbyLevelNode[] {
     const cover = this.getLobbyCoverRect();
-    const nav = this.getNavChipFrame();
-    const macaronR = lobbyMacaronRadius(cover.dw);
+    const { ceiling, step } = this.getLobbyLadderLayout();
     return layoutLobbyLevelNodes({
       vines: this.session.listLobbyVineNodes(),
       cover,
@@ -4108,7 +5461,21 @@ export class WxCanvasGameApp {
       width: this.width,
       height: this.height,
       camY: this.lobbyCamY,
-      maxCloudCenterY: nav.y - 36 - macaronR,
+      ladderBottomY: ceiling,
+      maxCloudCenterY: ceiling,
+      ladderStep: step,
+    });
+  }
+
+  /** 标题区～底栏留白后的带宽 → 首屏约 8 关紧凑步长（布局与相机共用）。 */
+  private getLobbyLadderLayout(): { ceiling: number; bandTop: number; step: number } {
+    const cover = this.getLobbyCoverRect();
+    const titleBandTop = lobbyLevelBandTop(cover, this.statusBarHeight);
+    const { h: barH } = lobbyBarSize(this.width, this.height);
+    return lobbyFirstScreenLadderLayout({
+      bandTop: titleBandTop,
+      contentTop: this.lobbyContentTop(),
+      barH,
     });
   }
 
@@ -4121,12 +5488,15 @@ export class WxCanvasGameApp {
       this.lobbyCamSnapFrom = 0;
       this.lobbyCamSnapAtMs = 0;
       this.lobbyCamVel = 0;
+      this.lobbySwipeHintShownAtMs = 0;
+      this.lobbySwipeHintDismissed = false;
     }
   }
 
   private getLobbyCamRange(): { min: number; max: number } {
-    const maxNode = lobbyMaxPageIndex(this.session.getLevelCount());
-    return { min: 0, max: lobbyCameraMax(maxNode, this.height) };
+    const total = this.session.getLevelCount();
+    const { step } = this.getLobbyLadderLayout();
+    return { min: 0, max: lobbyCameraMax(total, this.height, step) };
   }
 
   private beginLobbyDrag(x: number, y: number): void {
@@ -4153,6 +5523,7 @@ export class WxCanvasGameApp {
       drag.moved = true;
       this.lobbyCamUserHeld = true;
       this.lobbyCamAutoTarget = null;
+      this.lobbySwipeHintDismissed = true;
     }
     if (drag.moved) {
       const range = this.getLobbyCamRange();
@@ -4180,17 +5551,18 @@ export class WxCanvasGameApp {
       return false;
     }
     const range = this.getLobbyCamRange();
-    const maxPage = Math.round(range.max / Math.max(1, this.height));
-    this.lobbyCamVel = 0;
     this.lobbyCamUserHeld = false;
+    // 连续梯子：保留惯性，再轻吸附到最近糖豆步长
+    this.lobbyCamVel = Math.max(-1.8, Math.min(1.8, drag.velY));
     this.lobbyCamSnapFrom = this.lobbyCamY;
     this.lobbyCamSnapAtMs = this.nowMs || Date.now();
     this.lobbyCamAutoTarget = lobbySnapTarget(
       drag.camStart,
       this.lobbyCamY,
       this.height,
-      maxPage,
+      range.max,
       drag.velY,
+      this.getLobbyLadderLayout().step,
     );
     return true;
   }
@@ -4239,30 +5611,52 @@ export class WxCanvasGameApp {
     }
   }
 
-  private drawLobbySkyTitle(page: number): void {
+  /** 品牌主标题 + 副标题 +「20关后…」：固定在关卡列表上方，上滑不换样式。 */
+  private drawLobbyBrandCopy(): void {
     const { ctx, width } = this;
-    const y = Math.max(this.statusBarHeight + 26, 44);
-    const caption = lobbyPageCaption(page, this.session.getLevelCount());
-    const comingSoon = lobbyComingSoonLine(page, this.session.getLevelCount());
+    const cover = this.getLobbyCoverRect();
+    const titleY = lobbyBrandAnchorY(cover, 0, LOBBY_TITLE_UY);
+    const subY = lobbyBrandAnchorY(cover, 0, LOBBY_SUBTITLE_UY);
+    if (subY < this.statusBarHeight) {
+      return;
+    }
+    const titleSize = Math.max(28, Math.min(40, Math.round(cover.dh * 0.048)));
+    const subSize = Math.max(13, Math.min(17, Math.round(cover.dh * 0.018)));
+    const teaser = lobbyComingSoonLine();
+    const teaserY = subY + Math.max(22, cover.dh * 0.028);
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = 'bold 20px sans-serif';
-    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
-    ctx.lineWidth = 6;
     ctx.lineJoin = 'round';
-    ctx.strokeText('糖果云朵', width / 2, y);
-    ctx.fillStyle = '#ff8cc8';
-    ctx.fillText('糖果云朵', width / 2, y);
-    if (caption) {
+
+    ctx.font = `bold ${titleSize}px sans-serif`;
+    ctx.shadowColor = 'rgba(70, 130, 180, 0.35)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetY = 2;
+    ctx.strokeStyle = 'rgba(140, 200, 230, 0.95)';
+    ctx.lineWidth = Math.max(5, Math.round(titleSize * 0.18));
+    ctx.strokeText(LOBBY_BRAND_TITLE, width / 2, titleY);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(LOBBY_BRAND_TITLE, width / 2, titleY);
+
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.font = `bold ${subSize}px sans-serif`;
+    ctx.strokeStyle = 'rgba(120, 180, 215, 0.7)';
+    ctx.lineWidth = 3;
+    ctx.strokeText(LOBBY_BRAND_SUBTITLE, width / 2, subY);
+    ctx.fillStyle = 'rgba(255,255,255,0.98)';
+    ctx.fillText(LOBBY_BRAND_SUBTITLE, width / 2, subY);
+
+    if (teaser) {
+      // 警示色：与原先糖果屋/敬请期待同款，区别于标题白字
       ctx.font = 'bold 12px sans-serif';
-      ctx.fillStyle = '#7a3e6a';
-      ctx.fillText(caption, width / 2, y + 22);
-    }
-    if (comingSoon) {
-      ctx.font = 'bold 12px sans-serif';
+      ctx.strokeStyle = 'rgba(255,255,255,0.96)';
+      ctx.lineWidth = 4;
+      ctx.strokeText(teaser, width / 2, teaserY);
       ctx.fillStyle = '#c2255c';
-      ctx.fillText(comingSoon, width / 2, y + (caption ? 42 : 22));
+      ctx.fillText(teaser, width / 2, teaserY);
     }
     ctx.restore();
   }
@@ -4272,49 +5666,69 @@ export class WxCanvasGameApp {
       return;
     }
     const { ctx, width } = this;
-    const bob = Math.sin(nowMs / 260) * this.fxAmt(5, 3);
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
     if (page < maxPage) {
-      const y =
-        page <= 0
-          ? Math.max(this.statusBarHeight + 18, 36) + bob
-          : Math.max(this.statusBarHeight + 88, 108) + bob;
-      ctx.fillStyle = 'rgba(255,255,255,0.9)';
-      this.roundRectPath(width / 2 - 72, y - 16, 144, 32, 16);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 140, 200, 0.95)';
-      ctx.lineWidth = 2;
-      this.roundRectPath(width / 2 - 72, y - 16, 144, 32, 16);
-      ctx.stroke();
-      this.drawSwipeChevrons(width / 2 - 54, y, -1);
-      ctx.font = 'bold 12px sans-serif';
-      ctx.fillStyle = '#c2255c';
-      ctx.fillText(page <= 0 ? '上滑看云朵关卡' : '上滑继续', width / 2 + 12, y);
+      if (this.lobbySwipeHintShownAtMs <= 0) {
+        this.lobbySwipeHintShownAtMs = nowMs;
+      }
+      const alpha = lobbySwipeHintOpacity(
+        this.lobbySwipeHintShownAtMs,
+        nowMs,
+        this.lobbySwipeHintDismissed,
+      );
+      if (alpha <= 0.01) {
+        this.lobbySwipeHintDismissed = true;
+      } else {
+        const bob = Math.sin(nowMs / 520) * this.fxAmt(4, 2.5);
+        const frame = layoutLobbyMoreLevelsHint(width, this.statusBarHeight, bob);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        // 右缘半圆把手：左端圆、右端画出屏幕
+        ctx.fillStyle = 'rgba(32, 40, 56, 0.42)';
+        this.roundRectPath(frame.x, frame.y, width - frame.x + 10, frame.h, frame.r);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+        ctx.lineWidth = 1;
+        this.roundRectPath(frame.x, frame.y, width - frame.x + 10, frame.h, frame.r);
+        ctx.stroke();
+        this.drawSwipeChevrons(frame.chevronX, frame.cy, -1);
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.95)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(
+          page <= 0 ? LOBBY_MORE_LEVELS_HINT : '上滑继续',
+          frame.textX,
+          frame.cy,
+        );
+        ctx.restore();
+      }
     }
     if (page > 0) {
       const nav = this.getNavChipFrame();
+      const bob = Math.sin(nowMs / 520) * this.fxAmt(3, 2);
       const y = nav.y - 44 - bob * 0.35;
+      ctx.save();
       ctx.font = 'bold 11px sans-serif';
-      ctx.fillStyle = 'rgba(122, 62, 106, 0.85)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(255,255,255,0.78)';
       ctx.fillText('下滑返回', width / 2, y);
+      ctx.restore();
     }
-    ctx.restore();
   }
 
   private drawSwipeChevrons(x: number, y: number, dir: number): void {
     const { ctx } = this;
-    ctx.strokeStyle = '#ff6baf';
-    ctx.lineWidth = 2.4;
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+    ctx.lineWidth = 2;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     for (let i = 0; i < 2; i += 1) {
       const oy = dir * i * 5;
       ctx.beginPath();
-      ctx.moveTo(x - 6, y + 4 + oy);
-      ctx.lineTo(x, y - 2 + oy);
-      ctx.lineTo(x + 6, y + 4 + oy);
+      ctx.moveTo(x - 5, y + 3.5 + oy);
+      ctx.lineTo(x, y - 1.5 + oy);
+      ctx.lineTo(x + 5, y + 3.5 + oy);
       ctx.stroke();
     }
   }
@@ -4327,17 +5741,14 @@ export class WxCanvasGameApp {
     const total = maxPage + 1;
     const x = width - 16;
     const gap = Math.min(14, (height * 0.22) / Math.max(1, total - 1));
-    const r = 4;
-    const startY = height * 0.38 - ((total - 1) * gap) / 2;
+    const r = 3.5;
+    const startY = height * 0.42 - ((total - 1) * gap) / 2;
     ctx.save();
     for (let i = 0; i < total; i += 1) {
       ctx.beginPath();
-      ctx.arc(x, startY + i * gap, i === page ? 5 : r, 0, Math.PI * 2);
-      ctx.fillStyle = i === page ? '#ff6baf' : 'rgba(255,255,255,0.7)';
+      ctx.arc(x, startY + i * gap, i === page ? 4.5 : r, 0, Math.PI * 2);
+      ctx.fillStyle = i === page ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.38)';
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 140, 200, 0.85)';
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
     }
     ctx.restore();
   }
@@ -4567,11 +5978,6 @@ export class WxCanvasGameApp {
       },
       { id: 'booster_shuffle', iconKey: 'shuffle', count: stock.shuffle },
       { id: 'booster_extra', iconKey: 'extra', count: stock.extraMoves },
-      {
-        id: 'mute',
-        iconKey: this.session.isMuted() ? 'mute' : 'sound',
-        count: -1,
-      },
     ];
     const totalW = items.length * size + (items.length - 1) * gap;
     const nav = this.getNavChipFrame();
@@ -4580,16 +5986,10 @@ export class WxCanvasGameApp {
     let x = leftReserve + Math.floor((avail - totalW) / 2);
 
     for (const item of items) {
-      const extraAd =
-        (item.id === 'booster_extra' &&
-          item.count === 0 &&
-          this.session.allowsRewardedBooster('extraMoves')) ||
-        (item.id === 'booster_hammer' &&
-          item.count === 0 &&
-          this.session.allowsRewardedBooster('hammer')) ||
-        (item.id === 'booster_shuffle' &&
-          item.count === 0 &&
-          this.session.allowsRewardedBooster('shuffle'));
+      const boosterId = this.boosterIdFromButton(item.id);
+      const refill =
+        item.count === 0 ? this.session.getBoosterRefillChannel(boosterId) : 'none';
+      const extraAd = refill !== 'none';
       const disabled = item.count === 0 && !extraAd;
       const btn: UiButton = {
         id: item.id,
@@ -4605,7 +6005,7 @@ export class WxCanvasGameApp {
         disabled,
         active: !!item.active,
         count: extraAd ? -1 : item.count,
-        ad: extraAd,
+        badge: extraAd && refill !== 'none' ? boosterRefillBadge(refill) : undefined,
       });
       x += size + gap;
     }
@@ -4647,7 +6047,7 @@ export class WxCanvasGameApp {
   private drawBoosterIconButton(
     btn: UiButton,
     iconKey: keyof typeof BOOSTER_ICON_SRC,
-    opts: { disabled: boolean; active: boolean; count: number; ad?: boolean },
+    opts: { disabled: boolean; active: boolean; count: number; badge?: string },
   ): void {
     const { ctx } = this;
     const img = this.uiIcons.get(iconKey);
@@ -4716,10 +6116,12 @@ export class WxCanvasGameApp {
       ctx.fillText(fallback, cx, cy);
     }
 
-    if (opts.ad) {
+    if (opts.badge) {
       const bx = btn.x + btn.w - 2;
       const by = btn.y + 6;
-      ctx.fillStyle = '#ff922b';
+      const fill =
+        opts.badge === '好友' ? '#12b886' : opts.badge === '群' ? '#339af0' : '#ff922b';
+      ctx.fillStyle = fill;
       this.roundRectPath(bx - 18, by - 9, 36, 18, 9);
       ctx.fill();
       ctx.strokeStyle = '#ffffff';
@@ -4730,7 +6132,7 @@ export class WxCanvasGameApp {
       ctx.font = 'bold 9px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('广告', bx, by + 0.5);
+      ctx.fillText(opts.badge, bx, by + 0.5);
     } else if (opts.count >= 0) {
       const bx = btn.x + btn.w - 4;
       const by = btn.y + 4;
@@ -4866,11 +6268,11 @@ export class WxCanvasGameApp {
       fillBottom: string;
       border: string;
     } = {
-      track: '#ffe8cc',
-      fillTop: '#ffc078',
-      fillMid: '#ff922b',
-      fillBottom: '#f76707',
-      border: '#ffa94d',
+      track: '#d0ebff',
+      fillTop: '#a5d8ff',
+      fillMid: '#4dabf7',
+      fillBottom: '#228be6',
+      border: '#74c0fc',
     };
     if (inClean && clean) {
       progress = this.hudBurstBarDisplay;
@@ -4886,11 +6288,11 @@ export class WxCanvasGameApp {
       progress = this.hudBurstBarDisplay;
       goalLabel = `粉碎 +${crush.crushScore}`;
       barTheme = {
-        track: '#ffe3e3',
-        fillTop: '#ff9f7a',
-        fillMid: '#ff6b6b',
-        fillBottom: '#e03131',
-        border: '#ff8787',
+        track: '#c5f6fa',
+        fillTop: '#66d9e8',
+        fillMid: '#22b8cf',
+        fillBottom: '#1098ad',
+        border: '#3bc9db',
       };
     } else if (hudGoal.text) {
       progress = hudGoal.progress;
@@ -4920,7 +6322,7 @@ export class WxCanvasGameApp {
       ctx.scale(this.hudScorePunch, this.hudScorePunch);
       ctx.translate(-labelX, -labelY);
     }
-    ctx.strokeStyle = 'rgba(90,40,20,0.35)';
+    ctx.strokeStyle = inBurst ? 'rgba(12, 80, 100, 0.35)' : 'rgba(24, 100, 160, 0.35)';
     ctx.lineWidth = 3.5;
     ctx.strokeText(goalLabel, labelX, labelY);
     ctx.fillStyle = '#ffffff';
@@ -4935,15 +6337,15 @@ export class WxCanvasGameApp {
       const tipY = this.getHudBottom() + 2;
       ctx.font = '12px sans-serif';
       const tipW = Math.min(frame.width, ctx.measureText(this.statusText).width + 20);
-      this.drawHudPill(frame.left, tipY, tipW, 22, 'rgba(255,248,230,0.95)', '#ffb347');
-      ctx.fillStyle = '#d35400';
+      this.drawHudPill(frame.left, tipY, tipW, 22, 'rgba(232,248,255,0.95)', '#74c0fc');
+      ctx.fillStyle = '#1864ab';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillText(this.statusText, frame.left + 10, tipY + 11);
     }
   }
 
-  /** 糖果枝配色：对局粉 / 粉碎红 / 清洁薄荷绿 */
+  /** 糖果枝配色：对局 / 粉碎 / 清洁统一天蓝冷色 */
   private getHudCandyPalette(
     inClean: boolean,
     inCrush: boolean,
@@ -4967,21 +6369,21 @@ export class WxCanvasGameApp {
     }
     if (inCrush) {
       return {
-        deep: '#e03131',
-        mid: '#ff8787',
-        lite: '#ffe3e3',
-        ink: '#c92a2a',
-        inkSoft: '#fa5252',
-        shadow: '#862e2e',
+        deep: '#1098ad',
+        mid: '#3bc9db',
+        lite: '#c5f6fa',
+        ink: '#0b7285',
+        inkSoft: '#15aabf',
+        shadow: '#0b4f5c',
       };
     }
     return {
-      deep: '#f06595',
-      mid: '#ffa8cc',
-      lite: '#ffe3f0',
-      ink: '#a61e4d',
-      inkSoft: '#e64980',
-      shadow: '#862e4b',
+      deep: '#339af0',
+      mid: '#74c0fc',
+      lite: '#d0ebff',
+      ink: '#1864ab',
+      inkSoft: '#4dabf7',
+      shadow: '#1c4b7a',
     };
   }
 
@@ -5061,8 +6463,8 @@ export class WxCanvasGameApp {
     ctx.arc(cx, cy, r + 1, -Math.PI * 0.9, -Math.PI * 0.18);
     ctx.stroke();
 
-    // 彩色描边
-    ctx.strokeStyle = opts.low ? '#ff6b6b' : '#ffffff';
+    // 彩色描边：步数紧张时用深蓝警示（冷色），不用红
+    ctx.strokeStyle = opts.low ? '#339af0' : '#ffffff';
     ctx.lineWidth = opts.low ? 3.2 : 2.2;
     ctx.beginPath();
     ctx.arc(cx, cy, r - 3.8, 0, Math.PI * 2);
@@ -5070,9 +6472,9 @@ export class WxCanvasGameApp {
 
     // 顶部糖珠
     const pearls = [
-      { x: -0.55, y: -0.82, color: '#ffe066' },
-      { x: 0.05, y: -0.95, color: '#ff85c0' },
-      { x: 0.58, y: -0.78, color: '#74c0fc' },
+      { x: -0.55, y: -0.82, color: '#a5d8ff' },
+      { x: 0.05, y: -0.95, color: '#74c0fc' },
+      { x: 0.58, y: -0.78, color: '#4dabf7' },
     ];
     for (const p of pearls) {
       ctx.fillStyle = p.color;
@@ -5081,12 +6483,12 @@ export class WxCanvasGameApp {
       ctx.fill();
     }
 
-    ctx.fillStyle = opts.low ? '#e03131' : c.inkSoft;
+    ctx.fillStyle = opts.low ? '#1c7ed6' : c.inkSoft;
     ctx.font = 'bold 11px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(opts.label, cx, cy - 9);
-    ctx.fillStyle = opts.low ? '#c92a2a' : c.ink;
+    ctx.fillStyle = opts.low ? '#1864ab' : c.ink;
     ctx.font = 'bold 19px sans-serif';
     ctx.fillText(opts.value, cx, cy + 8);
     ctx.restore();
@@ -5173,14 +6575,14 @@ export class WxCanvasGameApp {
 
     // 外阴影（软落地）
     ctx.save();
-    ctx.globalAlpha = 0.18;
-    ctx.fillStyle = '#8d6e4a';
+    ctx.globalAlpha = 0.16;
+    ctx.fillStyle = '#4a7090';
     this.roundRectPath(x + 1.5, y + 3, w, h, r);
     ctx.fill();
     ctx.restore();
 
     // 外轮廓底（偏白，衬出厚边）
-    ctx.fillStyle = '#fff8f0';
+    ctx.fillStyle = '#f1f8ff';
     this.roundRectPath(x, y, w, h, r);
     ctx.fill();
 
@@ -5663,8 +7065,8 @@ export class WxCanvasGameApp {
 
     // 软投影
     ctx.save();
-    ctx.globalAlpha = 0.2;
-    ctx.fillStyle = '#7a5a3a';
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = '#4a7090';
     this.roundRectPath(x + 2, y + 5, w, h, radius);
     ctx.fill();
     ctx.restore();
@@ -6270,11 +7672,14 @@ export class WxCanvasGameApp {
     const cs = layout.cellSize;
     const slotR = Math.max(6, Math.floor(cs * 0.18));
     const cloudy: Array<{ r: number; c: number; layers: number }> = [];
+    const keyOf = (r: number, c: number) => r * board.size.cols + c;
+    const layerAt = new Map<number, number>();
     for (let r = 0; r < board.size.rows; r += 1) {
       for (let c = 0; c < board.size.cols; c += 1) {
         const layers = this.getDisplayCloud(board, r, c);
         if (layers > 0) {
           cloudy.push({ r, c, layers });
+          layerAt.set(keyOf(r, c), layers);
         }
       }
     }
@@ -6282,48 +7687,155 @@ export class WxCanvasGameApp {
       return;
     }
 
-    const cloudyAt = (row: number, col: number) =>
-      row >= 0 &&
-      col >= 0 &&
-      row < board.size.rows &&
-      col < board.size.cols &&
-      this.getDisplayCloud(board, row, col) > 0;
+    const cloudyAt = (row: number, col: number) => layerAt.has(keyOf(row, col));
 
-    for (const cell of cloudy) {
-      const layers = cell.layers;
-      const left = cloudyAt(cell.r, cell.c - 1);
-      const right = cloudyAt(cell.r, cell.c + 1);
-      const up = cloudyAt(cell.r + 1, cell.c);
-      const down = cloudyAt(cell.r - 1, cell.c);
-      let x = layout.originX + cell.c * cs;
-      let y = layout.originY - (cell.r + 1) * cs;
-      let w = cs;
-      let h = cs;
-      const join = Math.max(3, Math.ceil(cs * 0.08));
-      if (left) {
-        x -= join;
-        w += join;
+    // 四连通成片，相邻棉花合成一块云
+    const visited = new Set<number>();
+    const blobs: Array<Array<{ r: number; c: number; layers: number }>> = [];
+    for (const seed of cloudy) {
+      const sk = keyOf(seed.r, seed.c);
+      if (visited.has(sk)) {
+        continue;
       }
-      if (right) {
-        w += join;
+      const blob: Array<{ r: number; c: number; layers: number }> = [];
+      const queue = [seed];
+      visited.add(sk);
+      while (queue.length > 0) {
+        const cur = queue.pop()!;
+        blob.push(cur);
+        const nbs: Array<[number, number]> = [
+          [cur.r + 1, cur.c],
+          [cur.r - 1, cur.c],
+          [cur.r, cur.c + 1],
+          [cur.r, cur.c - 1],
+        ];
+        for (const [nr, nc] of nbs) {
+          const nk = keyOf(nr, nc);
+          if (visited.has(nk) || !layerAt.has(nk)) {
+            continue;
+          }
+          visited.add(nk);
+          queue.push({ r: nr, c: nc, layers: layerAt.get(nk)! });
+        }
       }
-      if (up) {
-        y -= join;
-        h += join;
-      }
-      if (down) {
-        h += join;
-      }
-      const cx = layout.originX + (cell.c + 0.5) * cs;
-      const cy = layout.originY - (cell.r + 0.5) * cs;
+      blobs.push(blob);
+    }
+
+    const join = Math.max(6, Math.ceil(cs * 0.22));
+    const corner = Math.max(6, slotR * 0.7);
+
+    for (const blob of blobs) {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
       ctx.save();
-      this.roundRectPath(x, y, w, h, Math.max(4, slotR * 0.45));
+      ctx.beginPath();
+      for (const cell of blob) {
+        let x = layout.originX + cell.c * cs;
+        let y = layout.originY - (cell.r + 1) * cs;
+        let w = cs;
+        let h = cs;
+        if (cloudyAt(cell.r, cell.c - 1)) {
+          x -= join;
+          w += join;
+        }
+        if (cloudyAt(cell.r, cell.c + 1)) {
+          w += join;
+        }
+        if (cloudyAt(cell.r + 1, cell.c)) {
+          y -= join;
+          h += join;
+        }
+        if (cloudyAt(cell.r - 1, cell.c)) {
+          h += join;
+        }
+        this.appendRoundRectPath(x, y, w, h, corner);
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x + w);
+        maxY = Math.max(maxY, y + h);
+      }
       ctx.clip();
-      ctx.fillStyle = layers <= 1 ? 'rgba(242, 246, 250, 0.38)' : '#f2f6fa';
-      ctx.fillRect(x, y, w, h);
-      this.drawThickCotton(cx, cy, cs * 0.98, cell.r, cell.c, layers);
+
+      // 整片底雾，把格缝糊成一块
+      const wornBlob = blob.every((cell) => cell.layers <= 1);
+      const midX = (minX + maxX) / 2;
+      const midY = (minY + maxY) / 2;
+      const span = Math.max(maxX - minX, maxY - minY);
+      const sheet = ctx.createRadialGradient(midX, midY - span * 0.08, span * 0.05, midX, midY, span * 0.72);
+      if (wornBlob) {
+        sheet.addColorStop(0, 'rgba(255,255,255,0.5)');
+        sheet.addColorStop(0.55, 'rgba(234,242,250,0.32)');
+        sheet.addColorStop(1, 'rgba(214,226,240,0.1)');
+      } else {
+        sheet.addColorStop(0, 'rgba(255,255,255,0.82)');
+        sheet.addColorStop(0.5, 'rgba(238,246,252,0.62)');
+        sheet.addColorStop(1, 'rgba(216,228,242,0.2)');
+      }
+      ctx.fillStyle = sheet;
+      ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+
+      // 格心棉团 + 邻格桥接，视觉连成一片
+      for (const cell of blob) {
+        const cx = layout.originX + (cell.c + 0.5) * cs;
+        const cy = layout.originY - (cell.r + 0.5) * cs;
+        this.drawThickCotton(cx, cy, cs * 1.12, cell.r, cell.c, cell.layers);
+        // 只向右 / 上桥接，避免重复画
+        if (cloudyAt(cell.r, cell.c + 1)) {
+          this.drawThickCotton(
+            cx + cs * 0.5,
+            cy,
+            cs * 0.88,
+            cell.r,
+            cell.c + 17,
+            Math.min(cell.layers, layerAt.get(keyOf(cell.r, cell.c + 1)) ?? cell.layers),
+          );
+        }
+        if (cloudyAt(cell.r + 1, cell.c)) {
+          this.drawThickCotton(
+            cx,
+            cy - cs * 0.5,
+            cs * 0.88,
+            cell.r + 17,
+            cell.c,
+            Math.min(cell.layers, layerAt.get(keyOf(cell.r + 1, cell.c)) ?? cell.layers),
+          );
+        }
+      }
       ctx.restore();
     }
+  }
+
+  /** 往当前 path 追加圆角矩形子路径（不 beginPath），用于棉花并集裁剪。 */
+  private appendRoundRectPath(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number,
+  ): void {
+    const { ctx } = this;
+    const width = Math.max(0, w);
+    const height = Math.max(0, h);
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+    const rr = Math.max(0, Math.min(r, width / 2, height / 2));
+    if (rr <= 0) {
+      ctx.rect(x, y, width, height);
+      return;
+    }
+    ctx.moveTo(x + rr, y);
+    ctx.lineTo(x + width - rr, y);
+    ctx.arc(x + width - rr, y + rr, rr, -Math.PI / 2, 0);
+    ctx.lineTo(x + width, y + height - rr);
+    ctx.arc(x + width - rr, y + height - rr, rr, 0, Math.PI / 2);
+    ctx.lineTo(x + rr, y + height);
+    ctx.arc(x + rr, y + height - rr, rr, Math.PI / 2, Math.PI);
+    ctx.lineTo(x, y + rr);
+    ctx.arc(x + rr, y + rr, rr, Math.PI, Math.PI * 1.5);
+    ctx.closePath();
   }
 
   private drawThickCotton(
@@ -6337,47 +7849,103 @@ export class WxCanvasGameApp {
     const { ctx } = this;
     const worn = layers <= 1;
     ctx.save();
-    ctx.globalAlpha = worn ? 0.42 : 1;
+    ctx.globalAlpha = worn ? 0.52 : 1;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    const puffCount = worn ? 4 : 6;
+    // 中心蓬松底光，让整团有厚度
+    const core = ctx.createRadialGradient(
+      cx - s * 0.12,
+      cy - s * 0.18,
+      s * 0.06,
+      cx,
+      cy,
+      s * 0.5,
+    );
+    core.addColorStop(0, worn ? 'rgba(255,255,255,0.62)' : 'rgba(255,255,255,0.92)');
+    core.addColorStop(0.5, worn ? 'rgba(236,244,252,0.34)' : 'rgba(232,242,252,0.55)');
+    core.addColorStop(1, 'rgba(200,214,232,0)');
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(cx, cy, s * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 粉彩棉团：左上高光 + 右下柔阴影，对齐萌宠球的立体感
+    const pastels: Array<[number, number, number]> = [
+      [255, 246, 250],
+      [234, 246, 255],
+      [236, 252, 244],
+      [246, 238, 255],
+      [255, 250, 236],
+      [240, 248, 255],
+    ];
+    const puffCount = worn ? 5 : 7;
     for (let i = 0; i < puffCount; i += 1) {
       const u = this.cottonHash(row, col, i);
       const v = this.cottonHash(row, col, i + 18);
       const w = this.cottonHash(row, col, i + 36);
-      const px = cx + (u - 0.5) * s * 0.58;
-      const py = cy + (v - 0.5) * s * 0.58;
-      const pr = s * (0.18 + w * 0.16);
-      ctx.fillStyle = `rgba(${210 + Math.round(w * 30)}, ${220 + Math.round(u * 20)}, ${228 + Math.round(v * 18)}, ${worn ? 0.55 : 0.92})`;
+      const px = cx + (u - 0.5) * s * 0.52;
+      const py = cy + (v - 0.5) * s * 0.5;
+      const pr = s * (0.2 + w * 0.17);
+      const [pr_, pg, pb] = pastels[i % pastels.length]!;
+      const hx = px - pr * 0.32;
+      const hy = py - pr * 0.38;
+      const g = ctx.createRadialGradient(hx, hy, pr * 0.06, px + pr * 0.08, py + pr * 0.18, pr);
+      g.addColorStop(0, `rgba(255,255,255,${worn ? 0.88 : 1})`);
+      g.addColorStop(
+        0.42,
+        `rgba(${pr_}, ${pg}, ${pb}, ${worn ? 0.72 : 0.94})`,
+      );
+      g.addColorStop(
+        0.82,
+        `rgba(${Math.max(180, pr_ - 36)}, ${Math.max(190, pg - 28)}, ${Math.max(205, pb - 18)}, ${worn ? 0.28 : 0.48})`,
+      );
+      g.addColorStop(1, 'rgba(186, 200, 218, 0.02)');
+      ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(px, py, pr, 0, Math.PI * 2);
       ctx.fill();
+
+      // 顶部小高光点，蹭一点糖果质感
+      if (!worn || i % 2 === 0) {
+        ctx.fillStyle = `rgba(255,255,255,${worn ? 0.45 : 0.7})`;
+        ctx.beginPath();
+        ctx.arc(hx + pr * 0.08, hy + pr * 0.1, pr * 0.16, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
-    const fiber = 6;
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-    ctx.lineWidth = 1.1;
+    // 柔边丝光：短弧代替硬划线，更像绒毛反光
+    const fiber = worn ? 3 : 5;
     for (let i = 0; i < fiber; i += 1) {
       const u = this.cottonHash(row, col, i + 80);
       const v = this.cottonHash(row, col, i + 102);
       const ang = u * Math.PI * 2;
-      const len = s * (0.12 + v * 0.22);
-      const ox = cx + (u - 0.5) * s * 0.5;
-      const oy = cy + (v - 0.5) * s * 0.5;
+      const len = s * (0.1 + v * 0.16);
+      const ox = cx + (u - 0.5) * s * 0.42;
+      const oy = cy + (v - 0.5) * s * 0.42;
+      ctx.strokeStyle = `rgba(255,255,255,${worn ? 0.35 : 0.55})`;
+      ctx.lineWidth = 1.4;
       ctx.beginPath();
-      ctx.moveTo(ox, oy);
-      ctx.lineTo(ox + Math.cos(ang) * len, oy + Math.sin(ang) * len);
+      ctx.arc(ox, oy, len, ang - 0.55, ang + 0.55);
       ctx.stroke();
     }
 
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    const dots = 5;
+    // 细碎亮点
+    const dots = worn ? 3 : 6;
     for (let i = 0; i < dots; i += 1) {
       const u = this.cottonHash(row, col, i + 280);
       const v = this.cottonHash(row, col, i + 300);
+      const dr = 0.9 + this.cottonHash(row, col, i + 320) * 1.4;
+      ctx.fillStyle = `rgba(255,255,255,${worn ? 0.5 : 0.78})`;
       ctx.beginPath();
-      ctx.arc(cx + (u - 0.5) * s * 0.62, cy + (v - 0.5) * s * 0.62, 1.1, 0, Math.PI * 2);
+      ctx.arc(
+        cx + (u - 0.5) * s * 0.58,
+        cy + (v - 0.5) * s * 0.58,
+        dr,
+        0,
+        Math.PI * 2,
+      );
       ctx.fill();
     }
     ctx.restore();
@@ -7111,14 +8679,14 @@ export class WxCanvasGameApp {
     };
     this.buttons.push(extendBtn, skipBtn);
     this.drawCuteButton(extendBtn, {
-      top: '#ffb347',
-      bottom: '#ff8c42',
+      top: '#66d9e8',
+      bottom: '#1098ad',
       border: '#ffffff',
       gloss: true,
     });
     this.drawCuteButton(skipBtn, {
-      top: '#ff7eb3',
-      bottom: '#ff4d8d',
+      top: '#74c0fc',
+      bottom: '#1c7ed6',
       border: '#ffffff',
       gloss: true,
     });
@@ -7273,9 +8841,9 @@ export class WxCanvasGameApp {
 
     this.drawCuteCard(-panelW / 2, -panelH / 2, panelW, panelH, {
       radius: 24,
-      fillTop: isFail ? 'rgba(255,255,255,0.96)' : 'rgba(180, 235, 120, 0.98)',
-      fillBottom: isFail ? 'rgba(240,240,245,0.94)' : 'rgba(120, 200, 70, 0.96)',
-      border: isFail ? '#c5c8d0' : '#7bc84a',
+      fillTop: isFail ? 'rgba(255,255,255,0.97)' : 'rgba(180, 235, 120, 0.98)',
+      fillBottom: isFail ? 'rgba(232, 248, 255, 0.95)' : 'rgba(120, 200, 70, 0.96)',
+      border: isFail ? '#74c0fc' : '#7bc84a',
       borderWidth: 3,
       shadow: false,
       sparkle: !isFail,
@@ -7290,12 +8858,12 @@ export class WxCanvasGameApp {
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
     ctx.lineWidth = 5;
     ctx.strokeText(title, 0, -14);
-    ctx.fillStyle = isFail ? '#7f8c8d' : '#2d6a1f';
+    ctx.fillStyle = isFail ? '#1864ab' : '#2d6a1f';
     ctx.fillText(title, 0, -14);
     ctx.restore();
 
     ctx.font = 'bold 17px sans-serif';
-    ctx.fillStyle = isFail ? '#6b5344' : '#3d5c2e';
+    ctx.fillStyle = isFail ? '#4dabf7' : '#3d5c2e';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.save();
@@ -7304,7 +8872,7 @@ export class WxCanvasGameApp {
     ctx.restore();
     if (isFail) {
       ctx.font = 'bold 12px sans-serif';
-      ctx.fillStyle = '#8d6e63';
+      ctx.fillStyle = '#339af0';
       ctx.fillText('没关系，再试一次就好', 0, 42);
     }
     if (!isFail && crushBonus > 0) {
@@ -7379,12 +8947,12 @@ export class WxCanvasGameApp {
       const slide = (1 - easeOutBackLocal(stagger)) * 36;
       const palette =
         b.id === 'revive'
-          ? { top: '#ffc078', bottom: '#ff922b', border: '#ffffff', gloss: true }
+          ? { top: '#74c0fc', bottom: '#1c7ed6', border: '#ffffff', gloss: true }
           : b.id === 'next'
             ? { top: '#8ce99a', bottom: '#37b24d', border: '#ffffff', gloss: true }
             : b.id === 'lobby'
-              ? { top: '#a5d8ff', bottom: '#4dabf7', border: '#ffffff', gloss: true }
-              : { top: '#ffa8d4', bottom: '#ff6baf', border: '#ffffff', gloss: true };
+              ? { top: '#d0ebff', bottom: '#74c0fc', border: '#ffffff', gloss: true }
+              : { top: '#a5d8ff', bottom: '#339af0', border: '#ffffff', gloss: true };
       ctx.save();
       ctx.globalAlpha = stagger;
       this.drawCuteButton(
@@ -7552,10 +9120,10 @@ export class WxCanvasGameApp {
       const slide = (1 - easeOutBackLocal(stagger)) * 20;
       const palette =
         b.id === 'next'
-          ? { top: '#ffd43b', bottom: '#ff922b', border: '#ffffff', gloss: true }
+          ? { top: '#74c0fc', bottom: '#1c7ed6', border: '#ffffff', gloss: true }
           : b.id === 'lobby'
-            ? { top: '#a5d8ff', bottom: '#4dabf7', border: '#ffffff', gloss: true }
-            : { top: '#ffa8d4', bottom: '#ff6baf', border: '#ffffff', gloss: true };
+            ? { top: '#d0ebff', bottom: '#74c0fc', border: '#ffffff', gloss: true }
+            : { top: '#a5d8ff', bottom: '#339af0', border: '#ffffff', gloss: true };
       ctx.save();
       ctx.globalAlpha = stagger;
       this.drawCuteButton(
@@ -7695,6 +9263,7 @@ export class WxCanvasGameApp {
       borderWidth: number;
       shadow?: boolean;
       sparkle?: boolean;
+      sparkleColor?: string;
       nowMs?: number;
     },
   ): void {
@@ -7752,7 +9321,7 @@ export class WxCanvasGameApp {
         const twinkle = 0.45 + 0.55 * Math.abs(Math.sin(t + i));
         ctx.save();
         ctx.globalAlpha = twinkle;
-        ctx.fillStyle = '#ffd6ef';
+        ctx.fillStyle = style.sparkleColor ?? '#ffd6ef';
         ctx.beginPath();
         ctx.arc(x + d.dx, y + d.dy, 2.2, 0, Math.PI * 2);
         ctx.fill();
@@ -7766,7 +9335,13 @@ export class WxCanvasGameApp {
    */
   private drawCuteButton(
     btn: UiButton,
-    palette: { top: string; bottom: string; border: string; gloss?: boolean },
+    palette: {
+      top: string;
+      bottom: string;
+      border: string;
+      gloss?: boolean;
+      fontSize?: number;
+    },
     scale = 1,
   ): void {
     const { ctx } = this;
@@ -7800,32 +9375,36 @@ export class WxCanvasGameApp {
     ctx.fill();
 
     if (palette.gloss !== false) {
+      const insetX = btn.h <= 22 ? 3 : 6;
+      const insetY = btn.h <= 22 ? 2 : 4;
       ctx.save();
       ctx.globalAlpha = 0.5;
       ctx.fillStyle = 'rgba(255,255,255,0.72)';
       this.roundRectPath(
-        btn.x + 6,
-        btn.y + 4,
-        btn.w - 12,
+        btn.x + insetX,
+        btn.y + insetY,
+        btn.w - insetX * 2,
         btn.h * 0.38,
-        Math.max(8, r - 8),
+        Math.max(btn.h <= 22 ? 4 : 8, r - 8),
       );
       ctx.fill();
       ctx.restore();
     }
 
     ctx.strokeStyle = palette.border;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = btn.h <= 22 ? 1.5 : 2.5;
     this.roundRectPath(btn.x + 1.5, btn.y + 1.5, btn.w - 3, btn.h - 3, r - 1);
     ctx.stroke();
 
     if (btn.label) {
-      const fontSize = btn.h <= 28 ? 13 : btn.h <= 36 ? 15 : 17;
+      const fontSize =
+        palette.fontSize ??
+        (btn.h <= 22 ? 11 : btn.h <= 28 ? 12 : btn.h <= 36 ? 15 : 17);
       ctx.font = `bold ${fontSize}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.strokeStyle = 'rgba(120,40,90,0.25)';
-      ctx.lineWidth = 3;
+      ctx.lineWidth = fontSize <= 11 ? 2 : 3;
       ctx.strokeText(btn.label, cx, cy + 1);
       ctx.fillStyle = '#ffffff';
       ctx.fillText(btn.label, cx, cy);

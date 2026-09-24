@@ -2,5 +2,51 @@
   "id": "post20-gameplay",
   "title": "公告",
   "body": "20关后有新玩法，敬请期待",
-  "confirm": "知道了"
+  "confirm": "知道了",
+  "bubbles": [
+    "20关后有新玩法，敬请期待",
+    "沿糖果梯子闯关，冲进糖果屋！",
+    "邀请好友通关，双方各得锤子"
+  ],
+  "difficultyUp": "难度提升",
+  "difficultyUpCotton": "难度提升 · 棉花关开始",
+  "difficultyUpParty": "难度提升 · 异形关卡",
+  "difficultyUpIce": "难度提升 · 冰雪埋藏",
+  "leaderboard": {
+    "title": "好友排行",
+    "entry": "好友排行",
+    "passed": "你被 {name} 超过了",
+    "closeGap": "距离上一名只差 1 关，加油！",
+    "notify": "{name} 超过了你的排名",
+    "reward": "每周一结算，前 3 名得锤子 x{hammer}、重排 x{shuffle}",
+    "rewarded": "上周前 3 名结算：锤子 x{hammer}，重排 x{shuffle}",
+    "empty": "暂时还没有其他玩家上榜。",
+    "settled": "上周排行已结算，新的一周开始了",
+    "unavailable": "排行暂时打不开，请稍后再试。",
+    "stockFull": "{name}已有 9 个，这次没有再发放"
+  },
+  "profileWelcome": {
+    "title": "展示微信头像",
+    "body": "授权后，好友排行会显示你的头像和昵称。也可跳过，不影响游玩。",
+    "btn": "授权头像昵称",
+    "skip": "暂不授权",
+    "ok": "头像昵称已保存",
+    "fail": "暂时无法获取头像，不影响继续玩"
+  },
+  "dailyChallenge": {
+    "title": "今日挑战",
+    "entry": "今日挑战",
+    "level": "今天的挑战是第 {level} 关。每天 0 点重新抽一关。",
+    "reward": "完成可得重排 x{amount}，每天只领一次。",
+    "streak": "连续 {current}/{target} 天。满 {target} 天再得 +5步 x{streakAmount}。",
+    "pending": "今天还没完成。",
+    "done": "今天已经完成，奖励领过了。",
+    "board": "通关用时会记入好友周榜。",
+    "completed": "今日挑战完成",
+    "alreadyClaimed": "今天的奖励已经领过",
+    "stockFull": "{name}已有 9 个，这次没有再发放",
+    "wrongLevel": "这不是今天的挑战关",
+    "unavailable": "今日挑战暂时打不开，确认挑战服务已经启动。",
+    "missed": "今日挑战没记上"
+  }
 }
