@@ -288,6 +288,54 @@ interface Wx {
   }) => void;
   reportEvent?: (eventId: string, data?: Record<string, unknown>) => void;
   createCanvas: () => WxCanvas;
+  getUserInfo?: (options: {
+    withCredentials?: boolean;
+    lang?: string;
+    success?: (res: {
+      userInfo?: { nickName?: string; avatarUrl?: string; gender?: number };
+      errMsg: string;
+    }) => void;
+    fail?: (err: { errMsg: string }) => void;
+    complete?: () => void;
+  }) => void;
+  getUserProfile?: (options: {
+    desc: string;
+    lang?: string;
+    success?: (res: {
+      userInfo?: { nickName?: string; avatarUrl?: string; gender?: number };
+      errMsg: string;
+    }) => void;
+    fail?: (err: { errMsg: string }) => void;
+    complete?: () => void;
+  }) => void;
+  getSetting?: (options: {
+    success?: (res: { authSetting?: Record<string, boolean>; errMsg: string }) => void;
+    fail?: (err: { errMsg: string }) => void;
+    complete?: () => void;
+  }) => void;
+  createUserInfoButton?: (options: {
+    type: 'text' | 'image';
+    text?: string;
+    image?: string;
+    style: Record<string, string | number>;
+    withCredentials?: boolean;
+    lang?: string;
+  }) => {
+    show: () => void;
+    hide: () => void;
+    destroy: () => void;
+    onTap: (cb: (res: {
+      errMsg: string;
+      rawData?: string;
+      userInfo?: { nickName?: string; avatarUrl?: string };
+    }) => void) => void;
+    offTap?: (cb?: (...args: unknown[]) => void) => void;
+  };
+  requirePrivacyAuthorize?: (options: {
+    success?: () => void;
+    fail?: (err: { errMsg: string }) => void;
+    complete?: () => void;
+  }) => void;
   createImage: () => WxImage;
   vibrateShort?: (options?: { type?: 'heavy' | 'medium' | 'light' }) => void;
   showShareMenu?: (options: {

@@ -65,6 +65,12 @@ export function mergeDaily(local: DailyLoopData, remote: DailyLoopData): DailyLo
     adHammer: Math.max(flagsA.adHammer, flagsB.adHammer),
     adShuffle: Math.max(flagsA.adShuffle, flagsB.adShuffle),
     adExtra: Math.max(flagsA.adExtra, flagsB.adExtra),
+    shareFriendHammer: flagsA.shareFriendHammer || flagsB.shareFriendHammer,
+    shareFriendShuffle: flagsA.shareFriendShuffle || flagsB.shareFriendShuffle,
+    shareFriendExtra: flagsA.shareFriendExtra || flagsB.shareFriendExtra,
+    shareGroupHammer: flagsA.shareGroupHammer || flagsB.shareGroupHammer,
+    shareGroupShuffle: flagsA.shareGroupShuffle || flagsB.shareGroupShuffle,
+    shareGroupExtra: flagsA.shareGroupExtra || flagsB.shareGroupExtra,
     playShuffleGranted: flagsA.playShuffleGranted || flagsB.playShuffleGranted,
     playExtraGranted: flagsA.playExtraGranted || flagsB.playExtraGranted,
   };

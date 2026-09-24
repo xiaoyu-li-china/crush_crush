@@ -8,7 +8,8 @@
     DailyLoop: "crush.player.daily",
     Boosters: "crush.player.boosters",
     NoticeSeen: "crush.player.noticeSeen",
-    Invite: "crush.player.invite"
+    Invite: "crush.player.invite",
+    DeviceId: "crush.player.device"
   };
 
   // src/core/adapters/WxStorageAdapter.ts
@@ -95,6 +96,12 @@
     adHammer: 0,
     adShuffle: 0,
     adExtra: 0,
+    shareFriendHammer: false,
+    shareFriendShuffle: false,
+    shareFriendExtra: false,
+    shareGroupHammer: false,
+    shareGroupShuffle: false,
+    shareGroupExtra: false,
     playShuffleGranted: false,
     playExtraGranted: false
   };
@@ -104,9 +111,63 @@
       adHammer: Math.max(0, Math.floor((_a = raw == null ? void 0 : raw.adHammer) != null ? _a : 0)),
       adShuffle: Math.max(0, Math.floor((_b = raw == null ? void 0 : raw.adShuffle) != null ? _b : 0)),
       adExtra: Math.max(0, Math.floor((_c = raw == null ? void 0 : raw.adExtra) != null ? _c : 0)),
+      shareFriendHammer: !!(raw == null ? void 0 : raw.shareFriendHammer),
+      shareFriendShuffle: !!(raw == null ? void 0 : raw.shareFriendShuffle),
+      shareFriendExtra: !!(raw == null ? void 0 : raw.shareFriendExtra),
+      shareGroupHammer: !!(raw == null ? void 0 : raw.shareGroupHammer),
+      shareGroupShuffle: !!(raw == null ? void 0 : raw.shareGroupShuffle),
+      shareGroupExtra: !!(raw == null ? void 0 : raw.shareGroupExtra),
       playShuffleGranted: !!(raw == null ? void 0 : raw.playShuffleGranted),
       playExtraGranted: !!(raw == null ? void 0 : raw.playExtraGranted)
     };
+  }
+  function boosterRefillChannel(flags, id) {
+    if (id === "hammer") {
+      if (!flags.shareFriendHammer) {
+        return "friend";
+      }
+      if (!flags.shareGroupHammer) {
+        return "group";
+      }
+      return "ad";
+    }
+    if (id === "shuffle") {
+      if (!flags.shareFriendShuffle) {
+        return "friend";
+      }
+      if (!flags.shareGroupShuffle) {
+        return "group";
+      }
+      return "ad";
+    }
+    if (!flags.shareFriendExtra) {
+      return "friend";
+    }
+    if (!flags.shareGroupExtra) {
+      return "group";
+    }
+    return "ad";
+  }
+  function markBoosterShare(flags, id, channel) {
+    const next = { ...flags };
+    if (id === "hammer") {
+      if (channel === "friend") {
+        next.shareFriendHammer = true;
+      } else {
+        next.shareGroupHammer = true;
+      }
+    } else if (id === "shuffle") {
+      if (channel === "friend") {
+        next.shareFriendShuffle = true;
+      } else {
+        next.shareGroupShuffle = true;
+      }
+    } else if (channel === "friend") {
+      next.shareFriendExtra = true;
+    } else {
+      next.shareGroupExtra = true;
+    }
+    return next;
   }
   function bumpBoosterAd(flags, id) {
     const next = { ...flags };
@@ -118,6 +179,15 @@
       next.adExtra += 1;
     }
     return next;
+  }
+  function boosterRefillBadge(channel) {
+    if (channel === "friend") {
+      return "\u597D\u53CB";
+    }
+    if (channel === "group") {
+      return "\u7FA4";
+    }
+    return "\u5E7F\u544A";
   }
 
   // src/logic/economy/InviteLoop.ts
@@ -307,27 +377,6 @@
     }
     return addBoosterToWallet(stock, "hammer", amount);
   }
-  function inviteSettingsHint(state) {
-    if (state.pendingInviter && !state.inviteeGiftGranted) {
-      return "\u901A\u5173\u4EFB\u610F\u4E00\u5173\uFF0C\u4F60\u548C\u9080\u8BF7\u4EBA\u5404\u5F97 1 \u9524\u5B50";
-    }
-    if (state.appliedCreditHammer > 0 && state.inviteeGiftGranted) {
-      return `\u5DF2\u9886\u9080\u8BF7\u9524\u5B50 \xB7 \u5DF2\u6210\u529F\u9080\u8BF7 ${state.appliedCreditHammer} \u4EBA`;
-    }
-    if (state.inviteeGiftGranted) {
-      return "\u5DF2\u9886\u9080\u8BF7\u9524\u5B50 \xB7 \u518D\u9080\u65B0\u670B\u53CB\u901A\u5173\uFF0C\u4F60\u4E5F\u5F97\u9524\u5B50";
-    }
-    if (state.appliedCreditHammer > 0) {
-      return `\u5DF2\u6210\u529F\u9080\u8BF7 ${state.appliedCreditHammer} \u4EBA\uFF0C\u5404\u5F97 1 \u9524\u5B50`;
-    }
-    return "\u9080\u8BF7\u65B0\u73A9\u5BB6\uFF0C\u5BF9\u65B9\u901A\u5173\u540E\u53CC\u65B9\u5404\u5F97 1 \u9524\u5B50";
-  }
-  function lobbyInviteHint(state) {
-    if (state.pendingInviter && !state.inviteeGiftGranted) {
-      return "\u901A\u5173\u7B2C 1 \u5173\uFF0C\u4F60\u548C\u597D\u53CB\u5404\u5F97\u9524\u5B50";
-    }
-    return null;
-  }
 
   // src/config/cloud.json
   var cloud_default = {
@@ -499,6 +548,12 @@
         adHammer: 0,
         adShuffle: 0,
         adExtra: 0,
+        shareFriendHammer: false,
+        shareFriendShuffle: false,
+        shareFriendExtra: false,
+        shareGroupHammer: false,
+        shareGroupShuffle: false,
+        shareGroupExtra: false,
         playShuffleGranted: false,
         playExtraGranted: false
       },
@@ -2002,12 +2057,24 @@
       clearsToday: aligned.clearsToday + 1
     };
   }
-  function lobbyDailyHint(clearsToday, shuffleGranted) {
-    if (clearsToday >= DAILY_GOAL_CLEARS) {
-      return shuffleGranted ? "\u4ECA\u65E5\u76EE\u6807\u5B8C\u6210 \xB7 \u91CD\u6392\u5DF2\u5230\u8D26" : "\u4ECA\u65E5\u76EE\u6807\u5B8C\u6210\uFF0C\u968F\u65F6\u518D\u5F00\u4E00\u5173\u653E\u677E\u4E00\u4E0B";
+  function lobbyDailyProgress(clearsToday, shuffleGranted) {
+    const done = Math.max(0, Math.min(DAILY_GOAL_CLEARS, Math.floor(clearsToday) || 0));
+    return {
+      done,
+      goal: DAILY_GOAL_CLEARS,
+      label: `\u4ECA\u65E5\u901A\u5173\u8FDB\u5EA6 [${done}/${DAILY_GOAL_CLEARS}]`,
+      readyToClaim: done >= DAILY_GOAL_CLEARS && !shuffleGranted,
+      claimed: shuffleGranted && done >= DAILY_GOAL_CLEARS
+    };
+  }
+  function claimDailyShuffle(data) {
+    if (data.clearsToday < DAILY_GOAL_CLEARS || data.playShuffleGranted) {
+      return { data, granted: false };
     }
-    const left = DAILY_GOAL_CLEARS - Math.max(0, clearsToday);
-    return `\u4ECA\u65E5\u518D\u8FC7 ${left} \u5173\u53EF\u9886\u91CD\u6392`;
+    return {
+      data: { ...data, playShuffleGranted: true },
+      granted: true
+    };
   }
 
   // src/logic/level/LevelProgress.ts
@@ -2165,6 +2232,12 @@
       adHammer: Math.max(flagsA.adHammer, flagsB.adHammer),
       adShuffle: Math.max(flagsA.adShuffle, flagsB.adShuffle),
       adExtra: Math.max(flagsA.adExtra, flagsB.adExtra),
+      shareFriendHammer: flagsA.shareFriendHammer || flagsB.shareFriendHammer,
+      shareFriendShuffle: flagsA.shareFriendShuffle || flagsB.shareFriendShuffle,
+      shareFriendExtra: flagsA.shareFriendExtra || flagsB.shareFriendExtra,
+      shareGroupHammer: flagsA.shareGroupHammer || flagsB.shareGroupHammer,
+      shareGroupShuffle: flagsA.shareGroupShuffle || flagsB.shareGroupShuffle,
+      shareGroupExtra: flagsA.shareGroupExtra || flagsB.shareGroupExtra,
       playShuffleGranted: flagsA.playShuffleGranted || flagsB.playShuffleGranted,
       playExtraGranted: flagsA.playExtraGranted || flagsB.playExtraGranted
     };
@@ -3207,6 +3280,101 @@
       }
       return n;
     }
+    /**
+     * 底部满铺若干行，再在上一行居中盖 centerCap 格（如底 2 行满 + 第三层居中 3 格）。
+     * 行 0 为底。
+     */
+    coverBottomRowsWithCloudCap(bottomRows, centerCap) {
+      let n = this.coverBottomRowsWithCloud(bottomRows);
+      const base = Math.max(0, Math.min(this.size.rows, Math.floor(bottomRows)));
+      if (base >= this.size.rows) {
+        return n;
+      }
+      const cap = Math.max(0, Math.min(this.size.cols, Math.floor(centerCap)));
+      if (cap <= 0) {
+        return n;
+      }
+      const startCol = Math.floor((this.size.cols - cap) / 2);
+      const r = base;
+      for (let c = startCol; c < startCol + cap; c += 1) {
+        const i = this.index(r, c);
+        if (this.cells[i] === 8 /* Hole */) {
+          continue;
+        }
+        this.cloud[i] = CLOUD_HIT_LAYERS;
+        n += 1;
+      }
+      if (n > 0) {
+        this.bumpVersion();
+      }
+      return n;
+    }
+    /**
+     * 底部满铺若干行，最上一层中间 topCenterGap 格留空；
+     * rightClear > 0 时，其下各层再清空右侧若干列（最上层两侧翅膀保留）。
+     * 行 0 为底。
+     */
+    coverBottomRowsWithCloudTopGap(bottomRows, topCenterGap, rightClear = 0) {
+      const rows = Math.max(0, Math.min(this.size.rows, Math.floor(bottomRows)));
+      const cols = this.size.cols;
+      const gap = Math.max(0, Math.min(cols, Math.floor(topCenterGap)));
+      const gapStart = Math.floor((cols - gap) / 2);
+      const clearRight = Math.max(0, Math.min(cols, Math.floor(rightClear)));
+      const topRow = rows - 1;
+      let n = 0;
+      for (let r = 0; r < rows; r += 1) {
+        const skipCenter = gap > 0 && r === topRow;
+        const skipRight = clearRight > 0 && r < topRow;
+        for (let c = 0; c < cols; c += 1) {
+          if (skipCenter && c >= gapStart && c < gapStart + gap) {
+            continue;
+          }
+          if (skipRight && c >= cols - clearRight) {
+            continue;
+          }
+          const i = this.index(r, c);
+          if (this.cells[i] === 8 /* Hole */) {
+            continue;
+          }
+          this.cloud[i] = CLOUD_HIT_LAYERS;
+          n += 1;
+        }
+      }
+      if (n > 0) {
+        this.bumpVersion();
+      }
+      return n;
+    }
+    /** 居中铺若干行棉花（上下留白，行 0 为底），返回格数。
+     * bottomCenterGap：最底一层中间留空若干格（第四层中间 3 格不盖棉）。 */
+    coverMiddleRowsWithCloud(midRows, bottomCenterGap = 0) {
+      const total = this.size.rows;
+      const cols = this.size.cols;
+      const want = Math.max(0, Math.min(total, Math.floor(midRows)));
+      const start = Math.floor((total - want) / 2);
+      const end = start + want;
+      const gap = Math.max(0, Math.min(cols, Math.floor(bottomCenterGap)));
+      const gapStart = Math.floor((cols - gap) / 2);
+      let n = 0;
+      for (let r = start; r < end; r += 1) {
+        const skipCenter = gap > 0 && r === start;
+        for (let c = 0; c < cols; c += 1) {
+          if (skipCenter && c >= gapStart && c < gapStart + gap) {
+            continue;
+          }
+          const i = this.index(r, c);
+          if (this.cells[i] === 8 /* Hole */) {
+            continue;
+          }
+          this.cloud[i] = CLOUD_HIT_LAYERS;
+          n += 1;
+        }
+      }
+      if (n > 0) {
+        this.bumpVersion();
+      }
+      return n;
+    }
     /** 从底部铺 N 个粉球（不改云）。 */
     placeGemsFromBottom(count) {
       const want = Math.max(0, Math.floor(count));
@@ -3386,6 +3554,12 @@
       return isSplit34Cell(col, cols);
     }
     if (shape === "plus") {
+      const midR = (rows - 1) / 2;
+      const midC = (cols - 1) / 2;
+      if (Number.isInteger(midR) && Number.isInteger(midC)) {
+        const arm = rows >= 7 ? 1 : 0;
+        return Math.abs(row - midR) <= arm || Math.abs(col - midC) <= arm;
+      }
       const midR0 = Math.floor((rows - 1) / 2);
       const midR1 = Math.ceil((rows - 1) / 2);
       const midC0 = Math.floor((cols - 1) / 2);
@@ -5002,39 +5176,42 @@
     {
       id: 1,
       seed: 20250812,
-      moves: 12,
+      moves: 14,
       board: { rows: 6, cols: 6 },
       shape: "diamond",
-      goals: [{ type: "collect", kind: 1, count: 12 }],
+      starterSpecials: { sparkles: 1 },
+      goals: [{ type: "collect", kind: 1, count: 10 }],
       crushEnabled: true,
-      crushDurationMs: 14e3
+      crushDurationMs: 15e3
     },
     {
       id: 2,
       seed: 20250813,
-      moves: 13,
+      moves: 15,
       board: { rows: 6, cols: 6 },
       shape: "heart",
       ice: { bottomRows: 1 },
+      starterSpecials: { sparkles: 1 },
       goals: [
-        { type: "collect", kind: 2, count: 12 },
+        { type: "collect", kind: 2, count: 10 },
         { type: "clear_ice", count: 6 }
       ],
       crushEnabled: true,
-      crushDurationMs: 13e3
+      crushDurationMs: 14e3
     },
     {
       id: 3,
       seed: 20250811,
-      moves: 15,
+      moves: 16,
       board: { rows: 6, cols: 6 },
       ice: { bottomRows: 2 },
+      starterSpecials: { sparkles: 2 },
       goals: [
         { type: "collect", kind: 3, count: 10 },
         { type: "clear_ice", count: 12 }
       ],
       crushEnabled: true,
-      crushDurationMs: 12e3
+      crushDurationMs: 13e3
     },
     {
       id: 4,
@@ -5042,33 +5219,38 @@
       moves: 20,
       board: { rows: 7, cols: 7 },
       ice: { bottomRows: 3 },
+      starterSpecials: { sparkles: 2 },
       goals: [
-        { type: "collect", kind: 4, count: 12 },
+        { type: "collect", kind: 4, count: 10 },
+        { type: "collect", kind: 2, count: 8 },
         { type: "clear_ice", count: 21 }
       ],
       crushEnabled: true,
-      crushDurationMs: 12e3
+      crushDurationMs: 13e3
     },
     {
       id: 5,
       seed: 20250815,
       moves: 18,
       board: { rows: 7, cols: 7 },
-      ice: { bottomRows: 4 },
+      shape: "diamond",
+      ice: { bottomRows: 3 },
+      starterSpecials: { sparkles: 2 },
       goals: [
-        { type: "collect", kind: 1, count: 14 },
-        { type: "clear_ice", count: 28 }
+        { type: "collect", kind: 1, count: 12 },
+        { type: "clear_ice", count: 15 }
       ],
       crushEnabled: true,
-      crushDurationMs: 12e3
+      crushDurationMs: 13e3
     },
     {
       id: 6,
       seed: 20250816,
-      moves: 20,
+      moves: 15,
       board: { rows: 7, cols: 7 },
       cloudGems: 8,
       cloudRows: 2,
+      starterSpecials: { sparkles: 2 },
       goals: [{ type: "collect_gems", count: 8 }],
       crushEnabled: true,
       crushDurationMs: 12e3
@@ -5076,66 +5258,66 @@
     {
       id: 7,
       seed: 20250817,
-      moves: 20,
+      moves: 15,
       board: { rows: 7, cols: 7 },
+      cloud: { bottomRows: 2, centerCap: 3 },
       cloudGems: 10,
-      cloudRows: 3,
-      starterSpecials: { sparkles: 1 },
+      starterSpecials: { sparkles: 2 },
       goals: [{ type: "collect_gems", count: 10 }],
       crushEnabled: true,
-      crushDurationMs: 11e3
+      crushDurationMs: 12e3
     },
     {
       id: 8,
       seed: 20250818,
-      moves: 18,
+      moves: 14,
       board: { rows: 7, cols: 7 },
       shape: "diamond",
       cloudGems: 10,
-      cloudRows: 3,
-      starterSpecials: { sparkles: 1 },
+      cloudRows: 2,
+      starterSpecials: { sparkles: 2 },
       goals: [{ type: "collect_gems", count: 10 }],
       crushEnabled: true,
-      crushDurationMs: 11e3
+      crushDurationMs: 12e3
     },
     {
       id: 9,
       seed: 20250819,
-      moves: 20,
-      board: { rows: 8, cols: 8 },
+      moves: 14,
+      board: { rows: 7, cols: 7 },
       shape: "plus",
-      cloudGems: 8,
+      cloudGems: 9,
       cloudRows: 2,
       starterSpecials: { sparkles: 2 },
-      goals: [{ type: "collect_gems", count: 8 }],
+      goals: [{ type: "collect_gems", count: 9 }],
       crushEnabled: true,
-      crushDurationMs: 11e3
+      crushDurationMs: 12e3
     },
     {
       id: 10,
       seed: 20250820,
-      moves: 16,
+      moves: 15,
       board: { rows: 7, cols: 7 },
-      cloud: { skipTopRows: 1 },
-      cloudGems: 16,
+      cloud: { bottomRows: 4, topCenterGap: 3, rightClear: 1 },
+      cloudGems: 10,
       starterSpecials: { sparkles: 2 },
       goals: [
-        { type: "collect_gems", count: 16 },
-        { type: "clear_cloud", count: 42 }
+        { type: "collect_gems", count: 10 },
+        { type: "clear_cloud", count: 22 }
       ],
       crushEnabled: true,
-      crushDurationMs: 11e3
+      crushDurationMs: 12e3
     },
     {
       id: 11,
       seed: 20250911,
-      moves: 22,
+      moves: 15,
       board: { rows: 7, cols: 7 },
       shape: "heart",
-      starterSpecials: { owls: 1, sparkles: 3 },
+      starterSpecials: { owls: 1, sparkles: 2 },
       goals: [
-        { type: "collect", kind: 4, count: 14 },
-        { type: "collect", kind: 1, count: 12 }
+        { type: "collect", kind: 4, count: 16 },
+        { type: "collect", kind: 1, count: 14 }
       ],
       crushEnabled: true,
       crushDurationMs: 13e3
@@ -5143,26 +5325,29 @@
     {
       id: 12,
       seed: 20250912,
-      moves: 22,
-      board: { rows: 8, cols: 8 },
-      shape: "plus",
-      cloudGems: 8,
+      moves: 14,
+      board: { rows: 7, cols: 7 },
+      shape: "ring",
+      cloudGems: 9,
       cloudRows: 2,
       starterSpecials: { owls: 1, sparkles: 2 },
-      goals: [{ type: "collect_gems", count: 8 }],
+      goals: [
+        { type: "collect_gems", count: 9 },
+        { type: "clear_cloud", count: 9 }
+      ],
       crushEnabled: true,
       crushDurationMs: 12e3
     },
     {
       id: 13,
       seed: 20250913,
-      moves: 22,
+      moves: 15,
       board: { rows: 7, cols: 7 },
       shape: "double_ring",
       ice: { bottomRows: 2 },
       starterSpecials: { owls: 1, sparkles: 2 },
       goals: [
-        { type: "collect", kind: 3, count: 10 },
+        { type: "collect", kind: 3, count: 14 },
         { type: "clear_ice", count: 14 }
       ],
       crushEnabled: true,
@@ -5171,7 +5356,7 @@
     {
       id: 14,
       seed: 20250914,
-      moves: 18,
+      moves: 14,
       board: { rows: 7, cols: 7 },
       shape: "split_3_4",
       cloudGems: 10,
@@ -5179,24 +5364,24 @@
       starterSpecials: { owls: 1, sparkles: 2 },
       goals: [
         { type: "collect_gems", count: 10 },
-        { type: "collect", kind: 2, count: 10 }
+        { type: "collect", kind: 2, count: 12 }
       ],
       crushEnabled: true,
-      crushDurationMs: 11e3
+      crushDurationMs: 12e3
     },
     {
       id: 15,
       seed: 20250915,
-      moves: 20,
+      moves: 15,
       board: { rows: 7, cols: 7 },
-      shape: "heart",
-      ice: { bottomRows: 3 },
-      cloudGems: 12,
+      shape: "hourglass",
+      ice: { bottomRows: 2 },
+      cloudGems: 10,
       cloudRows: 2,
-      starterSpecials: { owls: 2, sparkles: 3 },
+      starterSpecials: { owls: 1, sparkles: 3 },
       goals: [
-        { type: "collect_gems", count: 12 },
-        { type: "clear_ice", count: 21 }
+        { type: "collect_gems", count: 10 },
+        { type: "clear_ice", count: 12 }
       ],
       crushEnabled: true,
       crushDurationMs: 13e3
@@ -5204,13 +5389,14 @@
     {
       id: 16,
       seed: 20250916,
-      moves: 22,
+      moves: 15,
       board: { rows: 7, cols: 7 },
-      ice: { bottomRows: 3 },
+      shape: "ring",
+      ice: { skipTopRows: 2 },
       starterSpecials: { owls: 1, sparkles: 2 },
       goals: [
-        { type: "collect", kind: 4, count: 10 },
-        { type: "clear_ice", count: 21 }
+        { type: "collect", kind: 4, count: 14 },
+        { type: "clear_ice", count: 15 }
       ],
       crushEnabled: true,
       crushDurationMs: 12e3
@@ -5218,7 +5404,7 @@
     {
       id: 17,
       seed: 20250917,
-      moves: 22,
+      moves: 15,
       board: { rows: 7, cols: 7 },
       ice: { skipTopRows: 3 },
       buried: { snowmen: 0, penguins: 2 },
@@ -5233,41 +5419,41 @@
     {
       id: 18,
       seed: 20250918,
-      moves: 20,
+      moves: 14,
       board: { rows: 7, cols: 7 },
       ice: { skipTopRows: 2 },
       iceStyle: "encase",
       buried: { snowmen: 0, penguins: 3 },
-      starterSpecials: { owls: 1, sparkles: 2 },
+      starterSpecials: { owls: 1, sparkles: 3 },
       goals: [
         { type: "collect_penguins", count: 3 },
         { type: "clear_ice", count: 35 }
       ],
       crushEnabled: true,
-      crushDurationMs: 11e3
+      crushDurationMs: 12e3
     },
     {
       id: 19,
       seed: 20250919,
-      moves: 20,
+      moves: 14,
       board: { rows: 7, cols: 7 },
       shape: "double_ring",
       ice: { skipTopRows: 2 },
       iceStyle: "encase",
       buried: { snowmen: 2, penguins: 2 },
-      starterSpecials: { owls: 1, sparkles: 3 },
+      starterSpecials: { owls: 2, sparkles: 3 },
       goals: [
         { type: "collect_snowmen", count: 2 },
         { type: "collect_penguins", count: 2 },
         { type: "clear_ice", count: 26 }
       ],
       crushEnabled: true,
-      crushDurationMs: 11e3
+      crushDurationMs: 12e3
     },
     {
       id: 20,
       seed: 20250920,
-      moves: 20,
+      moves: 14,
       board: { rows: 7, cols: 7 },
       shape: "hourglass",
       ice: { skipTopRows: 1 },
@@ -5275,7 +5461,7 @@
       cloudGems: 8,
       cloudRows: 2,
       buried: { snowmen: 2, penguins: 4 },
-      starterSpecials: { owls: 2, sparkles: 4 },
+      starterSpecials: { owls: 2, sparkles: 3 },
       goals: [
         { type: "collect_gems", count: 8 },
         { type: "collect_penguins", count: 4 },
@@ -5319,15 +5505,436 @@
     crushDefaultTapPower: 1,
     crushFinaleMaxBursts: 64,
     cleanScoreThreshold: 1500,
-    cleanDurationMs: 2e4
+    cleanDurationMs: 2e4,
+    challengeDailyInviteCap: 3,
+    dailyRewardPerDay: 1,
+    dailyChallenge: {
+      poolSize: 20,
+      streakDays: 3,
+      complete: { id: "shuffle", amount: 1 },
+      streak: { id: "extraMoves", amount: 1 }
+    },
+    leaderboard: {
+      limit: 50,
+      rewardRanks: 3,
+      settleWeekday: 1,
+      settleHour: 0,
+      rewards: [
+        { id: "hammer", amount: 1 },
+        { id: "shuffle", amount: 1 }
+      ]
+    }
   };
 
   // src/config/items.json
   var items_default = {
     extraMoves: {
       moves: 5
+    },
+    challenge: {
+      success: {
+        invitee: { id: "extraMoves", amount: 1 },
+        inviter: { id: "hammer", amount: 1 }
+      },
+      fail: {
+        invitee: { id: "shuffle", amount: 1 },
+        inviter: { id: "shuffle", amount: 1 }
+      }
+    },
+    dailyChallenge: {
+      reward: { id: "shuffle", amount: 1 },
+      streakReward: { id: "extraMoves", amount: 1 }
     }
   };
+
+  // src/config/notice.json
+  var notice_default = {
+    id: "post20-gameplay",
+    title: "\u516C\u544A",
+    body: "20\u5173\u540E\u6709\u65B0\u73A9\u6CD5\uFF0C\u656C\u8BF7\u671F\u5F85",
+    confirm: "\u77E5\u9053\u4E86",
+    bubbles: [
+      "20\u5173\u540E\u6709\u65B0\u73A9\u6CD5\uFF0C\u656C\u8BF7\u671F\u5F85",
+      "\u6CBF\u7CD6\u679C\u68AF\u5B50\u95EF\u5173\uFF0C\u51B2\u8FDB\u7CD6\u679C\u5C4B\uFF01",
+      "\u9080\u8BF7\u597D\u53CB\u901A\u5173\uFF0C\u53CC\u65B9\u5404\u5F97\u9524\u5B50"
+    ],
+    difficultyUp: "\u96BE\u5EA6\u63D0\u5347",
+    difficultyUpCotton: "\u96BE\u5EA6\u63D0\u5347 \xB7 \u68C9\u82B1\u5173\u5F00\u59CB",
+    difficultyUpParty: "\u96BE\u5EA6\u63D0\u5347 \xB7 \u5F02\u5F62\u5173\u5361",
+    difficultyUpIce: "\u96BE\u5EA6\u63D0\u5347 \xB7 \u51B0\u96EA\u57CB\u85CF",
+    leaderboard: {
+      title: "\u597D\u53CB\u6392\u884C",
+      entry: "\u597D\u53CB\u6392\u884C",
+      passed: "\u4F60\u88AB {name} \u8D85\u8FC7\u4E86",
+      closeGap: "\u8DDD\u79BB\u4E0A\u4E00\u540D\u53EA\u5DEE 1 \u5173\uFF0C\u52A0\u6CB9\uFF01",
+      notify: "{name} \u8D85\u8FC7\u4E86\u4F60\u7684\u6392\u540D",
+      reward: "\u6BCF\u5468\u4E00\u7ED3\u7B97\uFF0C\u524D 3 \u540D\u5F97\u9524\u5B50 x{hammer}\u3001\u91CD\u6392 x{shuffle}",
+      rewarded: "\u4E0A\u5468\u524D 3 \u540D\u7ED3\u7B97\uFF1A\u9524\u5B50 x{hammer}\uFF0C\u91CD\u6392 x{shuffle}",
+      empty: "\u6682\u65F6\u8FD8\u6CA1\u6709\u5176\u4ED6\u73A9\u5BB6\u4E0A\u699C\u3002",
+      settled: "\u4E0A\u5468\u6392\u884C\u5DF2\u7ED3\u7B97\uFF0C\u65B0\u7684\u4E00\u5468\u5F00\u59CB\u4E86",
+      unavailable: "\u6392\u884C\u6682\u65F6\u6253\u4E0D\u5F00\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+      stockFull: "{name}\u5DF2\u6709 9 \u4E2A\uFF0C\u8FD9\u6B21\u6CA1\u6709\u518D\u53D1\u653E"
+    },
+    profileWelcome: {
+      title: "\u5C55\u793A\u5FAE\u4FE1\u5934\u50CF",
+      body: "\u6388\u6743\u540E\uFF0C\u597D\u53CB\u6392\u884C\u4F1A\u663E\u793A\u4F60\u7684\u5934\u50CF\u548C\u6635\u79F0\u3002\u4E5F\u53EF\u8DF3\u8FC7\uFF0C\u4E0D\u5F71\u54CD\u6E38\u73A9\u3002",
+      btn: "\u6388\u6743\u5934\u50CF\u6635\u79F0",
+      skip: "\u6682\u4E0D\u6388\u6743",
+      ok: "\u5934\u50CF\u6635\u79F0\u5DF2\u4FDD\u5B58",
+      fail: "\u6682\u65F6\u65E0\u6CD5\u83B7\u53D6\u5934\u50CF\uFF0C\u4E0D\u5F71\u54CD\u7EE7\u7EED\u73A9"
+    },
+    dailyChallenge: {
+      title: "\u4ECA\u65E5\u6311\u6218",
+      entry: "\u4ECA\u65E5\u6311\u6218",
+      level: "\u4ECA\u5929\u7684\u6311\u6218\u662F\u7B2C {level} \u5173\u3002\u6BCF\u5929 0 \u70B9\u91CD\u65B0\u62BD\u4E00\u5173\u3002",
+      reward: "\u5B8C\u6210\u53EF\u5F97\u91CD\u6392 x{amount}\uFF0C\u6BCF\u5929\u53EA\u9886\u4E00\u6B21\u3002",
+      streak: "\u8FDE\u7EED {current}/{target} \u5929\u3002\u6EE1 {target} \u5929\u518D\u5F97 +5\u6B65 x{streakAmount}\u3002",
+      pending: "\u4ECA\u5929\u8FD8\u6CA1\u5B8C\u6210\u3002",
+      done: "\u4ECA\u5929\u5DF2\u7ECF\u5B8C\u6210\uFF0C\u5956\u52B1\u9886\u8FC7\u4E86\u3002",
+      board: "\u901A\u5173\u7528\u65F6\u4F1A\u8BB0\u5165\u597D\u53CB\u5468\u699C\u3002",
+      completed: "\u4ECA\u65E5\u6311\u6218\u5B8C\u6210",
+      alreadyClaimed: "\u4ECA\u5929\u7684\u5956\u52B1\u5DF2\u7ECF\u9886\u8FC7",
+      stockFull: "{name}\u5DF2\u6709 9 \u4E2A\uFF0C\u8FD9\u6B21\u6CA1\u6709\u518D\u53D1\u653E",
+      wrongLevel: "\u8FD9\u4E0D\u662F\u4ECA\u5929\u7684\u6311\u6218\u5173",
+      unavailable: "\u4ECA\u65E5\u6311\u6218\u6682\u65F6\u6253\u4E0D\u5F00\uFF0C\u786E\u8BA4\u6311\u6218\u670D\u52A1\u5DF2\u7ECF\u542F\u52A8\u3002",
+      missed: "\u4ECA\u65E5\u6311\u6218\u6CA1\u8BB0\u4E0A"
+    }
+  };
+
+  // src/logic/economy/ChallengeGrants.ts
+  function readSpec(raw, fallback) {
+    const id = (raw == null ? void 0 : raw.id) === "hammer" || (raw == null ? void 0 : raw.id) === "shuffle" || (raw == null ? void 0 : raw.id) === "extraMoves" ? raw.id : fallback;
+    return {
+      id,
+      amount: Math.max(0, Math.floor(Number(raw == null ? void 0 : raw.amount) || 0))
+    };
+  }
+  function readLeaderboardConfig() {
+    var _a;
+    const raw = balance_default.leaderboard;
+    const listed = Array.isArray(raw == null ? void 0 : raw.rewards) ? raw.rewards : void 0;
+    const rewards = listed && listed.length > 0 ? listed.map((item) => readSpec(item, "hammer")) : [
+      readSpec({ id: "hammer", amount: 1 }, "hammer"),
+      readSpec({ id: "shuffle", amount: 1 }, "shuffle")
+    ];
+    return {
+      limit: Math.max(1, Math.floor(Number(raw == null ? void 0 : raw.limit) || 50)),
+      rewardRanks: Math.max(1, Math.floor(Number(raw == null ? void 0 : raw.rewardRanks) || 3)),
+      settleWeekday: Math.min(6, Math.max(0, Math.floor((_a = Number(raw == null ? void 0 : raw.settleWeekday)) != null ? _a : 1))),
+      settleHour: Math.min(23, Math.max(0, Math.floor(Number(raw == null ? void 0 : raw.settleHour) || 0))),
+      rewards
+    };
+  }
+
+  // src/logic/economy/FriendLeaderboard.ts
+  function rankFriends(rows) {
+    const sorted = rows.slice().sort((a, b) => {
+      if (a.maxLevel !== b.maxLevel) {
+        return b.maxLevel - a.maxLevel;
+      }
+      const at = a.bestTimeMs != null && a.bestTimeMs > 0 ? a.bestTimeMs : Number.POSITIVE_INFINITY;
+      const bt = b.bestTimeMs != null && b.bestTimeMs > 0 ? b.bestTimeMs : Number.POSITIVE_INFINITY;
+      if (at !== bt) {
+        return at - bt;
+      }
+      return a.userId < b.userId ? -1 : 1;
+    });
+    return sorted.map((row, index) => ({ ...row, rank: index + 1 }));
+  }
+  function formatWxIdDisplay(raw, max = 12) {
+    const text = raw.trim();
+    if (!text) {
+      return "\u2014";
+    }
+    if (text.length <= max) {
+      return text;
+    }
+    return `${text.slice(0, Math.max(4, max - 3))}\u2026`;
+  }
+  function formatLeaderboardLine(row) {
+    var _a;
+    const nickName = (row.nickName || "").trim() || "\u5FAE\u4FE1\u73A9\u5BB6";
+    const wxId = formatWxIdDisplay(row.wxId || row.userId);
+    const score = Math.max(0, Math.floor((_a = row.score) != null ? _a : row.maxLevel));
+    return {
+      tag: String(row.rank),
+      text: "",
+      highlight: row.isSelf,
+      badge: nickName.slice(0, 1) || "\u73A9",
+      kind: "player",
+      avatarUrl: row.avatarUrl,
+      nickName,
+      wxId,
+      score
+    };
+  }
+  function fill(template, vars) {
+    return template.replace(/\{(\w+)\}/g, (_, key) => {
+      var _a;
+      return String((_a = vars[key]) != null ? _a : "");
+    });
+  }
+  function leaderboardRewardText() {
+    var _a, _b, _c, _d;
+    const config = readLeaderboardConfig();
+    const hammer = (_b = (_a = config.rewards.find((item) => item.id === "hammer")) == null ? void 0 : _a.amount) != null ? _b : 0;
+    const shuffle = (_d = (_c = config.rewards.find((item) => item.id === "shuffle")) == null ? void 0 : _c.amount) != null ? _d : 0;
+    return fill(notice_default.leaderboard.reward, { hammer, shuffle });
+  }
+
+  // src/core/adapters/WxUserProfile.ts
+  var WX_PROFILE_STORAGE_KEY = "crush_wx_profile";
+  var WX_PROFILE_ASKED_KEY = "crush_wx_profile_asked";
+  function hasAskedWxProfile() {
+    const api = wxApi();
+    if (!(api == null ? void 0 : api.getStorageSync)) {
+      return false;
+    }
+    try {
+      return !!api.getStorageSync(WX_PROFILE_ASKED_KEY);
+    } catch (e) {
+      return false;
+    }
+  }
+  function markWxProfileAsked() {
+    const api = wxApi();
+    if (!(api == null ? void 0 : api.setStorageSync)) {
+      return;
+    }
+    try {
+      api.setStorageSync(WX_PROFILE_ASKED_KEY, 1);
+    } catch (e) {
+    }
+  }
+  function wxApi() {
+    try {
+      if (typeof wx === "undefined") {
+        return null;
+      }
+      return wx;
+    } catch (e) {
+      return null;
+    }
+  }
+  function hasRealWxProfile(profile) {
+    return !!(profile && profile.avatarUrl);
+  }
+  function readCachedWxProfile(fallbackWxId = "") {
+    const api = wxApi();
+    if (!(api == null ? void 0 : api.getStorageSync)) {
+      return null;
+    }
+    try {
+      const raw = api.getStorageSync(WX_PROFILE_STORAGE_KEY);
+      const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (!data || typeof data !== "object") {
+        return null;
+      }
+      const nickName = String(data.nickName || "").trim();
+      const avatarUrl = String(data.avatarUrl || "").trim();
+      if (!avatarUrl) {
+        return null;
+      }
+      return {
+        nickName: nickName || "\u5FAE\u4FE1\u7528\u6237",
+        avatarUrl,
+        wxId: fallbackWxId
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+  function saveCachedWxProfile(profile) {
+    const api = wxApi();
+    if (!(api == null ? void 0 : api.setStorageSync)) {
+      return;
+    }
+    try {
+      api.setStorageSync(WX_PROFILE_STORAGE_KEY, {
+        nickName: profile.nickName.trim(),
+        avatarUrl: profile.avatarUrl.trim(),
+        updatedAt: Date.now()
+      });
+    } catch (e) {
+    }
+  }
+  function parseUserInfo(raw) {
+    if (!raw) {
+      return null;
+    }
+    const nickName = String(raw.nickName || "").trim();
+    const avatarUrl = String(raw.avatarUrl || "").trim();
+    if (!avatarUrl) {
+      return null;
+    }
+    return {
+      nickName: nickName || "\u5FAE\u4FE1\u7528\u6237",
+      avatarUrl
+    };
+  }
+  function humanizeAuthError(errMsg) {
+    const msg = String(errMsg || "");
+    if (msg.includes("privacy") || msg.includes("1025") || msg.includes("1026") || msg.includes("112") || msg.includes("please go to mp") || msg.includes("api scope is not declared")) {
+      console.warn(
+        "[crush-crush][auth] \u9700\u5728\u516C\u4F17\u5E73\u53F0\u300A\u7528\u6237\u9690\u79C1\u4FDD\u62A4\u6307\u5F15\u300B\u58F0\u660E\u300C\u7528\u6237\u4FE1\u606F\uFF08\u6635\u79F0\u3001\u5934\u50CF\uFF09\u300D\u5E76\u5F00\u542F\u9690\u79C1\u5F39\u7A97",
+        msg
+      );
+      return "\u6682\u65F6\u65E0\u6CD5\u83B7\u53D6\u5934\u50CF\uFF0C\u4E0D\u5F71\u54CD\u7EE7\u7EED\u73A9";
+    }
+    if (msg.includes("auth deny") || msg.includes("deny") || msg.includes("cancel")) {
+      return "\u5DF2\u8DF3\u8FC7\u6388\u6743\uFF0C\u53EF\u968F\u65F6\u5728\u4E0B\u6B21\u8FDB\u5165\u65F6\u518D\u6388\u6743";
+    }
+    if (!msg) {
+      return "\u6682\u65F6\u65E0\u6CD5\u83B7\u53D6\u5934\u50CF\uFF0C\u4E0D\u5F71\u54CD\u7EE7\u7EED\u73A9";
+    }
+    console.warn("[crush-crush][auth]", msg);
+    return "\u6682\u65F6\u65E0\u6CD5\u83B7\u53D6\u5934\u50CF\uFF0C\u4E0D\u5F71\u54CD\u7EE7\u7EED\u73A9";
+  }
+  function showAuthFailModal(message) {
+    const api = wxApi();
+    if (typeof (api == null ? void 0 : api.showToast) === "function") {
+      try {
+        api.showToast({
+          title: message.slice(0, 14),
+          icon: "none",
+          duration: 2500
+        });
+        return;
+      } catch (e) {
+      }
+    }
+    console.warn("[crush-crush][auth]", message);
+  }
+  function getUserInfoAuthState() {
+    const api = wxApi();
+    if (!(api == null ? void 0 : api.getSetting)) {
+      return Promise.resolve("unknown");
+    }
+    return new Promise((resolve) => {
+      try {
+        api.getSetting({
+          success: (res) => {
+            var _a;
+            const flag = (_a = res.authSetting) == null ? void 0 : _a["scope.userInfo"];
+            if (flag === true) {
+              resolve("authorized");
+              return;
+            }
+            if (flag === false) {
+              resolve("denied");
+              return;
+            }
+            resolve("unknown");
+          },
+          fail: () => resolve("unknown")
+        });
+      } catch (e) {
+        resolve("unknown");
+      }
+    });
+  }
+  function fetchWxUserInfoOnce() {
+    const api = wxApi();
+    if (!(api == null ? void 0 : api.getUserInfo)) {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+      try {
+        api.getUserInfo({
+          withCredentials: false,
+          lang: "zh_CN",
+          success: (res) => resolve(parseUserInfo(res.userInfo)),
+          fail: () => resolve(null)
+        });
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  }
+  async function ensureWxUserProfile(fallbackWxId = "") {
+    const cached = readCachedWxProfile(fallbackWxId);
+    if (hasRealWxProfile(cached)) {
+      return { ...cached, wxId: fallbackWxId || cached.wxId };
+    }
+    const auth = await getUserInfoAuthState();
+    if (auth === "authorized") {
+      const info = await fetchWxUserInfoOnce();
+      if (info) {
+        saveCachedWxProfile(info);
+        return { ...info, wxId: fallbackWxId };
+      }
+    }
+    return null;
+  }
+  function mountWxUserInfoAuthButton(input) {
+    const api = wxApi();
+    if (!(api == null ? void 0 : api.createUserInfoButton)) {
+      input.onFail("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u5FAE\u4FE1\u6388\u6743\u6309\u94AE\uFF0C\u8BF7\u7528\u624B\u673A\u5FAE\u4FE1\u6253\u5F00\u4F53\u9A8C\u7248");
+      return null;
+    }
+    try {
+      const button = api.createUserInfoButton({
+        type: "text",
+        text: input.text || "\u5C55\u793A\u6211\u7684\u5FAE\u4FE1\u5934\u50CF\uFF08\u53EF\u9009\uFF09",
+        withCredentials: false,
+        lang: "zh_CN",
+        style: {
+          left: Math.round(input.left),
+          top: Math.round(input.top),
+          width: Math.round(input.width),
+          height: Math.round(input.height),
+          lineHeight: Math.round(input.height),
+          backgroundColor: "#1c7ed6",
+          color: "#ffffff",
+          textAlign: "center",
+          fontSize: 14,
+          borderRadius: 18
+        }
+      });
+      button.onTap((res) => {
+        console.info("[crush-crush] userInfoButton tap", res == null ? void 0 : res.errMsg, !!(res == null ? void 0 : res.userInfo), !!(res == null ? void 0 : res.rawData));
+        const ok = String((res == null ? void 0 : res.errMsg) || "").includes(":ok");
+        if (ok) {
+          const parsed = parseUserInfo(res.userInfo);
+          if (parsed) {
+            saveCachedWxProfile(parsed);
+            input.onProfile(parsed);
+            return;
+          }
+          void fetchWxUserInfoOnce().then((info) => {
+            if (info) {
+              saveCachedWxProfile(info);
+              input.onProfile(info);
+              return;
+            }
+            input.onFail(humanizeAuthError("privacy not declared"));
+          });
+          return;
+        }
+        input.onFail(humanizeAuthError((res == null ? void 0 : res.errMsg) || ""));
+      });
+      try {
+        button.show();
+      } catch (e) {
+      }
+      return {
+        destroy: () => {
+          try {
+            button.hide();
+          } catch (e) {
+          }
+          try {
+            button.destroy();
+          } catch (e) {
+          }
+        }
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      input.onFail(humanizeAuthError(message));
+      return null;
+    }
+  }
 
   // src/services/GameSession.ts
   var GameSession = class {
@@ -5537,14 +6144,7 @@
       } else if (config.ice && typeof config.ice === "object" && "bottomRows" in config.ice) {
         this.iceAtStart = this.board.coverBottomRowsWithIce(config.ice.bottomRows);
       }
-      if (this.iceAtStart > 0) {
-        this.goals.bindClearIceTarget(this.iceAtStart);
-      }
       this.board.iceLocksTiles = config.iceStyle === "encase";
-      if (typeof config.cloudGems === "number" && config.cloudGems > 0) {
-        this.gemsAtStart = this.board.placeGemsFromBottom(config.cloudGems);
-        this.goals.bindCollectGemsTarget(this.gemsAtStart);
-      }
       shuffleUntilPlayable(this.board, config.seed + 99);
       this.stabilizeBoard({ animate: false });
       if (config.buried) {
@@ -5558,12 +6158,42 @@
         this.goals.bindCollectSnowmenTarget(placed.snowmen);
         this.goals.bindCollectPenguinsTarget(placed.penguins);
       }
+      if (this.iceAtStart > 0) {
+        this.iceAtStart = this.board.countIce();
+        this.goals.bindClearIceTarget(this.iceAtStart);
+      }
+      if (typeof config.cloudGems === "number" && config.cloudGems > 0) {
+        this.gemsAtStart = this.board.placeGemsFromBottom(config.cloudGems);
+        this.goals.bindCollectGemsTarget(this.gemsAtStart);
+      }
       if (config.cloud === "all") {
         this.cloudsAtStart = this.board.coverPlayableWithCloud();
+      } else if (config.cloud && typeof config.cloud === "object" && "midRows" in config.cloud) {
+        const bottomCenterGap = "bottomCenterGap" in config.cloud && typeof config.cloud.bottomCenterGap === "number" ? config.cloud.bottomCenterGap : 0;
+        this.cloudsAtStart = this.board.coverMiddleRowsWithCloud(
+          config.cloud.midRows,
+          bottomCenterGap
+        );
       } else if (config.cloud && typeof config.cloud === "object" && "skipTopRows" in config.cloud) {
         this.cloudsAtStart = this.board.coverPlayableSkippingTopRowsWithCloud(config.cloud.skipTopRows);
       } else if (config.cloud && typeof config.cloud === "object" && "bottomRows" in config.cloud) {
-        this.cloudsAtStart = this.board.coverBottomRowsWithCloud(config.cloud.bottomRows);
+        const centerCap = "centerCap" in config.cloud && typeof config.cloud.centerCap === "number" ? config.cloud.centerCap : 0;
+        const topCenterGap = "topCenterGap" in config.cloud && typeof config.cloud.topCenterGap === "number" ? config.cloud.topCenterGap : 0;
+        if (topCenterGap > 0) {
+          const rightClear = "rightClear" in config.cloud && typeof config.cloud.rightClear === "number" ? config.cloud.rightClear : 0;
+          this.cloudsAtStart = this.board.coverBottomRowsWithCloudTopGap(
+            config.cloud.bottomRows,
+            topCenterGap,
+            rightClear
+          );
+        } else if (centerCap > 0) {
+          this.cloudsAtStart = this.board.coverBottomRowsWithCloudCap(
+            config.cloud.bottomRows,
+            centerCap
+          );
+        } else {
+          this.cloudsAtStart = this.board.coverBottomRowsWithCloud(config.cloud.bottomRows);
+        }
       } else if (typeof config.cloudRows === "number" && config.cloudRows > 0) {
         this.cloudsAtStart = this.board.coverBottomRowsWithCloud(config.cloudRows);
       }
@@ -5622,6 +6252,100 @@
     }
     getInviteCode() {
       return this.invite.code;
+    }
+    /**
+     * 在用户点击「好友排行」手势里尝试拉微信头像/昵称。
+     * 未授权时返回 false，需 UI 弹出 createUserInfoButton。
+     * 真实微信号永远拿不到，只用邀请码。
+     */
+    async ensureWxUserProfile() {
+      const wxId = this.getInviteCode() || "";
+      const profile = await ensureWxUserProfile(wxId);
+      return !!(profile == null ? void 0 : profile.avatarUrl) || !!(profile && profile.nickName && profile.nickName !== "\u5FAE\u4FE1\u73A9\u5BB6");
+    }
+    /**
+     * 玩家排行：拉取所有玩过本小游戏的用户。
+     * 展示排名、头像、昵称、微信号、分数；接口不可用时至少展示自己。
+     */
+    async loadFriendLeaderboard() {
+      var _a, _b, _c, _d, _e, _f, _g, _h;
+      const userId = this.getInviteCode() || "me";
+      const maxLevel = this.getMaxClearedLevelId();
+      const profile = this.readWxProfile();
+      const selfInput = {
+        userId,
+        maxLevel,
+        bestTimeMs: null,
+        completed: false,
+        isSelf: true,
+        nickName: profile.nickName || "\u5FAE\u4FE1\u73A9\u5BB6",
+        avatarUrl: profile.avatarUrl,
+        wxId: profile.wxId || userId,
+        score: maxLevel
+      };
+      const api = this.deps.challengeApi;
+      if (api) {
+        try {
+          const res = await api.leaderboard(userId, maxLevel, {
+            nickName: profile.nickName && profile.nickName !== "\u5FAE\u4FE1\u73A9\u5BB6" ? profile.nickName : void 0,
+            avatarUrl: profile.avatarUrl || void 0
+          });
+          if (res.ok && res.rows && res.rows.length > 0) {
+            const rows = res.rows.map(
+              (row) => {
+                var _a2;
+                return formatLeaderboardLine({
+                  ...row,
+                  nickName: row.nickName || (row.isSelf ? profile.nickName || "\u5FAE\u4FE1\u73A9\u5BB6" : void 0),
+                  avatarUrl: row.avatarUrl || (row.isSelf ? profile.avatarUrl : void 0),
+                  wxId: row.wxId || row.userId,
+                  score: (_a2 = row.score) != null ? _a2 : row.maxLevel
+                });
+              }
+            );
+            return {
+              title: notice_default.leaderboard.title,
+              hint: (_a = res.hint) != null ? _a : "",
+              rewardText: (_b = res.rewardText) != null ? _b : leaderboardRewardText(),
+              selfRank: (_e = (_d = res.selfRank) != null ? _d : (_c = res.rows.find((r) => r.isSelf)) == null ? void 0 : _c.rank) != null ? _e : 0,
+              rows
+            };
+          }
+          if (res.ok) {
+            return {
+              title: notice_default.leaderboard.title,
+              hint: (_f = res.hint) != null ? _f : "",
+              rewardText: (_g = res.rewardText) != null ? _g : leaderboardRewardText(),
+              selfRank: (_h = res.selfRank) != null ? _h : 1,
+              rows: [
+                ...rankFriends([selfInput]).map(formatLeaderboardLine),
+                { tag: "\u63D0\u793A", text: notice_default.leaderboard.empty, kind: "meta" }
+              ]
+            };
+          }
+        } catch (e) {
+        }
+      }
+      const ranked = rankFriends([selfInput]);
+      return {
+        title: notice_default.leaderboard.title,
+        hint: "",
+        rewardText: leaderboardRewardText(),
+        selfRank: 1,
+        rows: ranked.map(formatLeaderboardLine)
+      };
+    }
+    readWxProfile() {
+      const wxId = this.getInviteCode();
+      const cached = readCachedWxProfile(wxId);
+      if (cached && cached.avatarUrl) {
+        return {
+          nickName: cached.nickName || "\u5FAE\u4FE1\u73A9\u5BB6",
+          avatarUrl: cached.avatarUrl,
+          wxId: cached.wxId || wxId
+        };
+      }
+      return { nickName: "\u5FAE\u4FE1\u73A9\u5BB6", wxId };
     }
     /** 从分享卡片绑定邀请人；仅新用户且非自己。 */
     bindInviteFromQuery(query) {
@@ -5764,10 +6488,6 @@
     }
     noteDailyClear() {
       this.daily = recordDailyClear(this.daily, Date.now());
-      if (this.daily.clearsToday >= DAILY_GOAL_CLEARS && !this.daily.playShuffleGranted) {
-        this.boosters.add("shuffle", 1);
-        this.daily = { ...this.daily, playShuffleGranted: true };
-      }
       if (this.movesLeft >= LEFTOVER_MOVES_FOR_EXTRA && !this.daily.playExtraGranted) {
         this.boosters.add("extraMoves", 1);
         this.daily = { ...this.daily, playExtraGranted: true };
@@ -5775,6 +6495,19 @@
       this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
       void this.persistDaily();
       void this.persistBoosters();
+    }
+    /** 大厅进度条满 3 格后，玩家点领取才发重排。 */
+    claimDailyShuffle() {
+      const claimed = claimDailyShuffle(this.daily);
+      if (!claimed.granted) {
+        return false;
+      }
+      this.daily = claimed.data;
+      this.boosters.add("shuffle", 1);
+      this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
+      void this.persistDaily();
+      void this.persistBoosters();
+      return true;
     }
     commitLevelCleared() {
       if (!this.level) {
@@ -5953,11 +6686,47 @@
     allowsRewardedExtraMoves() {
       return this.allowsRewardedBooster("extraMoves");
     }
+    /** 空库存补给通道：好友 → 群 → 广告。非对局返回 none。 */
+    getBoosterRefillChannel(id) {
+      if (!this.allowsRewardedBooster(id)) {
+        return "none";
+      }
+      return boosterRefillChannel(this.daily, id);
+    }
     /**
-     * 库存为 0 时看广告：锤子/重排 +1 入包；加步立刻 +5。次数不限，看完就发。
+     * 转发好友 / 群成功后发 1 个道具。每个道具每天各允许 1 次。
+     */
+    claimBoosterShare(id) {
+      var _a, _b;
+      const channel = this.getBoosterRefillChannel(id);
+      if (channel !== "friend" && channel !== "group") {
+        return false;
+      }
+      this.applyBoosterRefill(id, id === "shuffle");
+      this.daily = { ...this.daily, ...markBoosterShare(this.daily, id, channel) };
+      void this.persistDaily();
+      this.deps.analytics.track("booster_share", {
+        boosterId: id,
+        channel,
+        levelId: (_b = (_a = this.level) == null ? void 0 : _a.id) != null ? _b : 0
+      });
+      return true;
+    }
+    /** 只推进好友/群阶梯，不发道具（测试解锁广告通道用）。 */
+    markBoosterShareStep(id) {
+      const channel = this.getBoosterRefillChannel(id);
+      if (channel !== "friend" && channel !== "group") {
+        return false;
+      }
+      this.daily = { ...this.daily, ...markBoosterShare(this.daily, id, channel) };
+      void this.persistDaily();
+      return true;
+    }
+    /**
+     * 库存为 0 且已用完当日好友/群转发后看广告：锤子/重排 +1；加步立刻 +5。
      */
     async watchAdForBooster(id) {
-      if (!this.allowsRewardedBooster(id)) {
+      if (this.getBoosterRefillChannel(id) !== "ad") {
         return "unavailable";
       }
       this.deps.analytics.track("ad_show", {
@@ -5967,39 +6736,47 @@
       });
       const result = await this.deps.ads.show("rewarded_revive");
       if (result === "completed") {
-        if (id === "extraMoves") {
-          this.movesLeft += this.extraMovesGrant;
-          this.playSfx("sfx_extra");
-        } else if (id === "shuffle") {
-          this.boosters.add("shuffle", 1);
-          this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
-          this.useShuffle();
-        } else {
-          this.boosters.add(id, 1);
-          this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
-          void this.persistBoosters();
-          this.playSfx("sfx_hammer");
-        }
+        this.applyBoosterRefill(id, true);
         this.daily = { ...this.daily, ...bumpBoosterAd(this.daily, id) };
         void this.persistDaily();
         this.deps.analytics.track("ad_complete", {
           placement: "rewarded_revive",
           reason: `booster_${id}`
         });
-        if (id === "extraMoves") {
-          this.events.emit({
-            type: "BoosterUsed",
-            boosterId: id,
-            remaining: this.boosters.getCount(id),
-            movesGranted: this.extraMovesGrant
-          });
-        }
         return "revived";
       }
       if (result === "skipped") {
         return "skipped";
       }
       return result === "not_ready" ? "unavailable" : "error";
+    }
+    applyBoosterRefill(id, consumeShuffle) {
+      if (id === "extraMoves") {
+        this.movesLeft += this.extraMovesGrant;
+        this.playSfx("sfx_extra");
+        this.events.emit({
+          type: "BoosterUsed",
+          boosterId: id,
+          remaining: this.boosters.getCount(id),
+          movesGranted: this.extraMovesGrant
+        });
+        return;
+      }
+      if (id === "shuffle") {
+        this.boosters.add("shuffle", 1);
+        this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
+        if (consumeShuffle) {
+          this.useShuffle();
+        } else {
+          void this.persistBoosters();
+          this.playSfx("sfx_shuffle");
+        }
+        return;
+      }
+      this.boosters.add(id, 1);
+      this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
+      void this.persistBoosters();
+      this.playSfx("sfx_hammer");
     }
     /**
      * 对局中看广告加 5 步（与失败复活同一激励广告位）。
@@ -6090,6 +6867,15 @@
     }
     isLevelCleared(levelId) {
       return this.progress.isLevelCleared(levelId);
+    }
+    /** 已通关的最高关卡。highestLevelId 是下一关，所以要减 1，再和每关分数对一下。 */
+    getMaxClearedLevelId() {
+      var _a;
+      const data = this.progress.getData();
+      const scored = Object.keys((_a = data.levelScores) != null ? _a : {}).map((key) => Number(key)).filter((id) => Number.isFinite(id) && this.progress.isLevelCleared(id));
+      const fromScores = scored.length > 0 ? Math.max(...scored) : 0;
+      const fromHighest = Math.max(0, data.highestLevelId - 1);
+      return Math.max(fromScores, fromHighest);
     }
     /** 大厅藤蔓：当前节点的 5 关（兼容旧逻辑） */
     getVineNode() {
@@ -7208,7 +7994,194 @@
     }
   };
 
+  // src/config/challenge.json
+  var challenge_default = {
+    provider: "cloud",
+    cloudFunction: "leaderboard",
+    baseUrl: "",
+    _comment: "\u4F53\u9A8C\u7248/\u6B63\u5F0F\u7248\u8D70\u5FAE\u4FE1\u4E91\u51FD\u6570 leaderboard\uFF1B\u672C\u5730 HTTP \u8C03\u8BD5\u53EF\u6539 provider=http \u5E76\u586B baseUrl\u3002"
+  };
+
+  // src/core/adapters/HttpChallengeApi.ts
+  async function requestJson(url, method, body) {
+    if (typeof wx !== "undefined" && typeof wx.request === "function") {
+      return new Promise((resolve, reject) => {
+        wx.request({
+          url,
+          method,
+          data: body,
+          header: { "content-type": "application/json" },
+          timeout: 1500,
+          success: (res) => resolve(res.data),
+          fail: (err) => reject(new Error(err.errMsg || "request failed"))
+        });
+      });
+    }
+    const fetchFn = globalThis.fetch;
+    if (typeof fetchFn === "function") {
+      const res = await fetchFn(url, {
+        method,
+        headers: { "content-type": "application/json" },
+        body: method === "POST" ? JSON.stringify(body != null ? body : {}) : void 0
+      });
+      return res.json();
+    }
+    throw new Error("no http client");
+  }
+  var HttpChallengeApi = class {
+    constructor(baseUrl = challenge_default.baseUrl) {
+      this.baseUrl = baseUrl;
+    }
+    async create(body) {
+      return this.post("/api/challenge/create", body);
+    }
+    async verify(body) {
+      return this.post("/api/challenge/verify", body);
+    }
+    async status(userId) {
+      const url = `${this.base()}/api/challenge/status?user_id=${encodeURIComponent(userId)}&consume=1`;
+      return await requestJson(url, "GET");
+    }
+    async dailyToday(userId) {
+      const url = `${this.base()}/api/daily-challenge?user_id=${encodeURIComponent(userId)}`;
+      if (!this.baseUrl) {
+        return { ok: false, reason: "no_api" };
+      }
+      return await requestJson(url, "GET");
+    }
+    async dailySubmit(body) {
+      return this.post("/api/daily-challenge/complete", body);
+    }
+    async leaderboard(userId, maxClearedLevel = 0, profile) {
+      const qs = [
+        `user_id=${encodeURIComponent(userId)}`,
+        `max_level=${Math.max(0, Math.floor(maxClearedLevel))}`,
+        "scope=all"
+      ];
+      if (profile == null ? void 0 : profile.nickName) {
+        qs.push(`nick_name=${encodeURIComponent(profile.nickName)}`);
+      }
+      if (profile == null ? void 0 : profile.avatarUrl) {
+        qs.push(`avatar_url=${encodeURIComponent(profile.avatarUrl)}`);
+      }
+      const url = `${this.base()}/api/leaderboard?${qs.join("&")}`;
+      if (!this.baseUrl) {
+        return { ok: false, reason: "no_api" };
+      }
+      return await requestJson(url, "GET");
+    }
+    async leaderboardNotify(body) {
+      return this.post("/api/leaderboard/notify", body);
+    }
+    base() {
+      return this.baseUrl.replace(/\/$/, "");
+    }
+    async post(path, body) {
+      if (!this.baseUrl) {
+        return { ok: false, reason: "no_api" };
+      }
+      return requestJson(`${this.base()}${path}`, "POST", body);
+    }
+  };
+
+  // src/core/adapters/WxCloudChallengeApi.ts
+  function cloudApi2() {
+    try {
+      if (typeof wx === "undefined" || !wx.cloud) {
+        return null;
+      }
+      return wx.cloud;
+    } catch (e) {
+      return null;
+    }
+  }
+  var cloudReady = null;
+  function ensureCloud() {
+    if (cloudReady) {
+      return cloudReady;
+    }
+    cloudReady = (async () => {
+      const cloud = cloudApi2();
+      if (!cloud || typeof cloud.callFunction !== "function") {
+        return false;
+      }
+      try {
+        const env = cloud_default.envId || cloud.DYNAMIC_CURRENT_ENV;
+        cloud.init(env ? { env, traceUser: true } : { traceUser: true });
+        return true;
+      } catch (e) {
+        return false;
+      }
+    })();
+    return cloudReady;
+  }
+  var NO_API = { ok: false, reason: "no_api" };
+  var WxCloudChallengeApi = class {
+    constructor(functionName = challenge_default.cloudFunction || "leaderboard") {
+      this.functionName = functionName;
+    }
+    async create(_body) {
+      return NO_API;
+    }
+    async verify(_body) {
+      return NO_API;
+    }
+    async status(_userId) {
+      return NO_API;
+    }
+    async dailyToday(_userId) {
+      return NO_API;
+    }
+    async dailySubmit(_body) {
+      return NO_API;
+    }
+    async leaderboard(userId, maxClearedLevel = 0, profile) {
+      var _a;
+      if (!await ensureCloud()) {
+        return { ok: false, reason: "cloud_unavailable" };
+      }
+      const cloud = cloudApi2();
+      if (!(cloud == null ? void 0 : cloud.callFunction)) {
+        return { ok: false, reason: "cloud_unavailable" };
+      }
+      try {
+        const res = await cloud.callFunction({
+          name: this.functionName,
+          data: {
+            userId,
+            wxId: userId,
+            maxLevel: Math.max(0, Math.floor(maxClearedLevel)),
+            nickName: (profile == null ? void 0 : profile.nickName) || "",
+            avatarUrl: (profile == null ? void 0 : profile.avatarUrl) || ""
+          }
+        });
+        const result = (_a = res.result) != null ? _a : {};
+        if (result && result.ok) {
+          return result;
+        }
+        return {
+          ok: false,
+          reason: result && result.reason || "cloud_error"
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn("[crush-crush][leaderboard] cloud call failed", message);
+        return { ok: false, reason: "cloud_error" };
+      }
+    }
+    async leaderboardNotify() {
+      return NO_API;
+    }
+  };
+
   // src/services/Bootstrap.ts
+  function createChallengeApi() {
+    const provider = String(challenge_default.provider || "").toLowerCase();
+    if (provider === "cloud" || !challenge_default.baseUrl) {
+      return new WxCloudChallengeApi();
+    }
+    return new HttpChallengeApi();
+  }
   function createAppContainer() {
     const storage = new WxStorageAdapter();
     const ads = new WxAdAdapter({
@@ -7221,13 +8194,15 @@
     const analytics = new WxAnalyticsAdapter();
     const platform = new WxPlatformAdapter();
     const cloudSave = new WxCloudSaveAdapter();
+    const challengeApi = createChallengeApi();
     const session = new GameSession({
       storage,
       ads,
       audio,
       analytics,
       platform,
-      cloudSave
+      cloudSave,
+      challengeApi
     });
     return {
       storage,
@@ -8273,213 +9248,6 @@
     return 1.35 - 0.35 * easeOutCubic(u);
   }
 
-  // src/config/notice.json
-  var notice_default = {
-    id: "post20-gameplay",
-    title: "\u516C\u544A",
-    body: "20\u5173\u540E\u6709\u65B0\u73A9\u6CD5\uFF0C\u656C\u8BF7\u671F\u5F85",
-    confirm: "\u77E5\u9053\u4E86"
-  };
-
-  // src/presentation/ui/LobbyLevelMap.ts
-  var MACARON_RADIUS_OF_COVER = 62 / 576;
-  var MACARON_SPRITE_FILL = 0.97;
-  var TREE_MACARON_SLOTS = [
-    { ux: 0.205, uy: 0.39 },
-    { ux: 0.485, uy: 0.315 },
-    { ux: 0.49, uy: 0.42 },
-    { ux: 0.47, uy: 0.55 },
-    { ux: 0.785, uy: 0.47 }
-  ];
-  var TREE_CAPTION_UY = 0.645;
-  var CLOUD_PAGE_SLOTS = [
-    [
-      { ux: 0.33, uy: 0.28 },
-      { ux: 0.58, uy: 0.23 },
-      { ux: 0.39, uy: 0.39 },
-      { ux: 0.69, uy: 0.47 },
-      { ux: 0.51, uy: 0.56 }
-    ],
-    [
-      { ux: 0.56, uy: 0.26 },
-      { ux: 0.33, uy: 0.34 },
-      { ux: 0.65, uy: 0.41 },
-      { ux: 0.68, uy: 0.52 },
-      { ux: 0.47, uy: 0.58 }
-    ],
-    [
-      { ux: 0.375, uy: 0.31 },
-      { ux: 0.625, uy: 0.31 },
-      { ux: 0.35, uy: 0.43 },
-      { ux: 0.67, uy: 0.43 },
-      { ux: 0.5, uy: 0.52 }
-    ]
-  ];
-  function cloudLevelSlots(nodeIndex) {
-    const page = Math.max(0, nodeIndex - 1);
-    return CLOUD_PAGE_SLOTS[page % CLOUD_PAGE_SLOTS.length];
-  }
-  function lobbyPageHeight(height) {
-    return Math.max(1, height);
-  }
-  function lobbyPageIndex(camY, height) {
-    const pageH = lobbyPageHeight(height);
-    return Math.max(0, Math.round(camY / pageH));
-  }
-  var LOBBY_SNAP_MS = 200;
-  function lobbySnapEase(t) {
-    const u = Math.max(0, Math.min(1, t));
-    const inv = 1 - u;
-    return 1 - inv * inv * inv * inv;
-  }
-  function lobbySnapCamY(from, to, elapsedMs, durationMs = LOBBY_SNAP_MS) {
-    if (durationMs <= 0 || elapsedMs >= durationMs) {
-      return to;
-    }
-    if (elapsedMs <= 0) {
-      return from;
-    }
-    return from + (to - from) * lobbySnapEase(elapsedMs / durationMs);
-  }
-  function lobbyPageOriginY(page, camY, height) {
-    const h = Math.max(1, height);
-    const current = camY / h;
-    if (page <= current) {
-      return camY - page * h;
-    }
-    if (page <= current + 1) {
-      return 0;
-    }
-    return camY - page * h;
-  }
-  function isLobbyNodeExposed(node, camY, height, hideBelowY) {
-    const h = Math.max(1, height);
-    const front = Math.max(0, Math.floor(camY / h + 1e-4));
-    if (node.nodeIndex < front) {
-      return false;
-    }
-    if (typeof hideBelowY === "number" && Number.isFinite(hideBelowY) && node.y - node.hitR * 0.15 > hideBelowY) {
-      return false;
-    }
-    if (node.nodeIndex === front) {
-      return true;
-    }
-    if (node.nodeIndex === front + 1) {
-      const reveal = camY - front * h;
-      return node.y + node.hitR * 0.55 < reveal;
-    }
-    return false;
-  }
-  function lobbyCameraMax(maxNodeIndex, height) {
-    return Math.max(0, maxNodeIndex) * lobbyPageHeight(height);
-  }
-  function lobbyMaxPageIndex(totalLevels) {
-    return Math.max(0, vineNodeCount(totalLevels) - 1);
-  }
-  function lobbyComingSoonLine(page, totalLevels) {
-    if (totalLevels <= 0 || page !== lobbyMaxPageIndex(totalLevels)) {
-      return "";
-    }
-    return notice_default.body;
-  }
-  function lobbyCamFromDrag(camStart, dragDy, min, max, extra = 48) {
-    const raw = camStart - dragDy;
-    return Math.max(min - extra, Math.min(max + extra, raw));
-  }
-  function lobbySnapTarget(camStart, camNow, height, maxPage, velY) {
-    const pageH = lobbyPageHeight(height);
-    const startPage = Math.round(camStart / pageH);
-    const delta = camNow - camStart;
-    let page = startPage;
-    if (velY > 0.42 || delta > pageH * 0.18) {
-      page = startPage + 1;
-    } else if (velY < -0.42 || delta < -pageH * 0.18) {
-      page = startPage - 1;
-    }
-    page = Math.max(0, Math.min(maxPage, page));
-    return page * pageH;
-  }
-  function lobbyMacaronRadius(coverDw) {
-    return coverDw * MACARON_RADIUS_OF_COVER;
-  }
-  function layoutLobbyLevelNodes(args) {
-    var _a;
-    const { vines, cover, width, height, camY } = args;
-    const macaronR = lobbyMacaronRadius(cover.dw);
-    const cloudCover = (_a = args.cloudCover) != null ? _a : { dx: 0, dy: 0, dw: width, dh: height };
-    const out = [];
-    for (const vine of vines) {
-      const lift = vine.nodeIndex === 0 ? 0 : cloudPageLiftY(vine.nodeIndex, cloudCover, args.maxCloudCenterY);
-      for (const levelId of vine.levelIds) {
-        const slotIndex = levelId - vine.startLevelId;
-        if (vine.nodeIndex === 0) {
-          const slot2 = TREE_MACARON_SLOTS[slotIndex];
-          if (!slot2) {
-            continue;
-          }
-          out.push({
-            levelId,
-            nodeIndex: 0,
-            slotIndex,
-            x: cover.dx + cover.dw * slot2.ux,
-            y: cover.dy + cover.dh * slot2.uy + lobbyPageOriginY(0, camY, height),
-            hitR: macaronR,
-            kind: "tree"
-          });
-          continue;
-        }
-        const slot = cloudLevelSlots(vine.nodeIndex)[slotIndex];
-        if (!slot) {
-          continue;
-        }
-        out.push({
-          levelId,
-          nodeIndex: vine.nodeIndex,
-          slotIndex,
-          x: cloudCover.dx + cloudCover.dw * slot.ux,
-          y: cloudCover.dy + cloudCover.dh * slot.uy - lift + lobbyPageOriginY(vine.nodeIndex, camY, height),
-          hitR: macaronR,
-          kind: "candy-cloud"
-        });
-      }
-    }
-    return out;
-  }
-  function cloudPageLiftY(nodeIndex, cloudCover, maxCloudCenterY) {
-    if (typeof maxCloudCenterY !== "number" || !Number.isFinite(maxCloudCenterY)) {
-      return 0;
-    }
-    let lowest = Number.NEGATIVE_INFINITY;
-    for (const slot of cloudLevelSlots(nodeIndex)) {
-      lowest = Math.max(lowest, cloudCover.dy + cloudCover.dh * slot.uy);
-    }
-    return lowest > maxCloudCenterY ? lowest - maxCloudCenterY : 0;
-  }
-  function isLobbyNodeOnScreen(node, height, pad = 72) {
-    return node.y > -pad && node.y < height + pad;
-  }
-  function lobbyPageCaption(page, totalLevels = 0) {
-    if (page <= 0) {
-      return "";
-    }
-    const start = page * LEVELS_PER_VINE_NODE + 1;
-    const rawEnd = start + LEVELS_PER_VINE_NODE - 1;
-    const end = totalLevels > 0 ? Math.min(totalLevels, rawEnd) : rawEnd;
-    if (start > end) {
-      return "";
-    }
-    if (start === end) {
-      return `\u7B2C ${start} \u5173`;
-    }
-    return `\u7B2C ${start}-${end} \u5173`;
-  }
-  function lobbyCaptionY(cover, camY, height, page) {
-    if (page <= 0) {
-      return cover.dy + cover.dh * TREE_CAPTION_UY + lobbyPageOriginY(0, camY, height);
-    }
-    return height * TREE_CAPTION_UY + lobbyPageOriginY(page, camY, height);
-  }
-
   // src/presentation/fx/CuteSceneBackground.ts
   var CuteSceneBackground = class {
     constructor() {
@@ -8513,9 +9281,9 @@
     /**
      * 绘制完整动态背景。
      * @param mode - lobby | level（闯关）
-     * @param lobbyPanY - 大厅相机下移：树往下走，上方露出天空云层
+     * @param lobbyPanY - 保留参数兼容调用方；大厅底图固定不随相机平移
      */
-    draw(ctx, images, mode, nowMs, lobbyPanY = 0) {
+    draw(ctx, images, mode, nowMs, _lobbyPanY = 0) {
       const { width, height } = this;
       if (width <= 0 || height <= 0) {
         return;
@@ -8523,286 +9291,39 @@
       const t = nowMs * 1e-3;
       const img = mode === "lobby" ? images.lobby : images.level;
       if (mode === "lobby") {
-        this.drawLobbyWorld(ctx, images, t, lobbyPanY);
+        this.drawLobbyWorld(ctx, images, t);
         return;
       }
       if (img) {
-        this.drawCoverImage(ctx, img, width, height, 1, 0, 0, 0.92);
+        this.drawFallbackGradient(ctx, mode, width, height);
+        try {
+          this.drawCoverImage(ctx, img, width, height, 1, 0, 0, 0.92);
+        } catch (err) {
+          console.warn("[crush-crush] level bg draw failed", err);
+        }
       } else {
         this.drawFallbackGradient(ctx, mode, width, height);
       }
-      this.drawSparkles(ctx, t, this.lite ? 0.16 : 0.22);
+      this.drawSparkles(ctx, t, 0.2);
     }
     /**
-     * 大厅世界：第 1 屏树冠底图；上滑后整屏换上与树冠同质感的糖果云背景。
+     * 大厅世界：先铺渐变底，再叠首页图。iOS 上 drawImage 失败时不至于整页黑屏。
      */
-    drawLobbyWorld(ctx, images, t, panY) {
-      var _a;
+    drawLobbyWorld(ctx, images, t) {
       const { width, height } = this;
+      this.drawFallbackGradient(ctx, "lobby", width, height);
       const img = images.lobby;
-      const hasCloudArt = ((_a = images.lobbyCloudPages) != null ? _a : []).some((page) => !!page);
-      const treeOrigin = lobbyPageOriginY(0, panY, height);
-      const open = Math.max(0, Math.min(1, treeOrigin / Math.max(24, height * 0.55)));
-      let destY = 0;
-      let destH = height;
-      let layout = null;
-      if (img && (img.width || 0) > 0) {
-        layout = this.getCoverLayout(img, 0.5);
-        destY = layout.dy + treeOrigin;
-        destH = layout.dh;
-      }
-      if (!layout || destY > 1) {
-        this.drawSkyGradient(ctx, width, height);
-        if (!hasCloudArt) {
-          this.drawAmbientSkyClouds(ctx, t, open);
+      const iw = (img == null ? void 0 : img.width) || 0;
+      const ih = (img == null ? void 0 : img.height) || 0;
+      if (img && iw > 0 && ih > 0) {
+        try {
+          const layout = this.getCoverLayout(img, 0.5);
+          ctx.drawImage(img, layout.dx, layout.dy, layout.dw, layout.dh);
+        } catch (err) {
+          console.warn("[crush-crush] lobby bg draw failed", err);
         }
       }
-      if (treeOrigin > 1 || panY > height * 0.5) {
-        this.drawPagedCandyCloudBackdrops(ctx, images, panY);
-      }
-      if (layout && img && destY < height && destY + destH > 0) {
-        ctx.drawImage(
-          img,
-          0,
-          0,
-          Math.max(1, img.width || width),
-          Math.max(1, img.height || height),
-          layout.dx - 4,
-          destY - 6,
-          layout.dw + 8,
-          destH + 10
-        );
-        this.coverLobbyBakedCornerIcons(ctx, layout, destY, destH, img);
-      } else if (!layout && open < 0.2) {
-        this.drawFallbackGradient(ctx, "lobby", width, height);
-      }
-      this.coverLobbyTopSeam(ctx, width, destY - 6);
-      this.drawSparkles(ctx, t, (this.lite ? 0.18 : 0.28) + open * 0.12);
-      if (open > 0.08) {
-        this.drawCandyDust(ctx, t, (this.lite ? 0.12 : 0.22) + open * 0.12);
-      }
-    }
-    /** 云层翻页：后续关卡沿用 6-10 关薄荷棉花糖岛设计 */
-    drawPagedCandyCloudBackdrops(ctx, images, panY) {
-      var _a;
-      const { height } = this;
-      if (height <= 0) {
-        return;
-      }
-      const pages = ((_a = images.lobbyCloudPages) != null ? _a : []).filter(
-        (img) => !!img && (img.width || 0) > 0
-      );
-      if (pages.length === 0) {
-        return;
-      }
-      const first = Math.max(1, Math.floor(panY / Math.max(1, height)));
-      const last = first + 1;
-      for (let page = last; page >= first; page -= 1) {
-        if (page < 1) {
-          continue;
-        }
-        const img = pages[(page - 1) % pages.length];
-        const layout = this.getCoverLayout(img, 0.48);
-        const y = layout.dy + lobbyPageOriginY(page, panY, height);
-        if (y + layout.dh < -8 || y > height + 8) {
-          continue;
-        }
-        ctx.drawImage(
-          img,
-          0,
-          0,
-          img.width || layout.dw,
-          img.height || layout.dh,
-          layout.dx - 4,
-          y - 6,
-          layout.dw + 8,
-          layout.dh + 10
-        );
-      }
-    }
-    drawSkyGradient(ctx, width, height) {
-      const g = ctx.createLinearGradient(0, 0, 0, height);
-      g.addColorStop(0, "#9ed4fb");
-      g.addColorStop(0.18, "#b5e4fc");
-      g.addColorStop(0.48, "#ffe3f2");
-      g.addColorStop(0.78, "#fff0c8");
-      g.addColorStop(1, "#e7fff6");
-      ctx.fillStyle = g;
-      ctx.fillRect(0, -4, width, height + 8);
-    }
-    /**
-     * 树屏顶边与上一层天空相接时，抹掉 1px 硬边，不铺色带。
-     */
-    coverLobbyTopSeam(ctx, width, destY) {
-      const y0 = destY - 2;
-      const capH = 8;
-      const g = ctx.createLinearGradient(0, y0, 0, y0 + capH);
-      g.addColorStop(0, "rgba(103, 200, 253, 0.22)");
-      g.addColorStop(1, "rgba(103, 200, 253, 0)");
-      ctx.fillStyle = g;
-      ctx.fillRect(0, y0, width, capH);
-    }
-    /**
-     * 底图右上角烘焙了两枚装饰图标，实机上会和微信胶囊叠在一起。
-     * 用与顶空一致的渐变盖住，不改 JPEG。
-     */
-    coverLobbyBakedCornerIcons(ctx, layout, destY, destH, img) {
-      const iw = Math.max(1, img.width || 576);
-      const ih = Math.max(1, img.height || 1024);
-      const dw = layout.dw + 8;
-      const dh = destH + 10;
-      const x = layout.dx - 4 + 484 / iw * dw;
-      const y = destY - 6 + 30 / ih * dh;
-      const h = (198 - 30) / ih * dh;
-      const w = this.width - x + 6;
-      if (w <= 0 || h <= 0) {
-        return;
-      }
-      const g = ctx.createLinearGradient(x, y, x, y + h);
-      g.addColorStop(0, "#9ed4fb");
-      g.addColorStop(0.4, "#b6e8fc");
-      g.addColorStop(1, "#c5eefd");
-      ctx.fillStyle = g;
-      ctx.fillRect(x + 14, y, Math.max(0, w - 14), h);
-      const edge = ctx.createLinearGradient(x, y, x + 16, y);
-      edge.addColorStop(0, "rgba(182, 232, 252, 0)");
-      edge.addColorStop(1, "rgba(182, 232, 252, 1)");
-      ctx.fillStyle = edge;
-      ctx.fillRect(x, y, 16, h);
-    }
-    drawAmbientSkyClouds(ctx, t, open) {
-      if (open <= 0.02) {
-        return;
-      }
-      ctx.save();
-      ctx.globalAlpha = 0.4 + open * 0.45;
-      const candy = [
-        { x: 0.12, y: 0.1, s: 1.35, tint: "#ffd0ea", dots: true },
-        { x: 0.78, y: 0.08, s: 1.5, tint: "#ffe6a8", dots: true },
-        { x: 0.48, y: 0.06, s: 1.05, tint: "#d9f5c8", dots: true },
-        { x: 0.9, y: 0.22, s: 1, tint: "#e4d4ff", dots: true },
-        { x: 0.22, y: 0.78, s: 1.1, tint: "#fff0c8", dots: true }
-      ];
-      const shown = this.lite ? candy.slice(0, 3) : candy;
-      for (let i = 0; i < shown.length; i += 1) {
-        const c = shown[i];
-        const bob = Math.sin(t * 0.7 + i) * 6;
-        const drift = Math.sin(t * 0.15 + i * 0.8) * 8;
-        this.drawCottonCandySwirl(
-          ctx,
-          this.width * c.x + drift,
-          this.height * c.y + bob,
-          c.s,
-          c.tint,
-          c.dots
-        );
-      }
-      ctx.restore();
-    }
-    /**
-     * 关卡宿主云：棉花糖旋涡，贴合大厅树冠质感。
-     */
-    drawLevelHostCloud(ctx, x, y, scale, candy, nowMs, slotIndex = 0) {
-      const t = nowMs * 1e-3;
-      const bob = Math.sin(t * 1.05 + x * 0.01) * 2.4;
-      const tint = candy ? this.candyCloudTint(slotIndex * 17 + 3) : "#e7fff6";
-      this.drawCottonCandySwirl(ctx, x, y + bob + 10, scale * 1.42, tint, candy);
-    }
-    /**
-     * 树冠连到云朵：一串棉花糖，而不是细线。
-     */
-    drawCottonCandyStrand(ctx, x0, y0, x1, y1, nowMs) {
-      const t = nowMs * 1e-3;
-      const cx = (x0 + x1) / 2 + 18;
-      const cy = (y0 + y1) / 2;
-      ctx.save();
-      ctx.strokeStyle = "rgba(186, 245, 220, 0.7)";
-      ctx.lineWidth = 22;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(x0, y0);
-      ctx.quadraticCurveTo(cx, cy, x1, y1);
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
-      ctx.lineWidth = 10;
-      ctx.stroke();
-      ctx.restore();
-      const steps = 3;
-      for (let i = 0; i <= steps; i += 1) {
-        const u = i / steps;
-        const mt = 1 - u;
-        const x = mt * mt * x0 + 2 * mt * u * cx + u * u * x1;
-        const y = mt * mt * y0 + 2 * mt * u * cy + u * u * y1;
-        const bob = Math.sin(t * 1.2 + i) * 3;
-        this.drawCottonCandySwirl(
-          ctx,
-          x,
-          y + bob,
-          0.55 + i % 2 * 0.18,
-          i % 2 === 0 ? "#d9fff0" : "#fff6fb",
-          false
-        );
-      }
-    }
-    candyCloudTint(seed) {
-      const tints = ["#c8f8e4", "#d9fff0", "#e7fff6", "#c8f8e4", "#b8f0dc"];
-      const i = Math.abs(Math.floor(seed)) % tints.length;
-      return tints[i];
-    }
-    /** 棉花糖旋涡：大厅树冠那种厚 spiral 糖霜 */
-    drawCottonCandySwirl(ctx, x, y, scale, tint, candyDots) {
-      const r = 24 * scale;
-      ctx.save();
-      ctx.fillStyle = "rgba(120, 170, 200, 0.14)";
-      this.ellipse(ctx, x, y + r * 0.5, r * 1.75, r * 0.4);
-      ctx.fillStyle = tint;
-      this.ellipse(ctx, x, y, r * 1.62, r * 1.22);
-      const lobes = this.lite ? 3 : 5;
-      for (let i = 0; i < lobes; i += 1) {
-        const ang = i * 0.95 + 0.15;
-        const spin = 0.55 + i % 4 * 0.08;
-        this.ellipse(
-          ctx,
-          x + Math.cos(ang) * r * spin,
-          y + Math.sin(ang) * r * 0.38,
-          r * (0.7 + i % 3 * 0.1),
-          r * 0.5
-        );
-      }
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = this.shadeHex(tint, -28);
-      this.ellipse(ctx, x - r * 0.18, y + r * 0.08, r * 0.85, r * 0.28);
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = "rgba(255,255,255,0.55)";
-      this.ellipse(ctx, x - r * 0.32, y - r * 0.4, r * 0.7, r * 0.32);
-      if (candyDots) {
-        const dots = ["#ff85c0", "#ffe066", "#74c0fc"];
-        for (let i = 0; i < dots.length; i += 1) {
-          const ang = i / dots.length * Math.PI * 2 + 0.4;
-          ctx.fillStyle = dots[i];
-          ctx.beginPath();
-          ctx.arc(
-            x + Math.cos(ang) * r * 0.82,
-            y + Math.sin(ang) * r * 0.3 + 3,
-            2.4 + i % 2,
-            0,
-            Math.PI * 2
-          );
-          ctx.fill();
-        }
-      }
-      ctx.restore();
-    }
-    shadeHex(hex, delta) {
-      const raw = hex.replace("#", "");
-      if (raw.length !== 6) {
-        return hex;
-      }
-      const clamp3 = (n) => Math.max(0, Math.min(255, n));
-      const r = clamp3(parseInt(raw.slice(0, 2), 16) + delta);
-      const g = clamp3(parseInt(raw.slice(2, 4), 16) + delta);
-      const b = clamp3(parseInt(raw.slice(4, 6), 16) + delta);
-      return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+      this.drawSparkles(ctx, t, 0.16);
     }
     /**
      * cover 绘制矩形（与大厅静止底图一致），供热区换算。
@@ -8838,21 +9359,12 @@
         g.addColorStop(0.72, "#b8e89a");
         g.addColorStop(1, "#7bc96a");
       } else {
-        g.addColorStop(0, "#9ed4fb");
-        g.addColorStop(0.45, "#b8e4ff");
+        g.addColorStop(0, "#a7f0d4");
+        g.addColorStop(0.7, "#b6f0d8");
         g.addColorStop(1, "#ffe6f0");
       }
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, width, height);
-    }
-    ellipse(ctx, cx, cy, rx, ry) {
-      ctx.beginPath();
-      if (typeof ctx.ellipse === "function") {
-        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-      } else {
-        ctx.arc(cx, cy, Math.max(rx, ry), 0, Math.PI * 2);
-      }
-      ctx.fill();
     }
     drawSparkles(ctx, t, strength) {
       ctx.save();
@@ -8862,22 +9374,6 @@
         ctx.globalAlpha = twinkle * strength;
         ctx.beginPath();
         ctx.arc(s.x, s.y + Math.sin(t * 0.6 + s.phase) * 4, s.r * twinkle, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-    }
-    /** 彩色糖屑漂浮，增强欢乐氛围 */
-    drawCandyDust(ctx, t, strength) {
-      const colors = ["#ff85c0", "#ffe066", "#74c0fc", "#8ce99a", "#ff922b"];
-      ctx.save();
-      const dust = this.lite ? 4 : 8;
-      for (let i = 0; i < dust; i += 1) {
-        const x = (i * 137 + t * (10 + i % 4 * 4)) % (this.width + 40) - 20;
-        const y = i * 89 % Math.floor(this.height * 0.7) + Math.sin(t * 0.9 + i) * 8 + 20;
-        ctx.globalAlpha = (0.25 + 0.45 * Math.abs(Math.sin(t * 1.4 + i))) * strength;
-        ctx.fillStyle = colors[i % colors.length];
-        ctx.beginPath();
-        ctx.arc(x, y, 1.6 + i % 3 * 0.7, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.restore();
@@ -9172,6 +9668,445 @@
     }
   };
 
+  // src/presentation/ui/LobbyLevelMap.ts
+  var LADDER_BAR_H_OF_HEIGHT = 0.042;
+  var LADDER_BAR_W_OF_WIDTH = 0.52;
+  var LADDER_ZIGZAG_OF_WIDTH = 0.055;
+  var LADDER_STEP_OF_HEIGHT = 0.06;
+  var LADDER_CIRCLE_OF_BAR = 1.12;
+  var LADDER_BOTTOM_PAD_OF_HEIGHT = 0.22;
+  var LOBBY_FIRST_SCREEN_LEVELS = 8;
+  var LOBBY_LADDER_BOTTOM_GAP = 10;
+  var LOBBY_LADDER_TOP_INSET = 10;
+  var MACARON_RADIUS_OF_COVER = 30 / 576;
+  var LEVELS_PER_CANDY_HOUSE = 20;
+  var TREE_CAPTION_UY = 0.78;
+  var LOBBY_MORE_LEVELS_HINT = "\u4E0A\u6ED1\u95EF\u5173";
+  var LOBBY_SWIPE_HINT_HOLD_MS = 3e3;
+  var LOBBY_SWIPE_HINT_FADE_MS = 480;
+  var LOBBY_BRAND_TITLE = "\u840C\u5BA0\u7C89\u788E\u6D88";
+  var LOBBY_BRAND_SUBTITLE = "\u95EF\u5173\u6D88\u9664 \xB7 \u53EF\u7231\u5C0F\u52A8\u7269";
+  var LOBBY_TITLE_UY = 92 / 1024;
+  var LOBBY_SUBTITLE_UY = 142 / 1024;
+  var LADDER_CLEARED_THEMES = [
+    {
+      barTop: "#9ad8f8",
+      barBottom: "#5eb8ef",
+      circleTop: "#7ec8f5",
+      circleBottom: "#3aa0d8",
+      stripe: "rgba(255,255,255,0.22)",
+      pattern: "none"
+    },
+    {
+      barTop: "#d0bcfa",
+      barBottom: "#9b7aef",
+      circleTop: "#b9a0f5",
+      circleBottom: "#7c5ce0",
+      stripe: "rgba(255,255,255,0.28)",
+      pattern: "stripe"
+    },
+    {
+      barTop: "#8eebc0",
+      barBottom: "#4ecf8a",
+      circleTop: "#6edc9e",
+      circleBottom: "#2fb872",
+      stripe: "rgba(255,255,255,0.35)",
+      pattern: "sprinkle"
+    }
+  ];
+  var LADDER_CURRENT_THEME = {
+    barTop: "#ffc078",
+    barBottom: "#f18a2c",
+    circleTop: "#ffb056",
+    circleBottom: "#ef7a1a",
+    stripe: "rgba(255,255,255,0.38)",
+    pattern: "stripe",
+    startTop: "#ff8f6b",
+    startBottom: "#ff5c38"
+  };
+  var LADDER_LOCKED_THEME = {
+    barTop: "rgba(210, 224, 224, 0.78)",
+    barBottom: "rgba(180, 198, 200, 0.72)",
+    circleTop: "rgba(190, 205, 208, 0.92)",
+    circleBottom: "rgba(160, 178, 182, 0.9)",
+    stripe: "rgba(255,255,255,0.12)",
+    pattern: "none"
+  };
+  function lobbyBrandAnchorY(cover, _camY, uy) {
+    return cover.dy + cover.dh * uy;
+  }
+  function layoutLobbyMoreLevelsHint(width, statusBarHeight, bobY = 0) {
+    const h = 28;
+    const r = h / 2;
+    const w = 86;
+    const y = Math.max(statusBarHeight + 56, 72) + bobY - h / 2;
+    const x = width - w + 6;
+    const cy = y + r;
+    return {
+      x,
+      y,
+      w,
+      h,
+      r,
+      cy,
+      chevronX: x + 16,
+      textX: x + 48
+    };
+  }
+  function lobbySwipeHintOpacity(shownAtMs, nowMs, dismissed) {
+    if (dismissed || shownAtMs <= 0) {
+      return 0;
+    }
+    const elapsed = Math.max(0, nowMs - shownAtMs);
+    if (elapsed < LOBBY_SWIPE_HINT_HOLD_MS) {
+      return 1;
+    }
+    const t = (elapsed - LOBBY_SWIPE_HINT_HOLD_MS) / LOBBY_SWIPE_HINT_FADE_MS;
+    return Math.max(0, 1 - t);
+  }
+  function lobbyLadderStep(height, ladderStep) {
+    if (typeof ladderStep === "number" && Number.isFinite(ladderStep) && ladderStep > 0) {
+      return ladderStep;
+    }
+    return Math.max(40, height * LADDER_STEP_OF_HEIGHT);
+  }
+  function lobbyLadderStepForBand(bandHeight, barH = 36, levels = LOBBY_FIRST_SCREEN_LEVELS) {
+    const gaps = Math.max(1, levels - 1);
+    const band = Math.max(1, bandHeight);
+    return Math.max(barH + 6, (band + barH * 0.15) / gaps - 1);
+  }
+  function lobbyFirstScreenLadderLayout(args) {
+    var _a, _b, _c;
+    const bottomGap = (_a = args.bottomGap) != null ? _a : LOBBY_LADDER_BOTTOM_GAP;
+    const topInset = (_b = args.topInset) != null ? _b : LOBBY_LADDER_TOP_INSET;
+    const levels = (_c = args.levels) != null ? _c : LOBBY_FIRST_SCREEN_LEVELS;
+    const ceiling = args.contentTop - bottomGap - args.barH * 0.5;
+    const clipTop = args.bandTop + topInset;
+    const step = lobbyLadderStepForBand(
+      Math.max(1, ceiling - clipTop),
+      args.barH,
+      levels
+    );
+    return { ceiling, step, bandTop: clipTop };
+  }
+  function lobbyBarSize(width, height) {
+    return {
+      w: Math.min(width * LADDER_BAR_W_OF_WIDTH, width - 72),
+      h: Math.max(32, height * LADDER_BAR_H_OF_HEIGHT)
+    };
+  }
+  function isCandyHouseLevel(levelId) {
+    return levelId > 0 && levelId % LEVELS_PER_CANDY_HOUSE === 0;
+  }
+  function lobbyCircleSide(levelId) {
+    return levelId % 2 === 1 ? "right" : "left";
+  }
+  function lobbyLadderSlot(levelId) {
+    const i = Math.max(0, levelId - 1);
+    const side = lobbyCircleSide(levelId);
+    const ux = side === "left" ? 0.5 - LADDER_ZIGZAG_OF_WIDTH : 0.5 + LADDER_ZIGZAG_OF_WIDTH;
+    return { ux, uy: i };
+  }
+  function lobbyPageHeight(height) {
+    return Math.max(1, height);
+  }
+  function lobbyPageIndex(camY, height) {
+    const pageH = lobbyPageHeight(height);
+    return Math.max(0, Math.round(camY / pageH));
+  }
+  var LOBBY_SNAP_MS = 220;
+  function lobbySnapEase(t) {
+    const u = Math.max(0, Math.min(1, t));
+    const inv = 1 - u;
+    return 1 - inv * inv * inv * inv;
+  }
+  function lobbySnapCamY(from, to, elapsedMs, durationMs = LOBBY_SNAP_MS) {
+    if (durationMs <= 0 || elapsedMs >= durationMs) {
+      return to;
+    }
+    if (elapsedMs <= 0) {
+      return from;
+    }
+    return from + (to - from) * lobbySnapEase(elapsedMs / durationMs);
+  }
+  function isLobbyNodeExposed(node, _camY, _height, hideBelowY, hideAboveY) {
+    if (typeof hideBelowY === "number" && Number.isFinite(hideBelowY) && node.barY + node.barH * 0.35 > hideBelowY) {
+      return false;
+    }
+    if (typeof hideAboveY === "number" && Number.isFinite(hideAboveY) && node.barY + node.barH * 0.65 < hideAboveY) {
+      return false;
+    }
+    return true;
+  }
+  function lobbyLevelBandTop(cover, statusBarHeight) {
+    const subY = lobbyBrandAnchorY(cover, 0, LOBBY_SUBTITLE_UY);
+    const titleFloor = subY + Math.max(96, cover.dh * 0.105);
+    return Math.max(statusBarHeight + 84, titleFloor);
+  }
+  function lobbyCameraMax(totalLevels, height, ladderStep) {
+    const step = lobbyLadderStep(height, ladderStep);
+    const levels = Math.max(1, totalLevels);
+    return Math.max(0, (levels - 1) * step + step * 2.4);
+  }
+  function lobbyMaxPageIndex(totalLevels) {
+    const h = 800;
+    const maxCam = lobbyCameraMax(totalLevels, h);
+    return Math.max(0, Math.round(maxCam / h));
+  }
+  function lobbyComingSoonLine(_page = 0, _totalLevels = 0) {
+    return notice_default.body;
+  }
+  function lobbyCamFromDrag(camStart, dragDy, min, max, extra = 48) {
+    const raw = camStart - dragDy;
+    return Math.max(min - extra, Math.min(max + extra, raw));
+  }
+  function lobbySnapTarget(camStart, camNow, height, maxCamOrPage, velY, ladderStep) {
+    const pageH = lobbyPageHeight(height);
+    const maxCam = maxCamOrPage > pageH * 1.5 ? maxCamOrPage : Math.max(0, maxCamOrPage) * pageH;
+    const step = lobbyLadderStep(height, ladderStep);
+    const delta = camNow - camStart;
+    let target = camNow;
+    if (Math.abs(velY) <= 0.35 && Math.abs(delta) < pageH * 0.12) {
+      target = Math.round(camStart / step) * step;
+    } else if (velY > 0.35 || delta > pageH * 0.12) {
+      target = camNow + Math.min(pageH * 0.55, 120 + Math.abs(velY) * 180);
+      target = Math.round(target / step) * step;
+    } else if (velY < -0.35 || delta < -pageH * 0.12) {
+      target = camNow - Math.min(pageH * 0.55, 120 + Math.abs(velY) * 180);
+      target = Math.round(target / step) * step;
+    } else {
+      target = Math.round(target / step) * step;
+    }
+    return Math.max(0, Math.min(maxCam, target));
+  }
+  function layoutLobbyLevelNodes(args) {
+    const { vines, width, height, camY } = args;
+    const { w: barW, h: barH } = lobbyBarSize(width, height);
+    const circleR = barH * LADDER_CIRCLE_OF_BAR / 2;
+    const step = lobbyLadderStep(height, args.ladderStep);
+    const bottom = typeof args.ladderBottomY === "number" && Number.isFinite(args.ladderBottomY) ? args.ladderBottomY : typeof args.maxCloudCenterY === "number" && Number.isFinite(args.maxCloudCenterY) ? args.maxCloudCenterY : height * (1 - LADDER_BOTTOM_PAD_OF_HEIGHT);
+    const levelIds = [];
+    for (const vine of vines) {
+      for (const id of vine.levelIds) {
+        levelIds.push(id);
+      }
+    }
+    levelIds.sort((a, b) => a - b);
+    const baseX = (width - barW) / 2;
+    const zigzag = width * LADDER_ZIGZAG_OF_WIDTH;
+    const out = [];
+    for (const levelId of levelIds) {
+      const slot = lobbyLadderSlot(levelId);
+      const house = isCandyHouseLevel(levelId);
+      const side = lobbyCircleSide(levelId);
+      const cy = bottom - slot.uy * step + camY;
+      const barY = cy - barH / 2;
+      const barX = side === "left" ? baseX - zigzag : baseX + zigzag;
+      const circleX = side === "left" ? barX + circleR * 0.15 + circleR * 0.55 : barX + barW - circleR * 0.15 - circleR * 0.55;
+      const nodeIndex = Math.floor((levelId - 1) / LEVELS_PER_VINE_NODE);
+      const slotIndex = (levelId - 1) % LEVELS_PER_VINE_NODE;
+      out.push({
+        levelId,
+        nodeIndex,
+        slotIndex,
+        x: circleX,
+        y: cy,
+        hitR: circleR,
+        kind: house ? "candy-house" : "ladder",
+        barX,
+        barY,
+        barW,
+        barH,
+        circleSide: side,
+        circleR
+      });
+    }
+    return out;
+  }
+  function lobbyLevelHitRect(node) {
+    const sidePad = Math.max(18, node.circleR * 1.05);
+    const vertPad = Math.max(6, node.circleR - node.barH * 0.5 + 4);
+    return {
+      x: node.barX - sidePad,
+      y: node.barY - vertPad,
+      w: node.barW + sidePad * 2,
+      h: node.barH + vertPad * 2
+    };
+  }
+  function lobbyCloudDecorPoints(nodes, height, pad = 80) {
+    return nodes.filter((n) => n.y > -pad && n.y < height + pad).map((n) => {
+      const x = n.circleSide === "left" ? n.barX + n.barW - n.circleR * 0.35 : n.barX + n.circleR * 0.35;
+      return {
+        x,
+        y: n.y + n.circleR * 0.08,
+        side: n.circleSide,
+        circleR: n.circleR
+      };
+    });
+  }
+  function lobbyLadderSideTrailPoints(nodes, height, pad = 100) {
+    const sorted = nodes.filter((n) => n.y > -pad && n.y < height + pad).slice().sort((a, b) => a.levelId - b.levelId);
+    if (sorted.length < 2) {
+      return [];
+    }
+    const leftXs = sorted.filter((n) => n.circleSide === "left").map((n) => n.x);
+    const rightXs = sorted.filter((n) => n.circleSide === "right").map((n) => n.x);
+    const leftX = leftXs.length > 0 ? leftXs.reduce((s, v) => s + v, 0) / leftXs.length : Math.min(...sorted.map((n) => n.barX)) - 10;
+    const rightX = rightXs.length > 0 ? rightXs.reduce((s, v) => s + v, 0) / rightXs.length : Math.max(...sorted.map((n) => n.barX + n.barW)) + 10;
+    const out = [];
+    for (let i = 0; i < sorted.length - 1; i += 1) {
+      const a = sorted[i];
+      const b = sorted[i + 1];
+      const dy = b.y - a.y;
+      const spots = [
+        { t: 0.32, r: 4.2 },
+        { t: 0.55, r: 2.7 },
+        { t: 0.72, r: 3.4 }
+      ];
+      for (let s = 0; s < spots.length; s += 1) {
+        const spot = spots[s];
+        const y = a.y + dy * spot.t;
+        if (y < -24 || y > height + 24) {
+          continue;
+        }
+        const tone = (i + s) % 2 === 0 ? "white" : "cream";
+        out.push({ x: leftX, y, r: spot.r, tone });
+        out.push({ x: rightX, y, r: spot.r, tone });
+      }
+    }
+    return out;
+  }
+  function isLobbyNodeOnScreen(node, height, pad = 72) {
+    return node.barY + node.barH > -pad && node.barY < height + pad;
+  }
+  function lobbyCaptionY(cover, camY, height, page) {
+    if (page <= 0) {
+      return cover.dy + cover.dh * TREE_CAPTION_UY + camY * 0.15;
+    }
+    return height * 0.16;
+  }
+  function ladderThemeForLevel(levelId, state) {
+    if (state === "current") {
+      return LADDER_CURRENT_THEME;
+    }
+    if (state === "locked") {
+      return LADDER_LOCKED_THEME;
+    }
+    return LADDER_CLEARED_THEMES[(levelId - 1) % LADDER_CLEARED_THEMES.length];
+  }
+
+  // src/presentation/ui/LobbyNoticeBubble.ts
+  var NOTICE_BUBBLE_HOLD_MS = 3400;
+  var NOTICE_BUBBLE_FADE_MS = 480;
+  var NOTICE_BUBBLE_DRIFT_MS = 6200;
+  function lobbyNoticeBubbleLines(input) {
+    const raw = input.bubbles && input.bubbles.length > 0 ? input.bubbles : input.body ? [input.body] : [];
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const item of raw) {
+      const text = String(item != null ? item : "").trim();
+      if (!text || seen.has(text)) {
+        continue;
+      }
+      seen.add(text);
+      out.push(text);
+    }
+    return out;
+  }
+  function lobbyNoticeBubbleCycle(nowMs, lineCount, holdMs = NOTICE_BUBBLE_HOLD_MS, fadeMs = NOTICE_BUBBLE_FADE_MS) {
+    const n = Math.max(1, Math.floor(lineCount));
+    if (n <= 1) {
+      return { index: 0, opacity: 1, nextIndex: 0, nextOpacity: 0 };
+    }
+    const period = Math.max(1, holdMs + fadeMs);
+    const t = (Math.max(0, nowMs) % (period * n) + period * n) % (period * n);
+    const index = Math.floor(t / period) % n;
+    const local = t - index * period;
+    if (local < holdMs) {
+      return { index, opacity: 1, nextIndex: (index + 1) % n, nextOpacity: 0 };
+    }
+    const u = Math.max(0, Math.min(1, (local - holdMs) / fadeMs));
+    return {
+      index,
+      opacity: 1 - u,
+      nextIndex: (index + 1) % n,
+      nextOpacity: u
+    };
+  }
+  function lobbyNoticeBubbleDrift(nowMs, legMs = NOTICE_BUBBLE_DRIFT_MS) {
+    const leg = Math.max(1, legMs);
+    const round = leg * 2;
+    const clock = (Math.max(0, nowMs) % round + round) % round;
+    if (clock < leg) {
+      return { progress: clock / leg, goingUp: true, opacity: 1 };
+    }
+    return {
+      progress: 1 - (clock - leg) / leg,
+      goingUp: false,
+      opacity: 1
+    };
+  }
+  function easeInOut(t) {
+    const u = Math.max(0, Math.min(1, t));
+    const smooth = u * u * (3 - 2 * u);
+    return u * 0.35 + smooth * 0.65;
+  }
+  function layoutLobbyNoticeBubble(input) {
+    const padX = 16;
+    const maxW = Math.min(268, Math.floor(input.width * 0.7));
+    const textW = Math.min(maxW - padX * 2, Math.ceil(input.measureWidth(input.text)));
+    const w = Math.max(120, Math.min(maxW, textW + padX * 2));
+    const h = 34;
+    const t = easeInOut(input.progress);
+    const startX = 10;
+    const startY = Math.min(
+      input.height - h - 24,
+      Math.max(input.statusBarHeight + 80, input.contentTop - h - 18)
+    );
+    const endX = Math.max(startX, input.width - w - 12);
+    const endY = Math.max(input.statusBarHeight + 50, 64);
+    const x = startX + (endX - startX) * t;
+    const y = startY + (endY - startY) * t;
+    return {
+      x,
+      y,
+      w,
+      h,
+      textX: x + w / 2,
+      textY: y + h / 2,
+      driftOpacity: 1
+    };
+  }
+
+  // src/logic/level/levelDifficultyTip.ts
+  var COPY = notice_default;
+  function levelDifficultyArt(levelId) {
+    var _a;
+    const id = Math.floor(Number(levelId) || 0);
+    if (id < 6) {
+      return null;
+    }
+    const title = (_a = COPY.difficultyUp) != null ? _a : "\u96BE\u5EA6\u63D0\u5347";
+    if (id === 6) {
+      return { title, subtitle: chapterSub(COPY.difficultyUpCotton, "\u68C9\u82B1\u5173\u5F00\u59CB") };
+    }
+    if (id === 11) {
+      return { title, subtitle: chapterSub(COPY.difficultyUpParty, "\u5F02\u5F62\u5173\u5361") };
+    }
+    if (id === 16) {
+      return { title, subtitle: chapterSub(COPY.difficultyUpIce, "\u51B0\u96EA\u57CB\u85CF") };
+    }
+    return { title, subtitle: null };
+  }
+  function chapterSub(raw, fallback) {
+    if (!raw) {
+      return fallback;
+    }
+    const parts = raw.split("\xB7");
+    const tail = parts.length > 1 ? parts.slice(1).join("\xB7").trim() : raw.trim();
+    return tail || fallback;
+  }
+
   // src/presentation/ui/HudGoalText.ts
   var KIND_NAME = {
     [1 /* Red */]: "\u7EA2\u72D0",
@@ -9241,8 +10176,12 @@
         return `\u7B2C ${level} \u5173\u6253\u626B\u4E2D\uFF0C\u4E00\u8D77\u6765\u6536\u5C3E`;
       case "result":
         return `\u6211\u5728\u7B2C ${level} \u5173\u62FF\u4E86 ${points} \u5206\uFF0C\u4F60\u6765\u6311\u6218`;
+      case "booster_friend":
+        return `\u6211\u5728\u7B2C ${level} \u5173\u7F3A\u4E2A\u9053\u5177\uFF0C\u8F6C\u53D1\u7ED9\u6211\u5C31\u884C`;
+      case "booster_group":
+        return `\u53D1\u5230\u7FA4\u91CC\u4E00\u8D77\u73A9\uFF0C\u7B2C ${level} \u5173\u66F4\u597D\u8FC7`;
       default:
-        return "\u840C\u5BA0\u7C89\u788E\u6D88\uFF0C\u70B9\u6811\u4E0A\u9A6C\u5361\u9F99\u5C31\u80FD\u73A9";
+        return "\u840C\u5BA0\u7C89\u788E\u6D88\uFF0C\u6CBF\u7CD6\u679C\u68AF\u5B50\u51B2\u8FDB\u7CD6\u679C\u5C4B";
     }
   }
   function buildShareQuery(scene, levelId, score, inviteCode) {
@@ -9257,14 +10196,203 @@
       query = `from=clean&level=${level}`;
     } else if (scene === "result") {
       query = `from=result&level=${level}&score=${points}`;
+    } else if (scene === "booster_friend") {
+      query = `from=booster_friend&level=${level}`;
+    } else if (scene === "booster_group") {
+      query = `from=booster_group&level=${level}`;
     }
     return withInviterQuery(query, inviteCode);
   }
 
+  // src/presentation/ui/PanelChrome.ts
+  var PANEL_CORNER_SIZE = 34;
+  var CORNER_PALETTE = {
+    top: "transparent",
+    bottom: "transparent",
+    border: "transparent",
+    gloss: false
+  };
+  function panelBackButton(panel) {
+    return {
+      id: "resume",
+      x: panel.x + 10,
+      y: panel.y + 8,
+      w: PANEL_CORNER_SIZE,
+      h: PANEL_CORNER_SIZE,
+      label: "<",
+      palette: CORNER_PALETTE
+    };
+  }
+  function panelCloseButton(panel) {
+    return {
+      id: "resume",
+      x: panel.x + panel.w - PANEL_CORNER_SIZE - 10,
+      y: panel.y + 8,
+      w: PANEL_CORNER_SIZE,
+      h: PANEL_CORNER_SIZE,
+      label: "\xD7",
+      palette: CORNER_PALETTE
+    };
+  }
+  function isPanelBackLabel(label) {
+    return label === "<" || label === "\u2039";
+  }
+  function isPanelCloseLabel(label) {
+    return label === "\xD7" || label === "X" || label === "x";
+  }
+
+  // src/presentation/ui/LeaderboardPanel.ts
+  var PLAYER_ROW_H = 52;
+  var PLAYER_ROW_GAP = 6;
+  var META_ROW_H = 28;
+  var AVATAR_R = 16;
+  var VISIBLE_PLAYER_ROWS = 4;
+  function playerRowStride() {
+    return PLAYER_ROW_H + PLAYER_ROW_GAP;
+  }
+  function layoutLeaderboardPanel(input) {
+    var _a, _b, _c, _d;
+    const panelW = Math.min(360, input.width - 24);
+    const padX = 14;
+    const tagW = 28;
+    const avatarGap = 10;
+    const scoreColW = 56;
+    const headerRows = [];
+    if (input.hint) {
+      headerRows.push({ tag: "\u63D0\u9192", text: input.hint, kind: "meta" });
+    }
+    if (input.rewardText) {
+      headerRows.push({ tag: "", text: input.rewardText, kind: "reward" });
+    }
+    let playerRows = [];
+    if (input.rows.length > 0) {
+      playerRows = input.rows.map((row) => {
+        var _a2;
+        return {
+          ...row,
+          kind: (_a2 = row.kind) != null ? _a2 : row.nickName || row.score != null ? "player" : "meta"
+        };
+      });
+    } else {
+      headerRows.push({
+        tag: "\u63D0\u793A",
+        text: (_b = (_a = notice_default.leaderboard) == null ? void 0 : _a.unavailable) != null ? _b : "\u597D\u53CB\u6392\u884C\u6682\u65F6\u6253\u4E0D\u5F00",
+        kind: "meta"
+      });
+    }
+    const avatarR = AVATAR_R;
+    const textWidth = panelW - padX * 2 - tagW - avatarGap - avatarR * 2 - avatarGap - scoreColW;
+    let headerH = 8;
+    for (const row of headerRows) {
+      if (row.kind === "reward") {
+        headerH += Math.max(META_ROW_H, input.wrap(row.text, panelW - padX * 2).length * 16 + 8) + 6;
+      } else {
+        headerH += Math.max(META_ROW_H, input.wrap(row.text, textWidth + scoreColW).length * 16 + 10) + 6;
+      }
+    }
+    const listContentH = playerRows.length > 0 ? playerRows.length * playerRowStride() : 0;
+    const listViewportH = Math.min(
+      listContentH || playerRowStride(),
+      VISIBLE_PLAYER_ROWS * playerRowStride()
+    );
+    const titleH = 46;
+    const footH = 20;
+    const desiredH = titleH + headerH + listViewportH + footH;
+    const panelH = Math.min(input.height * 0.88, Math.max(desiredH, titleH + footH + 80));
+    const x = (input.width - panelW) / 2;
+    const y = Math.max(12, (input.height - panelH) / 2);
+    const tagX = x + padX;
+    const avatarX = tagX + tagW + avatarGap + avatarR;
+    const textX = avatarX + avatarR + avatarGap;
+    const scoreX = x + panelW - padX;
+    const bodyTop = y + titleH;
+    const bodyBottom = y + panelH - footH;
+    const listTop = bodyTop + headerH;
+    const listBottom = bodyBottom;
+    const fittedViewportH = Math.max(0, listBottom - listTop);
+    return {
+      panel: { x, y, w: panelW, h: panelH },
+      title: (_d = (_c = notice_default.leaderboard) == null ? void 0 : _c.title) != null ? _d : "\u597D\u53CB\u6392\u884C",
+      headerRows,
+      playerRows,
+      textWidth: Math.max(80, textWidth),
+      tagX,
+      avatarX,
+      avatarR,
+      textX,
+      scoreX,
+      bodyTop,
+      bodyBottom,
+      listTop,
+      listBottom,
+      listViewportH: fittedViewportH,
+      listContentH,
+      rowH: PLAYER_ROW_H,
+      metaRowH: META_ROW_H,
+      buttons: [panelCloseButton({ x, y, w: panelW })]
+    };
+  }
+  function clampLeaderboardScroll(scrollY, layout) {
+    const maxScroll = Math.max(0, layout.listContentH - layout.listViewportH);
+    if (!Number.isFinite(scrollY) || scrollY < 0) {
+      return 0;
+    }
+    if (scrollY > maxScroll) {
+      return maxScroll;
+    }
+    return scrollY;
+  }
+
   // src/core/utils/lobbyNav.ts
+  var LOBBY_GEAR_SIZE = 34;
+  var LOBBY_SIDE_ACTION_H = 26;
+  var LOBBY_SIDE_ACTION_GAP = 5;
+  var LOBBY_SIDE_ACTION_X = 10;
+  var LOBBY_SIDE_ACTION_MIN_W = 72;
+  var LOBBY_SIDE_ACTION_MAX_W = 86;
+  var LOBBY_SIDE_ACTION_FONT = 11;
+  var LOBBY_SIDE_ACTION_TOP_PAD = -6;
+  var LOBBY_GEAR_X = 12;
+  var LOBBY_TITLE_BOTTOM_RATIO = 142 / 1024;
   var LOBBY_NAV_CHIP_H = 36;
   var LOBBY_NAV_CHIP_MIN_W = 68;
   var LOBBY_NAV_HIT_PAD = 16;
+  var LOBBY_CLAIM_LABEL = "\u70B9\u51FB\u9886\u53D6 \u91CD\u6392 x1";
+  var LOBBY_SIDE_ACTIONS = [
+    { id: "invite", label: "\u9080\u8BF7\u597D\u53CB" },
+    { id: "leaderboard", label: "\u597D\u53CB\u6392\u884C" },
+    { id: "howto", label: "\u600E\u4E48\u73A9" }
+  ];
+  function lobbySideActionsTop(statusBarHeight, _coverDy, _coverDh) {
+    return Math.max(2, statusBarHeight + LOBBY_SIDE_ACTION_TOP_PAD);
+  }
+  function layoutLobbyGear(chipY, chipH = LOBBY_NAV_CHIP_H) {
+    return {
+      id: "settings",
+      x: LOBBY_GEAR_X,
+      y: chipY + Math.max(0, Math.floor((chipH - LOBBY_GEAR_SIZE) / 2)),
+      w: LOBBY_GEAR_SIZE,
+      h: LOBBY_GEAR_SIZE
+    };
+  }
+  function layoutLobbySideActions(top, screenWidth) {
+    const w = Math.min(
+      LOBBY_SIDE_ACTION_MAX_W,
+      Math.max(LOBBY_SIDE_ACTION_MIN_W, Math.floor(screenWidth * 0.2))
+    );
+    let y = top;
+    return LOBBY_SIDE_ACTIONS.map((item) => {
+      const frame = {
+        ...item,
+        x: LOBBY_SIDE_ACTION_X,
+        y,
+        w,
+        h: LOBBY_SIDE_ACTION_H
+      };
+      y += frame.h + LOBBY_SIDE_ACTION_GAP;
+      return frame;
+    });
+  }
   function lobbyNavBottomGap(bannerReserve, safeBottom) {
     const banner = Math.max(0, bannerReserve);
     const safe = Math.max(0, safeBottom);
@@ -9272,6 +10400,48 @@
       return 12 + banner;
     }
     return Math.max(24, safe + 14);
+  }
+  function layoutLobbyBottom(input) {
+    const side = 12;
+    const gap = 12;
+    const chipH = LOBBY_NAV_CHIP_H;
+    const bottom = lobbyNavBottomGap(input.bannerReserve, input.safeBottom);
+    const chipY = input.height - chipH - bottom;
+    const settings = layoutLobbyGear(chipY, chipH);
+    const labels = [
+      { id: "recommend", label: "\u63A8\u8350" },
+      { id: "club", label: "\u5708\u5B50" }
+    ];
+    const chipW = Math.min(
+      108,
+      Math.max(LOBBY_NAV_CHIP_MIN_W, Math.floor(input.width * 0.26))
+    );
+    const rowW = labels.length * chipW + (labels.length - 1) * gap;
+    const gearRight = settings.x + settings.w + gap;
+    const rowX = Math.max(gearRight, Math.floor((input.width - rowW) / 2));
+    const chips = labels.map((item, index) => ({
+      ...item,
+      x: rowX + index * (chipW + gap),
+      y: chipY,
+      w: chipW,
+      h: chipH
+    }));
+    const progressState = lobbyDailyProgress(input.clearsToday, input.shuffleGranted);
+    const claimH = 36;
+    const claim = progressState.readyToClaim ? {
+      id: "claim_shuffle",
+      label: LOBBY_CLAIM_LABEL,
+      x: side,
+      y: chipY - gap - claimH,
+      w: input.width - side * 2,
+      h: claimH
+    } : null;
+    return {
+      chips,
+      claim,
+      settings,
+      contentTop: claim ? claim.y : chipY
+    };
   }
 
   // src/core/utils/foregroundGate.ts
@@ -9528,9 +10698,13 @@
   }
   var IDLE_STOP_MS = 1800;
   var AMBIENT_IDLE_MS = Number.POSITIVE_INFINITY;
+  var DESKTOP_IDLE_STOP_MS = 6e3;
   var FRAME_ERROR_LIMIT = 3;
   function resolveRenderIdleStopMs(args) {
-    if (args.desktopIde || args.ambientFx) {
+    if (args.desktopIde) {
+      return DESKTOP_IDLE_STOP_MS;
+    }
+    if (args.ambientFx) {
       return AMBIENT_IDLE_MS;
     }
     return IDLE_STOP_MS;
@@ -9696,6 +10870,13 @@
     lobbyCloudMintB: "assets/main/bg/lobby-clouds-mint-b.jpg",
     lobbyCloudMintC: "assets/main/bg/lobby-clouds-mint-c.jpg"
   };
+  var LOBBY_LADDER_ICON_SRC = {
+    check: "assets/main/ui/lobby-ladder/icon-check.png",
+    star: "assets/main/ui/lobby-ladder/icon-star.png",
+    lock: "assets/main/ui/lobby-ladder/icon-lock.png",
+    cloud: "assets/main/ui/lobby-ladder/deco-cloud.png",
+    cloudSm: "assets/main/ui/lobby-ladder/deco-cloud-sm.png"
+  };
   var BOOSTER_ICON_SRC = {
     hammer: "assets/main/ui/icon-hammer.png",
     shuffle: "assets/main/ui/icon-shuffle.png",
@@ -9730,46 +10911,26 @@
     "#b44a28",
     "#2f6d82"
   ];
-  function lobbyBottomHint(vine, totalLevels) {
-    if (!vine.unlocked) {
-      return "\u901A\u5173\u4E0A\u4E00\u6BB5\u5168\u90E8\u5173\u5361\u540E\u89E3\u9501\u8FD9\u91CC";
-    }
-    if (vine.clearedInNode <= 0) {
-      if (vine.startLevelId > 1) {
-        return `\u5148\u901A\u5173\u7B2C ${vine.startLevelId} \u5173\uFF0C\u624D\u80FD\u89E3\u9501\u540E\u9762\u7684\u5173\u5361`;
-      }
-      return "\u5148\u901A\u5173\u7B2C 1 \u5173\uFF0C\u624D\u80FD\u89E3\u9501\u540E\u9762\u7684\u5173\u5361";
-    }
-    if (vine.clearedInNode >= vine.levelIds.length) {
-      if (vine.endLevelId >= totalLevels) {
-        return notice_default.body;
-      }
-      return "\u672C\u6BB5\u5DF2\u901A\u5173\uFF0C\u7EE7\u7EED\u6311\u6218\u4E91\u6735\u4E0A\u7684\u65B0\u5173\u5361";
-    }
-    if (vine.startLevelId > 5) {
-      return "\u7CD6\u679C\u4E91\u6735\u91CC\u85CF\u7740\u4E0B\u4E00\u5173\uFF0C\u70B9\u5B83\u5F00\u59CB";
-    }
-    return "\u7C89\u5149\u6655=\u53EF\u6311\u6218 \xB7 \u7EFF\u52FE=\u5DF2\u901A\u5173 \xB7 \u7070\u9501=\u672A\u89E3\u9501";
-  }
   var HOWTO_LINES = [
-    { tag: "\u6D88\u9664", text: "\u6ED1\u52A8\u4EA4\u6362\u76F8\u90BB\u840C\u5BA0\uFF0C\u6A2A\u7AD6 3 \u4E2A\u540C\u8272\u5C31\u4F1A\u6D88\uFF0C\u8FD8\u80FD\u8FDE\u6D88\u3002" },
-    { tag: "\u8FC7\u5173", text: "\u5934\u9876\u5217\u51FA\u7684\u76EE\u6807\u90FD\u8981\u505A\u5B8C\u3002\u6ED1\u4E00\u6B21\u7B97\u4E00\u6B65\uFF0C\u6CA1\u6B65\u4E86\u53EF\u91CD\u5F00\uFF0C\u6216\u53CD\u590D\u770B\u5E7F\u544A\u6BCF\u6B21\u8865 5 \u6B65\u3002" },
-    { tag: "\u51B0\u5757", text: "\u4E09\u6D88\u6253\u5230\u51B0\u5757\u5C31\u4F1A\u788E\u3002\u88AB\u51BB\u4F4F\u7684\u683C\u5B50\u4E0D\u80FD\u6ED1\uFF0C\u5148\u6D88\u65C1\u8FB9\u6216\u8FDE\u5230\u51B0\u4E0A\u3002" },
-    { tag: "\u68C9\u82B1", text: "\u76D6\u4F4F\u7684\u4E0D\u80FD\u6ED1\u3002\u65C1\u8FB9\u5C0F\u52A8\u7269\u6D88\u6389\u540E\u68C9\u82B1\u624D\u6389\u4E00\u5C42\uFF0C\u6D88\u4E24\u6B21\u6E05\u6389\u3002\u4E0B\u9762\u6709\u65F6\u85CF\u7C89\u7403\uFF0C\u518D\u6D88\u4E00\u6B21\u624D\u80FD\u6536\u3002" },
-    { tag: "\u4F19\u4F34", text: "\u96EA\u4EBA\u3001\u4F01\u9E45\u85CF\u5728\u51B0\u4E0B\uFF0C\u5404\u5360 2\uFF5E4 \u683C\u3002\u8FD9\u51E0\u683C\u7684\u51B0\u5168\u788E\u4E86\u624D\u80FD\u6536\u4E0B\u3002\u4F01\u9E45\u4E00\u53EA\u4E00\u53EA\u7B97\uFF1B\u4E24\u53EA\u96EA\u4EBA\u90FD\u9732\u51FA\u624D\u7B97\uFF0C\u8FD8\u4F1A\u9707\u788E\u5468\u56F4\u51B0\u3002" },
-    { tag: "\u5927\u62DB", text: "\u8FDE 4 \u4E2A\u51FA\u95EA\u5149\u4F1A\u7206\u70B8\uFF1B\u8FDE 5 \u4E2A\u51FA\u732B\u5934\u9E70\u6E05\u540C\u8272\u3002\u8FC7\u5173\u540E\u9650\u65F6\u70B9\u683C\u5B50\u7C89\u788E\u52A0\u5206\u3002" },
-    { tag: "\u9053\u5177", text: "\u9524\u5B50\u7838\u4E00\u683C\uFF0C\u91CD\u6392\u6253\u4E71\u68CB\u76D8\uFF0C\u52A0\u6B65 +5\u3002\u5F00\u5C40\u4E0D\u9001\u3002\u6309\u94AE\u7A7A\u4E86\u5C31\u770B\u5E7F\u544A\uFF0C\u770B\u5B8C\u5C31\u7ED9\uFF0C\u80FD\u4E00\u76F4\u770B\u3002" },
-    { tag: "\u9886\u53D6", text: "\u6BCF\u5929\u767B\u5F55\u9001\u9524\u5B50\uFF0C\u8FC7 3 \u5173\u9001\u91CD\u6392\uFF0C\u5269 6 \u6B65\u901A\u5173\u9001\u52A0\u6B65\u3002\u5E26\u5230\u4E0B\u4E00\u5173\uFF0C\u5404\u6700\u591A 9 \u4E2A\u3002" },
-    { tag: "\u9080\u8BF7", text: "\u628A\u6E38\u620F\u53D1\u7ED9\u6CA1\u73A9\u8FC7\u7684\u597D\u53CB\u3002\u5BF9\u65B9\u901A\u5173\u540E\u53CC\u65B9\u5404\u5F97 1 \u9524\u5B50\u3002\u770B\u5E7F\u544A\u9886\u9053\u5177\u4ECD\u7136\u9A6C\u4E0A\u5230\u8D26\u3002" }
+    { tag: "\u6D88\u9664", text: "\u6ED1\u52A8\u4EA4\u6362\u76F8\u90BB\u840C\u5BA0\u3002\u540C\u8272\u6A2A\u6216\u7AD6\u8FDE\u6210 3 \u4E2A\u53CA\u4EE5\u4E0A\u5373\u53EF\u6D88\u9664\uFF0C\u4E0B\u843D\u586B\u7A7A\u540E\u8FD8\u80FD\u8FDE\u9501\u3002" },
+    { tag: "\u8FC7\u5173", text: "\u5B8C\u6210\u5934\u9876\u5168\u90E8\u76EE\u6807\u5373\u901A\u5173\u3002\u6BCF\u6B21\u5408\u6CD5\u4EA4\u6362\u6263 1 \u6B65\uFF1B\u6B65\u6570\u7528\u5C3D\u53EF\u91CD\u5F00\uFF0C\u6216\u770B\u5E7F\u544A\u6BCF\u6B21\u8865 5 \u6B65\u7EE7\u7EED\u3002" },
+    { tag: "\u51B0\u5757", text: "\u6D88\u9664\u6CE2\u53CA\u51B0\u5757\u4F1A\u788E\u4E00\u5C42\u3002\u51B0\u5C01\u683C\u4E0A\u7684\u840C\u5BA0\u4E0D\u80FD\u6ED1\u52A8\uFF0C\u9700\u5148\u6253\u788E\u51B0\u5757\u3002" },
+    { tag: "\u68C9\u82B1", text: "\u68C9\u82B1\u76D6\u4F4F\u7684\u683C\u5B50\u4E0D\u80FD\u4EA4\u6362\u3002\u90BB\u6D88\u524A\u4E00\u5C42\uFF0C\u4E24\u6B21\u6E05\u6389\uFF1B\u4E91\u4E0B\u53EF\u80FD\u85CF\u7C89\u7403\uFF0C\u4E91\u6E05\u540E\u518D\u6D88\u624D\u7B97\u6536\u96C6\u3002" },
+    { tag: "\u4F19\u4F34", text: "\u96EA\u4EBA\u3001\u4F01\u9E45\u85CF\u5728\u51B0\u4E0B\uFF0C\u5404\u5360\u591A\u683C\u3002\u5360\u5730\u51B0\u5757\u5168\u788E\u540E\u624D\u9732\u51FA\u5E76\u6536\u83B7\uFF1B\u96EA\u4EBA\u9732\u51FA\u65F6\u4F1A\u9707\u788E\u5468\u56F4\u4E00\u5708\u51B0\u3002" },
+    { tag: "\u5927\u62DB", text: "\u56DB\u8FDE\u6216 L/T \u5F62\u51FA\u95EA\u5149\uFF08\u8303\u56F4\u7206\u70B8\uFF09\uFF1B\u4E94\u8FDE\u51FA\u8D85\u7EA7\u732B\u5934\u9E70\uFF08\u6E05\u540C\u8272\uFF09\u3002\u4E24\u679A\u95EA\u5149\u4E92\u6ED1\u53EF\u540C\u65F6\u5F15\u7206\u3002" },
+    { tag: "\u7C89\u788E", text: "\u901A\u5173\u540E\u8FDB\u5165\u9650\u65F6\u70B9\u51FB\u7C89\u788E\u52A0\u5206\uFF0C\u53EF\u770B\u5E7F\u544A\u52A0\u65F6\u3002\u603B\u5206\u591F\u9AD8\u65F6\u8FD8\u53EF\u9009\u6E05\u6D01\u5C0F\u6E38\u620F\uFF08\u4E0D\u52A0\u4E3B\u7EBF\u5206\uFF09\u3002" },
+    { tag: "\u9053\u5177", text: "\u9524\u5B50\u7838\u4E00\u683C\u3001\u91CD\u6392\u6D17\u76D8\u3001\u52A0\u6B65 +5\uFF0C\u5F00\u5C40\u4E0D\u9001\u3002\u5E93\u5B58\u7A7A\u65F6\uFF1A\u5148\u8F6C\u53D1\u597D\u53CB \u2192 \u518D\u8F6C\u53D1\u7FA4 \u2192 \u518D\u770B\u5E7F\u544A\u9886\u53D6\u3002" },
+    { tag: "\u5956\u52B1", text: "\u6BCF\u65E5\u767B\u5F55\u9001\u9524\u5B50\uFF1B\u5F53\u65E5\u901A\u5173\u6EE1 3 \u5173\u9886\u91CD\u6392\uFF1B\u67D0\u6B21\u5269 \u22656 \u6B65\u901A\u5173\u9001\u52A0\u6B65\u3002\u9053\u5177\u53EF\u5E26\u5165\u4E0B\u5173\uFF0C\u5404\u6700\u591A 9 \u4E2A\u3002" },
+    { tag: "\u9080\u8BF7", text: "\u5206\u4EAB\u7ED9\u6CA1\u73A9\u8FC7\u7684\u597D\u53CB\uFF0C\u5BF9\u65B9\u901A\u5173\u540E\u53CC\u65B9\u5404\u5F97 1 \u9524\u5B50\u3002" }
   ];
   var WIN_CELEBRATE_SRC = "assets/main/ui/win-celebrate.jpg";
   var WIN_CELEBRATE_CROP_TOP = 0.36;
   var WIN_BANNER_CY = 0.82;
-  var SLOT_FILL_BOTTOM = "rgba(255, 236, 220, 0.88)";
-  var SLOT_LINE = "rgba(255, 170, 140, 0.42)";
-  var BOARD_PANEL_TOP = "rgba(255, 252, 255, 0.96)";
-  var BOARD_PANEL_BOTTOM = "rgba(255, 246, 250, 0.94)";
-  var BOARD_PANEL_OUTER = "rgba(232, 214, 220, 0.95)";
+  var SLOT_FILL_BOTTOM = "rgba(232, 248, 252, 0.9)";
+  var SLOT_LINE = "rgba(140, 198, 220, 0.42)";
+  var BOARD_PANEL_TOP = "rgba(255, 255, 255, 0.97)";
+  var BOARD_PANEL_BOTTOM = "rgba(232, 248, 255, 0.95)";
+  var BOARD_PANEL_OUTER = "rgba(160, 210, 230, 0.92)";
   var WxCanvasGameApp = class {
     constructor(session) {
       this.animator = new BoardMatchAnimator();
@@ -9779,12 +10940,22 @@
       this.overlay = "none";
       /** 从设置点进玩法 / 公告时，关闭后回到设置 */
       this.overlayFromSettings = false;
+      this.boardViewModel = null;
+      this.avatarCache = /* @__PURE__ */ new Map();
+      /** 好友排行列表纵向滚动偏移（像素） */
+      this.leaderboardScrollY = 0;
+      /** 排行榜列表拖拽：起点与是否已滑动（滑动则不触发关闭按钮） */
+      this.leaderboardDrag = null;
+      /** 首次进入大厅：可选授权头像昵称（原生按钮，关闭面板时销毁） */
+      this.userInfoAuthButton = null;
       this.buttons = [];
       this.raf = 0;
       this.statusText = "";
       /** 点道具后贴在按钮上方的短提示 */
       this.toastText = "";
       this.toastUntilMs = 0;
+      /** 进关「难度提升」艺术字提示 */
+      this.difficultyArt = null;
       /** 锤子选格模式 */
       this.hammerTargeting = false;
       /** 锤子光标屏幕坐标（选中后跟随手指/鼠标） */
@@ -9855,6 +11026,7 @@
         if (inviteToast) {
           this.notifyUser(inviteToast, "\u9524\u5B50\u5230\u8D26");
         }
+        this.settlePendingBoosterShare();
       };
       this.onAudioInterruptionBeginBound = () => {
         this.session.suspendForBackground();
@@ -9877,6 +11049,14 @@
       this.lobbyCamSnapFrom = 0;
       this.lobbyCamSnapAtMs = 0;
       this.lobbyCamVel = 0;
+      /** 「更多关卡」把手首次亮起的时刻；0 表示尚未计时。 */
+      this.lobbySwipeHintShownAtMs = 0;
+      /** 首次滑动或淡出结束后不再画把手。 */
+      this.lobbySwipeHintDismissed = false;
+      /** 空道具转发补给：从分享页返回后发奖 */
+      this.pendingBoosterShare = null;
+      this.pendingBoosterShareAtMs = 0;
+      this.boosterShareScene = null;
       this.lobbyDrag = null;
       /** 动画播放期间暂存胜负，播完再弹结算或进入粉碎 */
       this.pendingResult = null;
@@ -10029,6 +11209,14 @@
           }
         });
       }
+      for (const [key, src] of Object.entries(LOBBY_LADDER_ICON_SRC)) {
+        jobs.push(async () => {
+          const img = await this.loadBgImage(src);
+          if (img) {
+            this.uiIcons.set(`ladder-${key}`, img);
+          }
+        });
+      }
       MACARON_SRC.forEach((src, index) => {
         jobs.push(async () => {
           const img = await this.loadBgImage(src);
@@ -10065,6 +11253,17 @@
       }
       this.requestPaint();
       void this.preloadDeferredAssets();
+      if (!isWxDesktopIdeHost()) {
+        setTimeout(() => {
+          this.sceneBg.layout(this.width, this.height);
+          this.needsPaint = true;
+          this.kickRenderLoop();
+        }, 40);
+        setTimeout(() => {
+          this.needsPaint = true;
+          this.kickRenderLoop();
+        }, 200);
+      }
       console.info(
         "[crush-crush] assets loaded tiles=",
         this.tileImages.size,
@@ -10115,6 +11314,7 @@
       this.leavingLobby = false;
       this.mode = "lobby";
       this.statusText = "";
+      this.difficultyArt = null;
       this.pendingResult = null;
       this.offerCleanPrompt = false;
       this.hammerTargeting = false;
@@ -10127,10 +11327,12 @@
       this.pendingPlayback = null;
       this.closeOverlay();
       this.prepareLobbyCamera();
-      this.maybeOpenLobbyNotice();
+      this.lobbySwipeHintShownAtMs = 0;
+      this.lobbySwipeHintDismissed = false;
       this.syncLobbyBanner();
       this.boardView.bindInput((_a, _b, _c, _d) => {
       });
+      this.maybeOfferLaunchProfileAuth();
     }
     resolveEntryLevelId() {
       const total = Math.max(1, this.session.getLevelCount());
@@ -10351,6 +11553,9 @@
       if (this.toastText && now < this.toastUntilMs) {
         return true;
       }
+      if (this.difficultyArt && now < this.difficultyArt.startMs + this.difficultyArt.durationMs) {
+        return true;
+      }
       if (this.floatingScores.length || this.crushSparks.length || this.crushBursts.length) {
         return true;
       }
@@ -10365,9 +11570,22 @@
       }
       return false;
     }
-    /** 大厅呼吸、结算彩带、粉碎倒计时需要持续转；对局静止盘面可停循环。 */
+    /** 大厅呼吸、结算彩带、粉碎倒计时、公告泡泡需要持续转；对局静止盘面可停循环。 */
     wantsAmbientFx() {
       return this.mode === "lobby" || this.mode === "result" || this.mode === "crush" || this.mode === "clean";
+    }
+    /** 首页公告泡泡在漂：开发者工具空闲停循环时也要慢速续画，避免冻在半路。 */
+    lobbyNoticeBubbleNeedsTick() {
+      if (this.mode !== "lobby" || this.overlay !== "none") {
+        return false;
+      }
+      if (this.lobbyCamY > this.height * 0.18) {
+        return false;
+      }
+      return lobbyNoticeBubbleLines({
+        body: notice_default.body,
+        bubbles: notice_default.bubbles
+      }).length > 0;
     }
     useCanvasRaf() {
       this.baseFrameDelayMs = 16;
@@ -10443,6 +11661,7 @@
             this.session.tickCrushReward(dt);
           }
           const animating = this.sceneIsBusy();
+          const ambientBubble = this.lobbyNoticeBubbleNeedsTick();
           const desktopIde = isWxDesktopIdeHost();
           const busy = shouldKeepRenderLoop({
             animating,
@@ -10452,12 +11671,15 @@
               desktopIde,
               ambientFx: this.wantsAmbientFx()
             })
-          });
+          }) || ambientBubble;
           this.frameDelayMs = resolveNextFrameDelayMs({
             animating,
             desktopIde,
             baseDelayMs: this.baseFrameDelayMs
           });
+          if (ambientBubble && !animating) {
+            this.frameDelayMs = Math.max(this.frameDelayMs, desktopIde ? 90 : 70);
+          }
           if (this.needsPaint || busy) {
             this.draw();
             this.frameErrors = 0;
@@ -10542,6 +11764,21 @@
             const expected = Math.max(1, Math.floor(this.width * this.dpr));
             recover(shouldFollowupRestoreCanvas(this.canvas.width, expected));
           }, 360)
+        );
+        this.resumeFollowupTimers.push(
+          setTimeout(() => {
+            if (token !== this.resumeToken || this.foregroundHidden) {
+              return;
+            }
+            this.sceneBg.layout(this.width, this.height);
+            this.needsPaint = true;
+            try {
+              this.draw();
+            } catch (err) {
+              console.error("[crush-crush] resume lobby redraw failed", err);
+            }
+            this.kickRenderLoop();
+          }, 120)
         );
       }
       if (shouldResumeBgm({
@@ -10722,7 +11959,7 @@
       }
       if (event.type === "LevelFailed") {
         this.pendingResult = "failed";
-        this.statusText = "\u6B65\u6570\u7528\u5B8C\u4E86\uFF0C\u518D\u8BD5\u4E00\u6B21\u4E5F\u5F88\u8F7B\u677E";
+        this.statusText = "\u6B65\u6570\u7528\u5B8C\u4E86\uFF0C\u5C31\u5DEE\u4E00\u70B9\uFF01";
         if (!this.animator.isPlaying() && !this.swapSlide) {
           this.afterLevelResolved();
         }
@@ -11404,6 +12641,16 @@
       if (this.isInputMuted()) {
         return;
       }
+      if (this.overlay === "leaderboard") {
+        const p2 = this.readTouchPoint(e, false);
+        if (!p2) {
+          return;
+        }
+        this.lastPointerX = p2.x;
+        this.lastPointerY = p2.y;
+        this.beginLeaderboardScroll(p2.x, p2.y);
+        return;
+      }
       if (this.overlay !== "none") {
         return;
       }
@@ -11442,6 +12689,16 @@
       if (this.isInputMuted()) {
         return;
       }
+      if (this.overlay === "leaderboard") {
+        const p2 = this.readTouchPoint(e, false);
+        if (!p2) {
+          return;
+        }
+        this.lastPointerX = p2.x;
+        this.lastPointerY = p2.y;
+        this.moveLeaderboardScroll(p2.y);
+        return;
+      }
       if (this.overlay !== "none") {
         return;
       }
@@ -11468,6 +12725,7 @@
       if (this.isInputMuted()) {
         this.boardView.onPointerCancel();
         this.lobbyDrag = null;
+        this.leaderboardDrag = null;
         this.crushTapOnDown = false;
         return;
       }
@@ -11478,6 +12736,18 @@
       const x = p.x;
       const y = p.y;
       this.ensureBoardLayoutSynced();
+      if (this.overlay === "leaderboard") {
+        const scrolled = this.endLeaderboardScroll();
+        this.lobbyDrag = null;
+        this.crushTapOnDown = false;
+        if (!scrolled) {
+          const overlayHit = this.hitButton(x, y);
+          if (overlayHit) {
+            void this.onButton(overlayHit.id, overlayHit.levelId);
+          }
+        }
+        return;
+      }
       if (this.overlay !== "none") {
         this.lobbyDrag = null;
         this.crushTapOnDown = false;
@@ -11542,6 +12812,7 @@
     handleTouchCancel(_e) {
       this.crushTapOnDown = false;
       this.lobbyDrag = null;
+      this.leaderboardDrag = null;
       this.lobbyCamVel = 0;
       this.boardView.onPointerCancel();
       if (this.hammerTargeting) {
@@ -11600,13 +12871,13 @@
       }
       this.boardView.updateLayout(this.computeBoardLayout(board));
     }
-    /** 按当前页面生成转发 / 朋友圈文案 */
+    /** 按当前页面生成转发 / 朋友圈文案。 */
     buildSharePayload() {
-      var _a;
+      var _a, _b;
       const level = this.session.getLevelConfig();
       const levelId = (_a = level == null ? void 0 : level.id) != null ? _a : 1;
       const score = this.session.getScore();
-      const scene = this.mode === "playing" || this.mode === "crush" || this.mode === "clean" || this.mode === "result" ? this.mode : "lobby";
+      const scene = (_b = this.boosterShareScene) != null ? _b : this.mode === "playing" || this.mode === "crush" || this.mode === "clean" || this.mode === "result" ? this.mode : "lobby";
       const title = buildShareTitle(scene, levelId, score);
       const query = buildShareQuery(
         scene,
@@ -11630,115 +12901,189 @@
       const imageUrlId = entry.imageUrlId.trim();
       return imageUrlId ? { imageUrl, imageUrlId } : { imageUrl };
     }
-    /** 左下角导航标签尺寸，供道具栏避让。 */
+    /** 左下角导航槽位尺寸，供道具栏避让；与底部胶囊行垂直居中。 */
     getNavChipFrame() {
-      const w = 88;
-      const h = LOBBY_NAV_CHIP_H;
-      const banner = this.mode === "lobby" ? this.session.getLobbyBannerReservePx() : 0;
+      if (this.mode !== "lobby") {
+        const layout = this.getInLevelBottomNavLayout();
+        return {
+          x: layout.muteX,
+          y: layout.muteY,
+          w: layout.muteSize,
+          h: layout.muteSize
+        };
+      }
+      const banner = this.session.getLobbyBannerReservePx();
       const bottom = lobbyNavBottomGap(banner, this.safeAreaBottom);
-      return { x: 12, y: this.height - h - bottom, w, h };
+      const chipY = this.height - LOBBY_NAV_CHIP_H - bottom;
+      return layoutLobbyGear(chipY, LOBBY_NAV_CHIP_H);
+    }
+    /** 局内左下：音效与道具栏底边对齐，「回首页」叠在音效上方。 */
+    getInLevelBottomNavLayout() {
+      const boosterSize = 58;
+      const boosterY = this.height - boosterSize - 22;
+      const muteSize = 42;
+      const muteX = LOBBY_GEAR_X;
+      const muteY = boosterY + (boosterSize - muteSize) / 2;
+      const homeW = Math.max(56, muteSize + 14);
+      const homeH = 28;
+      return {
+        muteX,
+        muteY,
+        muteSize,
+        homeX: muteX + (muteSize - homeW) / 2,
+        homeY: muteY - homeH - 6,
+        homeW,
+        homeH
+      };
     }
     hitLobbyNavChip(x, y) {
       const hit = this.hitButton(x, y);
       return !!hit && hit.id !== "level";
     }
-    /** 左下角「设置」；大厅再并排「推荐 / 圈子」。玩法在设置里。 */
+    /** 大厅 / 局内左下角：音效开关。局内与道具栏同高，上方附「回首页」。 */
     drawNavChips() {
-      const frame = this.getNavChipFrame();
       if (this.mode !== "lobby") {
         this.hideGameClubNativeButton();
-        const settingsBtn = {
-          id: "settings",
-          x: frame.x,
-          y: frame.y,
-          w: frame.w,
-          h: frame.h,
-          label: "\u8BBE\u7F6E",
-          hitPad: LOBBY_NAV_HIT_PAD
+        const layout = this.getInLevelBottomNavLayout();
+        this.pushMuteNavButton(
+          layout.muteX,
+          layout.muteY,
+          layout.muteSize,
+          layout.muteSize,
+          LOBBY_NAV_HIT_PAD
+        );
+        const homeBtn = {
+          id: "lobby",
+          x: layout.homeX,
+          y: layout.homeY,
+          w: layout.homeW,
+          h: layout.homeH,
+          label: "\u56DE\u9996\u9875",
+          hitPad: 6
         };
-        this.buttons.push(settingsBtn);
-        this.drawCuteButton(settingsBtn, {
-          top: "#b197fc",
-          bottom: "#7950f2",
+        this.buttons.push(homeBtn);
+        this.drawCuteButton(homeBtn, {
+          top: "#a5d8ff",
+          bottom: "#339af0",
           border: "#ffffff",
-          gloss: true
+          gloss: true,
+          fontSize: 12
         });
         return;
       }
-      const gap = 8;
-      const side = 12;
-      const items = [
-        {
-          id: "settings",
-          label: "\u8BBE\u7F6E",
-          palette: { top: "#b197fc", bottom: "#7950f2", border: "#ffffff", gloss: true }
-        },
-        {
-          id: "recommend",
-          label: "\u63A8\u8350",
-          palette: { top: "#ffa8a8", bottom: "#fa5252", border: "#ffffff", gloss: true }
-        },
-        {
-          id: "club",
-          label: "\u5708\u5B50",
-          palette: { top: "#74c0fc", bottom: "#1c7ed6", border: "#ffffff", gloss: true }
-        }
-      ];
-      const chipW = Math.max(
-        LOBBY_NAV_CHIP_MIN_W,
-        Math.floor((this.width - side * 2 - gap * (items.length - 1)) / items.length)
+      const daily = this.session.getDailyLoop();
+      const chrome = layoutLobbyBottom({
+        width: this.width,
+        height: this.height,
+        bannerReserve: this.session.getLobbyBannerReservePx(),
+        safeBottom: this.safeAreaBottom,
+        clearsToday: daily.clearsToday,
+        shuffleGranted: daily.playShuffleGranted
+      });
+      this.pushMuteNavButton(
+        chrome.settings.x,
+        chrome.settings.y,
+        chrome.settings.w,
+        chrome.settings.h,
+        8
       );
-      for (let i = 0; i < items.length; i += 1) {
-        const item = items[i];
+      if (chrome.claim) {
+        const claimBtn = {
+          id: "claim_shuffle",
+          x: chrome.claim.x,
+          y: chrome.claim.y,
+          w: chrome.claim.w,
+          h: chrome.claim.h,
+          label: chrome.claim.label,
+          hitPad: 6
+        };
+        this.buttons.push(claimBtn);
+        this.drawCuteButton(claimBtn, {
+          top: "#ffe066",
+          bottom: "#f59f00",
+          border: "#ffffff",
+          gloss: true
+        });
+      }
+      const palettes = {
+        recommend: { top: "#8ce99a", bottom: "#37b24d", border: "#ffffff", gloss: true },
+        club: { top: "#74c0fc", bottom: "#1c7ed6", border: "#ffffff", gloss: true }
+      };
+      for (const item of chrome.chips) {
         const btn = {
           id: item.id,
-          x: side + i * (chipW + gap),
-          y: frame.y,
-          w: chipW,
-          h: frame.h,
+          x: item.x,
+          y: item.y,
+          w: item.w,
+          h: item.h,
           label: item.label,
-          hitPad: LOBBY_NAV_HIT_PAD
+          hitPad: 8
         };
         this.buttons.push(btn);
-        this.drawCuteButton(btn, item.palette);
+        this.drawCuteButton(btn, palettes[item.id]);
         if (item.id === "club") {
           this.syncGameClubNativeButton(btn);
         }
       }
-      this.drawLobbyNavHint(frame);
     }
-    /** 每日目标提示贴在设置、推荐、圈子这一排上面。 */
-    drawLobbyNavHint(frame) {
-      var _a;
-      if (this.overlay !== "none") {
+    /** 左下角音效：开=彩色喇叭，关=灰色静音。 */
+    pushMuteNavButton(x, y, w, h, hitPad) {
+      const size = Math.max(w, h, 42);
+      const btn = {
+        id: "mute",
+        x: x + w / 2 - size / 2,
+        y: y + h / 2 - size / 2,
+        w: size,
+        h: size,
+        label: "",
+        hitPad
+      };
+      this.buttons.push(btn);
+      this.drawMuteToggleButton(btn, this.session.isMuted());
+    }
+    /** 首页左上角糖果列表（邀请 / 排行 / 怎么玩）。 */
+    drawLobbySideActions() {
+      if (this.mode !== "lobby") {
         return;
       }
-      const { ctx, width } = this;
-      const daily = this.session.getDailyLoop();
-      const page = lobbyPageIndex(this.lobbyCamY, this.height);
-      const vine = (_a = this.session.listLobbyVineNodes().find((node) => node.nodeIndex === page)) != null ? _a : this.session.getVineNode();
-      const inviteTip = lobbyInviteHint(this.session.getInviteState());
-      const tip = inviteTip != null ? inviteTip : daily.clearsToday >= DAILY_GOAL_CLEARS ? lobbyBottomHint(vine, this.session.getLevelCount()) : lobbyDailyHint(daily.clearsToday, daily.playShuffleGranted);
-      ctx.font = "bold 13px sans-serif";
-      const tipW = Math.min(width - 48, ctx.measureText(tip).width + 36);
-      const tipH = 32;
-      const tipX = (width - tipW) / 2;
-      const bob = Math.sin((this.nowMs || Date.now()) / 420) * 2;
-      const tipY = frame.y - tipH - 10 + bob;
-      this.drawHudPill(
-        tipX,
-        tipY,
-        tipW,
-        tipH,
-        "rgba(255,255,255,0.9)",
-        "rgba(255,150,200,0.85)"
-      );
-      ctx.save();
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = "#7a3e6a";
-      ctx.fillText(tip, width / 2, tipY + tipH / 2);
-      ctx.restore();
+      const top = lobbySideActionsTop(this.statusBarHeight);
+      const frames = layoutLobbySideActions(top, this.width);
+      const palettes = {
+        invite: {
+          top: "#63e6be",
+          bottom: "#12b886",
+          border: "#ffffff",
+          gloss: true,
+          fontSize: LOBBY_SIDE_ACTION_FONT
+        },
+        leaderboard: {
+          top: "#d0bfff",
+          bottom: "#845ef7",
+          border: "#ffffff",
+          gloss: true,
+          fontSize: LOBBY_SIDE_ACTION_FONT
+        },
+        howto: {
+          top: "#ffc078",
+          bottom: "#f76707",
+          border: "#ffffff",
+          gloss: true,
+          fontSize: LOBBY_SIDE_ACTION_FONT
+        }
+      };
+      for (const frame of frames) {
+        const btn = {
+          id: frame.id,
+          x: frame.x,
+          y: frame.y,
+          w: frame.w,
+          h: frame.h,
+          label: frame.label,
+          hitPad: 6
+        };
+        this.buttons.push(btn);
+        this.drawCuteButton(btn, palettes[frame.id]);
+      }
     }
     hideGameClubNativeButton() {
       var _a, _b;
@@ -11882,209 +13227,478 @@
         this.drawNoticePanel();
         return;
       }
+      if (this.overlay === "leaderboard") {
+        this.drawLeaderboardPanel();
+        return;
+      }
+      if (this.overlay === "profile_welcome") {
+        this.drawProfileWelcomePanel();
+        return;
+      }
       this.drawSettingsPanel();
+    }
+    /** 好友排行：标题/奖励固定，玩家列表可滑动。 */
+    drawLeaderboardPanel() {
+      var _a, _b, _c;
+      this.ctx.font = "12px sans-serif";
+      const view = this.boardViewModel;
+      const layout = layoutLeaderboardPanel({
+        width: this.width,
+        height: this.height,
+        hint: (_a = view == null ? void 0 : view.hint) != null ? _a : "",
+        rewardText: (_b = view == null ? void 0 : view.rewardText) != null ? _b : "",
+        rows: (_c = view == null ? void 0 : view.rows) != null ? _c : [],
+        wrap: (text, maxWidth) => this.wrapText(text, maxWidth)
+      });
+      this.leaderboardScrollY = clampLeaderboardScroll(this.leaderboardScrollY, layout);
+      const { ctx } = this;
+      const { panel } = layout;
+      this.drawCuteCard(panel.x, panel.y, panel.w, panel.h, {
+        radius: 24,
+        fillTop: "rgba(255,255,255,0.98)",
+        fillBottom: "rgba(232, 248, 255, 0.97)",
+        border: "rgba(116, 192, 252, 0.95)",
+        borderWidth: 3,
+        shadow: true,
+        sparkle: true,
+        sparkleColor: "#a5d8ff",
+        nowMs: this.nowMs || Date.now()
+      });
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "bold 20px sans-serif";
+      ctx.fillStyle = "#1864ab";
+      ctx.fillText(layout.title, panel.x + panel.w / 2, panel.y + 28);
+      ctx.restore();
+      let ty = layout.bodyTop;
+      for (const row of layout.headerRows) {
+        if (row.kind === "reward") {
+          const rewardW = panel.w - 28;
+          ctx.font = "12px sans-serif";
+          const lines2 = this.wrapText(row.text, rewardW);
+          const rowH2 = Math.max(layout.metaRowH, lines2.length * 16 + 8);
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.font = "12px sans-serif";
+          ctx.fillStyle = "#fa5252";
+          let ly2 = ty + 2;
+          const cx = panel.x + panel.w / 2;
+          for (const line of lines2) {
+            ctx.fillText(line, cx, ly2);
+            ly2 += 16;
+          }
+          ty += rowH2 + 6;
+          continue;
+        }
+        ctx.font = "12px sans-serif";
+        const lines = this.wrapText(row.text, layout.textWidth + 56);
+        const rowH = Math.max(layout.metaRowH, lines.length * 16 + 10);
+        ctx.fillStyle = "#74c0fc";
+        this.roundRectPath(layout.tagX, ty, 44, 24, 12);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(row.tag, layout.tagX + 22, ty + 12);
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.font = "12px sans-serif";
+        ctx.fillStyle = "#1864ab";
+        let ly = ty + 2;
+        for (const line of lines) {
+          ctx.fillText(line, layout.textX - 20, ly);
+          ly += 16;
+        }
+        ty += rowH + 6;
+      }
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(panel.x + 6, layout.listTop, panel.w - 12, layout.listViewportH);
+      ctx.clip();
+      let py = layout.listTop - this.leaderboardScrollY;
+      for (const row of layout.playerRows) {
+        const rowH = layout.rowH;
+        const nextY = py + rowH + 6;
+        if (nextY > layout.listTop && py < layout.listBottom) {
+          this.drawLeaderboardPlayerRow(row, layout, py, rowH);
+        }
+        py = nextY;
+      }
+      ctx.restore();
+      const maxScroll = Math.max(0, layout.listContentH - layout.listViewportH);
+      if (maxScroll > 4 && layout.listViewportH > 20) {
+        const trackX = panel.x + panel.w - 10;
+        const trackTop = layout.listTop + 4;
+        const trackH = layout.listViewportH - 8;
+        const thumbH = Math.max(18, layout.listViewportH / layout.listContentH * trackH);
+        const thumbY = trackTop + this.leaderboardScrollY / maxScroll * (trackH - thumbH);
+        ctx.fillStyle = "rgba(116, 192, 252, 0.25)";
+        this.roundRectPath(trackX, trackTop, 3, trackH, 2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(28, 126, 214, 0.55)";
+        this.roundRectPath(trackX, thumbY, 3, thumbH, 2);
+        ctx.fill();
+      }
+      for (const spec of layout.buttons) {
+        const btn = {
+          id: spec.id,
+          x: spec.x,
+          y: spec.y,
+          w: spec.w,
+          h: spec.h,
+          label: spec.label
+        };
+        this.buttons.push(btn);
+        if (isPanelCloseLabel(spec.label) || isPanelBackLabel(spec.label)) {
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.font = "bold 22px sans-serif";
+          ctx.fillStyle = "#74c0fc";
+          ctx.fillText(spec.label, spec.x + spec.w / 2, spec.y + spec.h / 2);
+        } else {
+          this.drawCuteButton(btn, spec.palette);
+        }
+      }
+    }
+    resolveLeaderboardLayout() {
+      var _a, _b, _c;
+      const view = this.boardViewModel;
+      return layoutLeaderboardPanel({
+        width: this.width,
+        height: this.height,
+        hint: (_a = view == null ? void 0 : view.hint) != null ? _a : "",
+        rewardText: (_b = view == null ? void 0 : view.rewardText) != null ? _b : "",
+        rows: (_c = view == null ? void 0 : view.rows) != null ? _c : [],
+        wrap: (text, maxWidth) => this.wrapText(text, maxWidth)
+      });
+    }
+    beginLeaderboardScroll(x, y) {
+      const layout = this.resolveLeaderboardLayout();
+      const inList = x >= layout.panel.x && x <= layout.panel.x + layout.panel.w && y >= layout.listTop && y <= layout.listBottom;
+      if (!inList || layout.listContentH <= layout.listViewportH + 1) {
+        this.leaderboardDrag = null;
+        return;
+      }
+      this.leaderboardDrag = { startY: y, lastY: y, scrolled: false };
+    }
+    moveLeaderboardScroll(y) {
+      if (!this.leaderboardDrag) {
+        return;
+      }
+      const dy = this.leaderboardDrag.lastY - y;
+      this.leaderboardDrag.lastY = y;
+      if (Math.abs(y - this.leaderboardDrag.startY) > 6) {
+        this.leaderboardDrag.scrolled = true;
+      }
+      if (Math.abs(dy) < 0.5) {
+        return;
+      }
+      const layout = this.resolveLeaderboardLayout();
+      this.leaderboardScrollY = clampLeaderboardScroll(
+        this.leaderboardScrollY + dy,
+        layout
+      );
+      this.requestPaint();
+    }
+    /** @returns 是否发生了滑动（滑动则不当作点击） */
+    endLeaderboardScroll() {
+      var _a;
+      const scrolled = !!((_a = this.leaderboardDrag) == null ? void 0 : _a.scrolled);
+      this.leaderboardDrag = null;
+      return scrolled;
+    }
+    /** 首次进入：可选授权头像昵称（不强制）。 */
+    drawProfileWelcomePanel() {
+      var _a, _b, _c;
+      const { ctx, width, height } = this;
+      const welcome = notice_default.profileWelcome;
+      const panelW = Math.min(320, width - 40);
+      const body = (_a = welcome == null ? void 0 : welcome.body) != null ? _a : "\u6388\u6743\u540E\uFF0C\u597D\u53CB\u6392\u884C\u4F1A\u663E\u793A\u4F60\u7684\u5934\u50CF\u548C\u6635\u79F0\u3002\u4E5F\u53EF\u8DF3\u8FC7\uFF0C\u4E0D\u5F71\u54CD\u6E38\u73A9\u3002";
+      ctx.font = "13px sans-serif";
+      const lines = this.wrapText(body, panelW - 40);
+      const panelH = 168 + lines.length * 18;
+      const x = (width - panelW) / 2;
+      const y = Math.max(80, height * 0.28);
+      this.drawCuteCard(x, y, panelW, panelH, {
+        radius: 22,
+        fillTop: "rgba(255,255,255,0.98)",
+        fillBottom: "rgba(232, 248, 255, 0.97)",
+        border: "rgba(116, 192, 252, 0.95)",
+        borderWidth: 3,
+        shadow: true,
+        sparkle: true,
+        sparkleColor: "#a5d8ff",
+        nowMs: this.nowMs || Date.now()
+      });
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "bold 18px sans-serif";
+      ctx.fillStyle = "#1864ab";
+      ctx.fillText((_b = welcome == null ? void 0 : welcome.title) != null ? _b : "\u5C55\u793A\u5FAE\u4FE1\u5934\u50CF", x + panelW / 2, y + 32);
+      ctx.font = "13px sans-serif";
+      ctx.fillStyle = "#495057";
+      ctx.textBaseline = "top";
+      let ly = y + 56;
+      for (const line of lines) {
+        ctx.fillText(line, x + panelW / 2, ly);
+        ly += 18;
+      }
+      const skip = {
+        id: "profile_skip",
+        x: x + 24,
+        y: y + panelH - 36,
+        w: panelW - 48,
+        h: 28,
+        label: (_c = welcome == null ? void 0 : welcome.skip) != null ? _c : "\u6682\u4E0D\u6388\u6743"
+      };
+      this.buttons.push(skip);
+      ctx.textBaseline = "middle";
+      ctx.font = "13px sans-serif";
+      ctx.fillStyle = "#74c0fc";
+      ctx.fillText(skip.label, skip.x + skip.w / 2, skip.y + skip.h / 2);
+    }
+    drawLeaderboardPlayerRow(row, layout, ty, rowH) {
+      var _a;
+      const { ctx } = this;
+      const { panel } = layout;
+      if (row.highlight) {
+        ctx.fillStyle = "rgba(208, 235, 255, 0.95)";
+        this.roundRectPath(panel.x + 8, ty - 2, panel.w - 16, rowH, 14);
+        ctx.fill();
+      }
+      const rankCx = layout.tagX + 12;
+      const rankCy = ty + rowH / 2;
+      ctx.beginPath();
+      ctx.arc(rankCx, rankCy, 11, 0, Math.PI * 2);
+      ctx.fillStyle = row.highlight ? "#1c7ed6" : "#74c0fc";
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(row.tag, rankCx, rankCy);
+      const ax = layout.avatarX;
+      const ay = rankCy;
+      const ar = layout.avatarR;
+      const avatar = row.avatarUrl ? this.avatarCache.get(row.avatarUrl) : null;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(ax, ay, ar, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.clip();
+      if (avatar && (avatar.width || 0) > 0) {
+        ctx.drawImage(avatar, ax - ar, ay - ar, ar * 2, ar * 2);
+      } else {
+        ctx.fillStyle = row.highlight ? "#1c7ed6" : "#a5d8ff";
+        ctx.fillRect(ax - ar, ay - ar, ar * 2, ar * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 13px sans-serif";
+        ctx.fillText(row.badge || (row.nickName || "\u73A9").slice(0, 1), ax, ay);
+        if (row.avatarUrl && !this.avatarCache.has(row.avatarUrl)) {
+          this.prefetchAvatar(row.avatarUrl);
+        }
+      }
+      ctx.restore();
+      ctx.beginPath();
+      ctx.arc(ax, ay, ar, 0, Math.PI * 2);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.font = "bold 13px sans-serif";
+      ctx.fillStyle = "#1864ab";
+      const name = row.nickName || "\u5FAE\u4FE1\u73A9\u5BB6";
+      ctx.fillText(name, layout.textX, ty + rowH * 0.36);
+      ctx.font = "11px sans-serif";
+      ctx.fillStyle = "#4c6ef5";
+      ctx.fillText(`\u9080\u8BF7\u7801 ${row.wxId || "\u2014"}`, layout.textX, ty + rowH * 0.68);
+      ctx.textAlign = "right";
+      ctx.font = "bold 14px sans-serif";
+      ctx.fillStyle = "#1864ab";
+      ctx.fillText(String((_a = row.score) != null ? _a : 0), layout.scoreX, rankCy);
+      ctx.font = "10px sans-serif";
+      ctx.fillStyle = "#74c0fc";
+      ctx.fillText("\u5173\u5361", layout.scoreX, rankCy + 14);
+    }
+    prefetchAvatar(url) {
+      if (!url || this.avatarCache.has(url) || typeof wx === "undefined") {
+        return;
+      }
+      try {
+        const img = wx.createImage();
+        this.avatarCache.set(url, img);
+        img.onload = () => this.requestPaint();
+        img.onerror = () => {
+          this.avatarCache.delete(url);
+          this.downloadAvatar(url);
+        };
+        img.src = url;
+      } catch (e) {
+        this.downloadAvatar(url);
+      }
+    }
+    downloadAvatar(url) {
+      if (!url || this.avatarCache.has(url) || typeof wx === "undefined") {
+        return;
+      }
+      const download = wx.downloadFile;
+      if (typeof download !== "function") {
+        return;
+      }
+      try {
+        download({
+          url,
+          success: (res) => {
+            const path = res.tempFilePath;
+            if (!path || res.statusCode != null && res.statusCode !== 200) {
+              return;
+            }
+            try {
+              const img = wx.createImage();
+              this.avatarCache.set(url, img);
+              img.onload = () => this.requestPaint();
+              img.onerror = () => {
+                this.avatarCache.delete(url);
+              };
+              img.src = path;
+            } catch (e) {
+            }
+          }
+        });
+      } catch (e) {
+      }
     }
     drawNoticePanel() {
       const { ctx, width, height } = this;
       const panelW = Math.min(300, width - 48);
       ctx.font = "bold 16px sans-serif";
       const bodyLines = this.wrapText(notice_default.body, panelW - 48);
-      const panelH = 168 + Math.max(0, bodyLines.length - 1) * 22;
+      const panelH = 120 + Math.max(0, bodyLines.length - 1) * 22;
       const x = (width - panelW) / 2;
       const y = Math.max(24, height * 0.28);
       this.drawCuteCard(x, y, panelW, panelH, {
         radius: 24,
         fillTop: "rgba(255,255,255,0.98)",
-        fillBottom: "rgba(255,236,245,0.97)",
-        border: "rgba(255, 170, 210, 0.95)",
+        fillBottom: "rgba(232, 248, 255, 0.97)",
+        border: "rgba(116, 192, 252, 0.95)",
         borderWidth: 3,
         shadow: true,
         sparkle: true,
+        sparkleColor: "#a5d8ff",
         nowMs: this.nowMs || Date.now()
       });
+      this.paintPanelCornerChrome(
+        this.overlayFromSettings ? panelBackButton({ x, y }) : panelCloseButton({ x, y, w: panelW }),
+        "#1c7ed6"
+      );
       ctx.save();
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.font = "bold 22px sans-serif";
-      ctx.fillStyle = "#c2255c";
+      ctx.fillStyle = "#1864ab";
       ctx.fillText(notice_default.title, x + panelW / 2, y + 38);
       ctx.font = "bold 16px sans-serif";
-      ctx.fillStyle = "#5c3d4a";
+      ctx.fillStyle = "#1c7ed6";
       let ty = y + 82;
       for (const line of bodyLines) {
         ctx.fillText(line, x + panelW / 2, ty);
         ty += 22;
       }
       ctx.restore();
-      const btnW = Math.min(220, panelW - 48);
-      const closeBtn = {
-        id: "resume",
-        x: x + (panelW - btnW) / 2,
-        y: y + panelH - 62,
-        w: btnW,
-        h: 46,
-        label: this.overlayFromSettings ? "\u8FD4\u56DE\u8BBE\u7F6E" : notice_default.confirm
-      };
-      this.buttons.push(closeBtn);
-      this.drawCuteButton(closeBtn, {
-        top: "#ffd43b",
-        bottom: "#fab005",
-        border: "#ffffff",
-        gloss: true
-      });
     }
     drawSettingsPanel() {
       const { ctx, width, height } = this;
       const inLobby = this.mode === "lobby";
-      const panelW = Math.min(300, width - 48);
-      const hint = inviteSettingsHint(this.session.getInviteState());
-      const panelH = inLobby ? 492 : 548;
+      const panelW = Math.min(280, width - 48);
+      const padX = 16;
+      const titleH = 44;
+      const footH = inLobby ? 72 : 100;
+      const panelH = titleH + footH;
       const x = (width - panelW) / 2;
-      const y = Math.max(12, Math.min(height * 0.16, height - panelH - 12));
+      const y = Math.max(12, Math.min(height * 0.28, height - panelH - 12));
       this.drawCuteCard(x, y, panelW, panelH, {
         radius: 24,
         fillTop: "rgba(255,255,255,0.98)",
-        fillBottom: "rgba(255,236,245,0.97)",
-        border: "rgba(255, 170, 210, 0.95)",
+        fillBottom: "rgba(232, 248, 255, 0.97)",
+        border: "rgba(116, 192, 252, 0.95)",
         borderWidth: 3,
         shadow: true,
         sparkle: true,
+        sparkleColor: "#a5d8ff",
         nowMs: this.nowMs || Date.now()
       });
+      this.paintPanelCornerChrome(panelCloseButton({ x, y, w: panelW }), "#1c7ed6");
       ctx.save();
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.font = "bold 22px sans-serif";
-      ctx.fillStyle = "#c2255c";
-      ctx.fillText("\u8BBE\u7F6E", x + panelW / 2, y + 32);
+      ctx.fillStyle = "#1864ab";
+      ctx.fillText("\u8BBE\u7F6E", x + panelW / 2, y + 26);
       ctx.restore();
-      ctx.save();
-      ctx.font = "12px sans-serif";
-      ctx.fillStyle = "#a61e4d";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      const hintLines = this.wrapText(hint, panelW - 36);
-      let hintY = y + 50;
-      for (const line of hintLines.slice(0, 2)) {
-        ctx.fillText(line, x + panelW / 2, hintY);
-        hintY += 16;
+      if (inLobby) {
+        ctx.save();
+        ctx.font = "13px sans-serif";
+        ctx.fillStyle = "#1c7ed6";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("\u97F3\u6548\u5F00\u5173\u5728\u5DE6\u4E0B\u89D2\u54E6", x + panelW / 2, y + titleH + 28);
+        ctx.restore();
+        return;
       }
-      ctx.restore();
-      const muted = this.session.isMuted();
-      const btnW = Math.min(220, panelW - 48);
-      const btnX = x + (panelW - btnW) / 2;
-      let btnY = y + 88;
-      const muteBtn = {
-        id: "mute",
-        x: btnX,
-        y: btnY,
-        w: btnW,
-        h: 46,
-        label: muted ? "\u97F3\u6548\uFF1A\u5173" : "\u97F3\u6548\uFF1A\u5F00"
+      const homeBtn = {
+        id: "lobby",
+        x: x + padX,
+        y: y + titleH + 18,
+        w: panelW - padX * 2,
+        h: 44,
+        label: "\u8FD4\u56DE\u9996\u9875"
       };
-      this.buttons.push(muteBtn);
-      this.drawCuteButton(
-        muteBtn,
-        muted ? { top: "#ced4da", bottom: "#868e96", border: "#ffffff", gloss: true } : { top: "#8ce99a", bottom: "#37b24d", border: "#ffffff", gloss: true }
-      );
-      btnY += 56;
-      const inviteBtn = {
-        id: "invite",
-        x: btnX,
-        y: btnY,
-        w: btnW,
-        h: 46,
-        label: "\u9080\u8BF7\u597D\u53CB"
-      };
-      this.buttons.push(inviteBtn);
-      this.drawCuteButton(inviteBtn, {
-        top: "#b197fc",
-        bottom: "#7950f2",
-        border: "#ffffff",
-        gloss: true
-      });
-      btnY += 56;
-      const postBtn = {
-        id: "post",
-        x: btnX,
-        y: btnY,
-        w: btnW,
-        h: 46,
-        label: "\u53D1\u8868\u8D34\u56FE"
-      };
-      this.buttons.push(postBtn);
-      this.drawCuteButton(postBtn, {
-        top: "#ffd43b",
-        bottom: "#fab005",
-        border: "#ffffff",
-        gloss: true
-      });
-      btnY += 56;
-      const howtoBtn = {
-        id: "howto",
-        x: btnX,
-        y: btnY,
-        w: btnW,
-        h: 46,
-        label: "\u600E\u4E48\u73A9"
-      };
-      this.buttons.push(howtoBtn);
-      this.drawCuteButton(howtoBtn, {
-        top: "#ffc078",
-        bottom: "#fd7e14",
-        border: "#ffffff",
-        gloss: true
-      });
-      btnY += 56;
-      const noticeBtn = {
-        id: "notice",
-        x: btnX,
-        y: btnY,
-        w: btnW,
-        h: 46,
-        label: notice_default.title
-      };
-      this.buttons.push(noticeBtn);
-      this.drawCuteButton(noticeBtn, {
-        top: "#ffa8d4",
-        bottom: "#f06595",
-        border: "#ffffff",
-        gloss: true
-      });
-      if (!inLobby) {
-        btnY += 56;
-        const homeBtn = {
-          id: "lobby",
-          x: btnX,
-          y: btnY,
-          w: btnW,
-          h: 46,
-          label: "\u8FD4\u56DE\u9996\u9875"
-        };
-        this.buttons.push(homeBtn);
-        this.drawCuteButton(homeBtn, {
-          top: "#ffa8d4",
-          bottom: "#ff6baf",
-          border: "#ffffff",
-          gloss: true
-        });
-      }
-      btnY += 56;
-      const closeBtn = {
-        id: "resume",
-        x: btnX,
-        y: btnY,
-        w: btnW,
-        h: 46,
-        label: inLobby ? "\u5173\u95ED" : "\u7EE7\u7EED\u6E38\u620F"
-      };
-      this.buttons.push(closeBtn);
-      this.drawCuteButton(closeBtn, {
+      this.buttons.push(homeBtn);
+      this.drawCuteButton(homeBtn, {
         top: "#a5d8ff",
-        bottom: "#4dabf7",
+        bottom: "#339af0",
         border: "#ffffff",
         gloss: true
       });
+    }
+    /** 关卡同款音效钮：彩色 = 开，灰色 = 关（贴图自带立体壳）。 */
+    drawMuteToggleButton(btn, muted) {
+      const { ctx } = this;
+      const key = muted ? "mute" : "sound";
+      const img = this.uiIcons.get(key);
+      const cx = btn.x + btn.w / 2;
+      const cy = btn.y + btn.h / 2;
+      if (img && (img.width || 0) > 0) {
+        ctx.save();
+        ctx.drawImage(img, btn.x, btn.y, btn.w, btn.h);
+        ctx.restore();
+        return;
+      }
+      ctx.save();
+      const grad = ctx.createLinearGradient(btn.x, btn.y, btn.x, btn.y + btn.h);
+      if (muted) {
+        grad.addColorStop(0, "#e9ecef");
+        grad.addColorStop(1, "#adb5bd");
+      } else {
+        grad.addColorStop(0, "#ffa8a8");
+        grad.addColorStop(1, "#f06595");
+      }
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, btn.w / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 14px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(muted ? "\u9759" : "\u97F3", cx, cy);
+      ctx.restore();
     }
     /** 首页玩法：一屏速查，打开就能看完。 */
     drawHowToPanel() {
@@ -12093,8 +13707,7 @@
       const padX = 16;
       const tagW = 44;
       const titleH = 46;
-      const btnH = 46;
-      const footH = 70;
+      const footH = 16;
       const gap = 8;
       ctx.font = "12px sans-serif";
       const textW = panelW - padX * 2 - tagW - 10;
@@ -12108,18 +13721,23 @@
       this.drawCuteCard(x, y, panelW, panelH, {
         radius: 24,
         fillTop: "rgba(255,255,255,0.98)",
-        fillBottom: "rgba(255,236,245,0.97)",
-        border: "rgba(255, 170, 210, 0.95)",
+        fillBottom: "rgba(230, 246, 255, 0.97)",
+        border: "rgba(116, 192, 252, 0.95)",
         borderWidth: 3,
         shadow: true,
         sparkle: true,
+        sparkleColor: "#a5d8ff",
         nowMs: this.nowMs || Date.now()
       });
+      this.paintPanelCornerChrome(
+        this.overlayFromSettings ? panelBackButton({ x, y }) : panelCloseButton({ x, y, w: panelW }),
+        "#339af0"
+      );
       ctx.save();
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.font = "bold 22px sans-serif";
-      ctx.fillStyle = "#c2255c";
+      ctx.fillStyle = "#1c7ed6";
       ctx.fillText("\u600E\u4E48\u73A9", x + panelW / 2, y + 26);
       ctx.restore();
       let ty = y + titleH;
@@ -12130,7 +13748,7 @@
         if (ty + rowH > maxY) {
           break;
         }
-        ctx.fillStyle = "#ff8cc8";
+        ctx.fillStyle = "#4dabf7";
         this.roundRectPath(x + padX, ty, tagW, 24, 12);
         ctx.fill();
         ctx.fillStyle = "#ffffff";
@@ -12141,7 +13759,7 @@
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
         ctx.font = "12px sans-serif";
-        ctx.fillStyle = "#5c3d4a";
+        ctx.fillStyle = "#3b5166";
         let ly = ty + 2;
         for (const line of lines) {
           ctx.fillText(line, x + padX + tagW + 10, ly);
@@ -12149,22 +13767,6 @@
         }
         ty += rowH + gap;
       }
-      const btnW = Math.min(200, panelW - 48);
-      const closeBtn = {
-        id: "resume",
-        x: x + (panelW - btnW) / 2,
-        y: y + panelH - 58,
-        w: btnW,
-        h: btnH,
-        label: this.overlayFromSettings ? "\u8FD4\u56DE\u8BBE\u7F6E" : "\u77E5\u9053\u4E86\uFF0C\u53BB\u73A9"
-      };
-      this.buttons.push(closeBtn);
-      this.drawCuteButton(closeBtn, {
-        top: "#ffd43b",
-        bottom: "#fab005",
-        border: "#ffffff",
-        gloss: true
-      });
     }
     /** 按宽度逐字折行（中文规则说明用）。 */
     wrapText(text, maxWidth) {
@@ -12184,6 +13786,61 @@
         lines.push(line);
       }
       return lines;
+    }
+    /** 弹窗角标：左上「<」返回 / 右上「×」关闭。 */
+    paintPanelCornerChrome(spec, accent = "#1c7ed6") {
+      const btn = {
+        id: spec.id,
+        x: spec.x,
+        y: spec.y,
+        w: spec.w,
+        h: spec.h,
+        label: spec.label,
+        hitPad: 12
+      };
+      this.buttons.push(btn);
+      if (isPanelCloseLabel(spec.label)) {
+        this.drawPanelCloseX(btn, accent);
+      } else {
+        this.drawPanelBackChevron(btn, accent);
+      }
+    }
+    /** 弹窗返回：无圆底，大张角折线箭头。 */
+    drawPanelBackChevron(btn, accent = "#1c7ed6") {
+      const { ctx } = this;
+      const cx = btn.x + btn.w * 0.52;
+      const cy = btn.y + btn.h / 2;
+      const armX = Math.min(11, btn.w * 0.32);
+      const armY = Math.min(9, btn.h * 0.28);
+      ctx.save();
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 3.5;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(cx + armX * 0.15, cy - armY);
+      ctx.lineTo(cx - armX, cy);
+      ctx.lineTo(cx + armX * 0.15, cy + armY);
+      ctx.stroke();
+      ctx.restore();
+    }
+    /** 弹窗关闭：无圆底，描线 ×。 */
+    drawPanelCloseX(btn, accent = "#1c7ed6") {
+      const { ctx } = this;
+      const cx = btn.x + btn.w / 2;
+      const cy = btn.y + btn.h / 2;
+      const arm = Math.min(9, btn.w * 0.28);
+      ctx.save();
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 3.5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(cx - arm, cy - arm);
+      ctx.lineTo(cx + arm, cy + arm);
+      ctx.moveTo(cx + arm, cy - arm);
+      ctx.lineTo(cx - arm, cy + arm);
+      ctx.stroke();
+      ctx.restore();
     }
     /** 启动或续上循环 BGM（静音时跳过；按钮音效后微信常把 BGM 掐掉） */
     tryStartBgm() {
@@ -12251,6 +13908,87 @@
       }
       return "\u5E7F\u544A\u8FD8\u5728\u52A0\u8F7D";
     }
+    boosterIdFromButton(id) {
+      if (id === "booster_hammer") {
+        return "hammer";
+      }
+      if (id === "booster_shuffle") {
+        return "shuffle";
+      }
+      return "extraMoves";
+    }
+    async requestBoosterRefill(id) {
+      const channel = this.session.getBoosterRefillChannel(id);
+      if (channel === "none") {
+        this.notifyUser("\u73B0\u5728\u4E0D\u80FD\u9886\u9053\u5177", "\u6682\u65F6\u4E0D\u80FD\u9886");
+        return;
+      }
+      if (channel === "ad") {
+        this.notifyUser("\u6B63\u5728\u6253\u5F00\u5E7F\u544A\u2026", "\u6B63\u5728\u6253\u5F00\u5E7F\u544A");
+        const result = await this.runDuringAd(() => this.session.watchAdForBooster(id));
+        this.clearAdPrompt();
+        if (result === "revived") {
+          this.onBoosterRefillGranted(id, "ad");
+        } else {
+          this.notifyUser(this.adWatchTip(result), this.adWatchNativeTitle(result));
+        }
+        return;
+      }
+      this.boosterShareScene = channel === "friend" ? "booster_friend" : "booster_group";
+      this.pendingBoosterShare = id;
+      this.pendingBoosterShareAtMs = this.nowMs || Date.now();
+      const opened = this.share.shareToFriend();
+      this.boosterShareScene = null;
+      if (!opened) {
+        this.pendingBoosterShareAtMs = 0;
+        this.settlePendingBoosterShare();
+        return;
+      }
+      this.notifyUser(
+        channel === "friend" ? "\u8F6C\u53D1\u7ED9 1 \u4E2A\u597D\u53CB\u5C31\u80FD\u9886" : "\u8F6C\u53D1\u5230\u7FA4\u5C31\u80FD\u518D\u9886 1 \u4E2A",
+        channel === "friend" ? "\u8F6C\u53D1\u597D\u53CB" : "\u8F6C\u53D1\u5230\u7FA4"
+      );
+      setTimeout(() => {
+        this.settlePendingBoosterShare();
+      }, 700);
+    }
+    settlePendingBoosterShare() {
+      const id = this.pendingBoosterShare;
+      if (!id) {
+        return;
+      }
+      const elapsed = (this.nowMs || Date.now()) - this.pendingBoosterShareAtMs;
+      if (elapsed < 280) {
+        return;
+      }
+      this.pendingBoosterShare = null;
+      const channel = this.session.getBoosterRefillChannel(id);
+      if (channel !== "friend" && channel !== "group") {
+        return;
+      }
+      if (!this.session.claimBoosterShare(id)) {
+        return;
+      }
+      this.onBoosterRefillGranted(id, channel);
+    }
+    onBoosterRefillGranted(id, channel) {
+      if (id === "hammer") {
+        this.hammerTargeting = true;
+        this.hammerCursor = { x: this.width / 2, y: this.height * 0.45 };
+        this.notifyUser(
+          channel === "ad" ? "\u770B\u5E7F\u544A\u83B7\u5F97\u9524\u5B50\uFF0C\u70B9\u4E00\u683C\u7838\u6389" : "\u5DF2\u83B7\u5F97\u9524\u5B50\uFF0C\u70B9\u4E00\u683C\u7838\u6389",
+          "\u5DF2\u83B7\u5F97\u9524\u5B50"
+        );
+        return;
+      }
+      if (id === "shuffle") {
+        this.boardView.clearSelection();
+        this.syncBoardView();
+        this.notifyUser("\u5C0F\u52A8\u7269\u91CD\u65B0\u6392\u5217\u5566\uFF01", "\u5DF2\u91CD\u6392");
+        return;
+      }
+      this.notifyUser(`\u6B65\u6570 +${5} \xB7 \u5269\u4F59 ${this.session.getMovesLeft()}`, "\u6B65\u6570+5");
+    }
     /** 画布提示 + 微信 Toast，点底部广告时一定看得到。 */
     notifyUser(text, nativeTitle) {
       this.statusText = text;
@@ -12272,7 +14010,8 @@
       }
     }
     async handleButton(id, levelId) {
-      if (id === "booster_hammer" || id === "booster_shuffle" || id === "booster_extra" || id === "mute" || id === "level" || id === "lobby" || id === "settings" || id === "howto" || id === "notice" || id === "club" || id === "recommend" || id === "post" || id === "invite" || id === "resume") {
+      var _a, _b, _c, _d;
+      if (id === "booster_hammer" || id === "booster_shuffle" || id === "booster_extra" || id === "mute" || id === "level" || id === "lobby" || id === "settings" || id === "howto" || id === "notice" || id === "club" || id === "recommend" || id === "post" || id === "invite" || id === "claim_shuffle" || id === "resume") {
         this.session.playUiSfx();
       }
       if (id === "level") {
@@ -12303,6 +14042,12 @@
         this.openOverlay("notice");
         return;
       }
+      if (id === "claim_shuffle") {
+        if (this.session.claimDailyShuffle()) {
+          this.notifyUser("\u91CD\u6392 x1 \u5DF2\u5230\u8D26", "\u9886\u53D6\u6210\u529F");
+        }
+        return;
+      }
       if (id === "club") {
         this.openGameClub();
         return;
@@ -12329,7 +14074,20 @@
       }
       if (id === "invite") {
         this.share.shareToFriend();
-        this.notifyUser("\u53D1\u7ED9\u65B0\u670B\u53CB\uFF0C\u5BF9\u65B9\u901A\u5173\u540E\u53CC\u65B9\u5404\u5F97\u9524\u5B50", "\u9080\u8BF7\u597D\u53CB");
+        return;
+      }
+      if (id === "leaderboard") {
+        void (async () => {
+          await this.session.ensureWxUserProfile();
+          await this.refreshLeaderboardView();
+          this.openOverlay("leaderboard");
+        })();
+        return;
+      }
+      if (id === "profile_skip") {
+        markWxProfileAsked();
+        this.destroyUserInfoAuthButton();
+        this.closeOverlay();
         return;
       }
       if (id === "lobby") {
@@ -12352,18 +14110,7 @@
       }
       if (id === "booster_hammer") {
         if (this.session.getBoosterCount("hammer") <= 0) {
-          this.notifyUser("\u6B63\u5728\u6253\u5F00\u5E7F\u544A\u2026", "\u6B63\u5728\u6253\u5F00\u5E7F\u544A");
-          const result = await this.runDuringAd(
-            () => this.session.watchAdForBooster("hammer")
-          );
-          this.clearAdPrompt();
-          if (result === "revived") {
-            this.hammerTargeting = true;
-            this.hammerCursor = { x: this.width / 2, y: this.height * 0.45 };
-            this.notifyUser("\u770B\u5E7F\u544A\u83B7\u5F97\u9524\u5B50\uFF0C\u70B9\u4E00\u683C\u7838\u6389", "\u5DF2\u83B7\u5F97\u9524\u5B50");
-          } else {
-            this.notifyUser(this.adWatchTip(result), this.adWatchNativeTitle(result));
-          }
+          await this.requestBoosterRefill("hammer");
           return;
         }
         this.hammerTargeting = !this.hammerTargeting;
@@ -12384,18 +14131,7 @@
           return;
         }
         if (this.session.getBoosterCount("shuffle") <= 0) {
-          this.notifyUser("\u6B63\u5728\u6253\u5F00\u5E7F\u544A\u2026", "\u6B63\u5728\u6253\u5F00\u5E7F\u544A");
-          const result = await this.runDuringAd(
-            () => this.session.watchAdForBooster("shuffle")
-          );
-          this.clearAdPrompt();
-          if (result === "revived") {
-            this.boardView.clearSelection();
-            this.syncBoardView();
-            this.notifyUser("\u5C0F\u52A8\u7269\u91CD\u65B0\u6392\u5217\u5566\uFF01", "\u5DF2\u91CD\u6392");
-          } else {
-            this.notifyUser(this.adWatchTip(result), this.adWatchNativeTitle(result));
-          }
+          await this.requestBoosterRefill("shuffle");
           return;
         }
         if (!this.session.useShuffle()) {
@@ -12418,17 +14154,7 @@
           }
           return;
         }
-        this.notifyUser("\u6B63\u5728\u6253\u5F00\u5E7F\u544A\u2026", "\u6B63\u5728\u6253\u5F00\u5E7F\u544A");
-        const result = await this.runDuringAd(() => this.session.watchAdToAddMoves());
-        this.clearAdPrompt();
-        if (result === "revived") {
-          this.notifyUser(
-            `\u770B\u5E7F\u544A +${5} \u6B65 \xB7 \u5269\u4F59 ${this.session.getMovesLeft()}`,
-            "\u6B65\u6570+5"
-          );
-        } else {
-          this.notifyUser(this.adWatchTip(result), this.adWatchNativeTitle(result));
-        }
+        await this.requestBoosterRefill("extraMoves");
         return;
       }
       if (id === "crush_skip") {
@@ -12488,6 +14214,7 @@
           this.notifyUser(this.adWatchTip(result), this.adWatchNativeTitle(result));
         }
         if (result === "revived") {
+          this.closeOverlay();
           this.mode = "playing";
           this.pendingResult = null;
           this.resultFx.stop();
@@ -12503,7 +14230,7 @@
         await this.session.retryLevel();
         this.mode = "playing";
         this.buriedFx.clear();
-        this.statusText = "";
+        this.applyLevelEntryTip((_b = (_a = this.session.getLevelConfig()) == null ? void 0 : _a.id) != null ? _b : 0);
         this.pendingResult = null;
         this.offerCleanPrompt = false;
         this.resultFx.stop();
@@ -12529,7 +14256,7 @@
           return;
         }
         this.mode = "playing";
-        this.statusText = "";
+        this.applyLevelEntryTip((_d = (_c = this.session.getLevelConfig()) == null ? void 0 : _c.id) != null ? _d : 0);
         this.pendingResult = null;
         this.offerCleanPrompt = false;
         this.resultFx.stop();
@@ -12542,25 +14269,117 @@
         return;
       }
     }
+    async refreshLeaderboardView() {
+      const view = await this.session.loadFriendLeaderboard();
+      this.boardViewModel = view;
+      for (const row of view.rows) {
+        if (row.avatarUrl) {
+          this.prefetchAvatar(row.avatarUrl);
+        }
+      }
+      this.requestPaint();
+    }
+    /**
+     * 首次进入 / 冷启动进大厅：可选授权头像昵称。
+     * 已授权或已问过则不再打扰。
+     */
+    maybeOfferLaunchProfileAuth() {
+      if (this.mode !== "lobby") {
+        return;
+      }
+      if (hasAskedWxProfile()) {
+        return;
+      }
+      const cached = readCachedWxProfile(this.session.getInviteCode());
+      if (hasRealWxProfile(cached)) {
+        markWxProfileAsked();
+        return;
+      }
+      setTimeout(() => {
+        if (this.mode !== "lobby" || this.overlay !== "none") {
+          return;
+        }
+        if (hasAskedWxProfile() || hasRealWxProfile(readCachedWxProfile(this.session.getInviteCode()))) {
+          return;
+        }
+        this.openOverlay("profile_welcome");
+        this.mountLaunchProfileAuthButton();
+      }, 400);
+    }
+    mountLaunchProfileAuthButton() {
+      var _a, _b, _c;
+      this.destroyUserInfoAuthButton();
+      if (this.overlay !== "profile_welcome") {
+        return;
+      }
+      const panelW = Math.min(320, this.width - 40);
+      const body = (_b = (_a = notice_default.profileWelcome) == null ? void 0 : _a.body) != null ? _b : "\u6388\u6743\u540E\uFF0C\u597D\u53CB\u6392\u884C\u4F1A\u663E\u793A\u4F60\u7684\u5934\u50CF\u548C\u6635\u79F0\u3002\u4E5F\u53EF\u8DF3\u8FC7\uFF0C\u4E0D\u5F71\u54CD\u6E38\u73A9\u3002";
+      this.ctx.font = "13px sans-serif";
+      const lines = this.wrapText(body, panelW - 40);
+      const panelH = 168 + lines.length * 18;
+      const panelY = Math.max(80, this.height * 0.28);
+      const btnW = Math.min(220, panelW - 48);
+      const btnH = 40;
+      const left = (this.width - btnW) / 2;
+      const top = panelY + panelH - 36 - 12 - btnH;
+      const welcome = notice_default.profileWelcome;
+      this.userInfoAuthButton = mountWxUserInfoAuthButton({
+        left,
+        top,
+        width: btnW,
+        height: btnH,
+        text: (_c = welcome == null ? void 0 : welcome.btn) != null ? _c : "\u6388\u6743\u5934\u50CF\u6635\u79F0",
+        onProfile: () => {
+          var _a2;
+          markWxProfileAsked();
+          this.destroyUserInfoAuthButton();
+          this.closeOverlay();
+          this.notifyUser((_a2 = welcome == null ? void 0 : welcome.ok) != null ? _a2 : "\u5934\u50CF\u6635\u79F0\u5DF2\u4FDD\u5B58", "\u6388\u6743\u6210\u529F");
+        },
+        onFail: (message) => {
+          var _a2;
+          markWxProfileAsked();
+          this.destroyUserInfoAuthButton();
+          this.closeOverlay();
+          showAuthFailModal((_a2 = welcome == null ? void 0 : welcome.fail) != null ? _a2 : message);
+        }
+      });
+    }
+    destroyUserInfoAuthButton() {
+      if (!this.userInfoAuthButton) {
+        return;
+      }
+      try {
+        this.userInfoAuthButton.destroy();
+      } catch (e) {
+      }
+      this.userInfoAuthButton = null;
+    }
     openOverlay(kind) {
+      if (kind !== "profile_welcome") {
+        this.destroyUserInfoAuthButton();
+      }
       this.overlay = kind;
+      this.leaderboardScrollY = 0;
+      this.leaderboardDrag = null;
       this.hammerTargeting = false;
       this.hammerCursor = null;
       this.boardView.onPointerCancel();
       this.syncLobbyBanner();
       this.requestPaint();
     }
+    /** 进游戏不再自动弹公告；设置里仍可手动打开。 */
     maybeOpenLobbyNotice() {
-      if (this.mode !== "lobby" || this.session.hasSeenNotice(notice_default.id)) {
-        return;
-      }
-      this.openOverlay("notice");
+      return;
     }
     closeOverlay() {
       if (this.overlay === "notice") {
         void this.session.markNoticeSeen(notice_default.id);
       }
+      this.destroyUserInfoAuthButton();
       this.overlayFromSettings = false;
+      this.leaderboardScrollY = 0;
+      this.leaderboardDrag = null;
       this.overlay = "none";
       this.syncLobbyBanner();
       this.requestPaint();
@@ -12570,7 +14389,7 @@
       this.foreground.onShow();
       this.kickRenderLoop();
     }
-    /** 设置里「发表贴图」：合成带小游戏码的海报，不截设置弹窗。 */
+    /** 首页「发表贴图」：合成带小游戏码的海报。 */
     async publishOfficialAccountPost() {
       const post = this.buildOfficialAccountPost();
       this.closeOverlay();
@@ -12591,7 +14410,6 @@
         opened = await this.share.sharePoster(shot);
       }
       this.restoreAfterShareSheet();
-      this.openOverlay("settings");
       this.statusText = opened ? "\u53EF\u628A\u6D77\u62A5\u53D1\u5230\u516C\u4F17\u53F7 / \u670B\u53CB\u5708" : "\u8BF7\u7528\u53F3\u4E0A\u89D2 \xB7\xB7\xB7 \u8F6C\u53D1\uFF0C\u6216\u5230\u516C\u4F17\u53F7\u53D1\u8D34\u56FE";
     }
     captureSharePoster() {
@@ -12658,10 +14476,127 @@
       }
       return {
         title: "\u4ECE\u60F3\u6CD5\u5230\u4E0A\u7EBF\uFF1A\u6211\u4EEC\u4E3A\u4EC0\u4E48\u7528\u5FAE\u4FE1\u505A\u4E00\u6B3E\u6CA1\u6709\u5185\u8D2D\u7684\u840C\u5BA0\u4E09\u6D88",
-        content: "\u300A\u840C\u5BA0\u7C89\u788E\u6D88\u300B\u662F\u4E00\u6B3E\u5FAE\u4FE1\u5C0F\u6E38\u620F\uFF1A7\xD77 \u68CB\u76D8\u6ED1\u52A8\u7EA2\u72D0\u3001\u84DD\u5154\u3001\u7EFF\u86D9\u3001\u9EC4\u9E21\u3001\u7D2B\u732B\uFF0C\u4E09\u8FDE\u6D88\u9664\uFF1B\u56DB\u8FDE/L/T \u51FA\u95EA\u5149\uFF0C\u4E94\u8FDE\u51FA\u8D85\u7EA7\u732B\u5934\u9E70\u3002\u8FC7\u5173\u81EA\u52A8\u8FDB\u9650\u65F6\u7C89\u788E\u52A0\u5206\uFF0C\u603B\u5206\u6EE1 1500 \u53EF\u9009\u6E05\u6D01\u6A21\u5F0F\uFF08\u6E05\u6D01\u4E0D\u52A0\u4E3B\u7EBF\u5206\uFF09\u3002\u5168\u7A0B\u65E0\u5185\u8D2D\uFF0C\u70B9\u6811\u4E0A\u7684\u9A6C\u5361\u9F99\u5C31\u80FD\u5F00\u73A9\u3002#\u6765\u5FAE\u4FE1\u505A\u4E2A\u5C0F\u7A0B\u5E8F",
+        content: "\u300A\u840C\u5BA0\u7C89\u788E\u6D88\u300B\u662F\u4E00\u6B3E\u5FAE\u4FE1\u5C0F\u6E38\u620F\uFF1A7\xD77 \u68CB\u76D8\u6ED1\u52A8\u7EA2\u72D0\u3001\u84DD\u5154\u3001\u7EFF\u86D9\u3001\u9EC4\u9E21\u3001\u7D2B\u732B\uFF0C\u4E09\u8FDE\u6D88\u9664\uFF1B\u56DB\u8FDE/L/T \u51FA\u95EA\u5149\uFF0C\u4E94\u8FDE\u51FA\u8D85\u7EA7\u732B\u5934\u9E70\u3002\u8FC7\u5173\u81EA\u52A8\u8FDB\u9650\u65F6\u7C89\u788E\u52A0\u5206\uFF0C\u603B\u5206\u6EE1 1500 \u53EF\u9009\u6E05\u6D01\u6A21\u5F0F\uFF08\u6E05\u6D01\u4E0D\u52A0\u4E3B\u7EBF\u5206\uFF09\u3002\u5168\u7A0B\u65E0\u5185\u8D2D\uFF0C\u6CBF\u7CD6\u679C\u68AF\u5B50\u95EF\u5173\u3001\u51B2\u8FDB\u7CD6\u679C\u5C4B\u5C31\u80FD\u5F00\u73A9\u3002#\u6765\u5FAE\u4FE1\u505A\u4E2A\u5C0F\u7A0B\u5E8F",
         tags,
         recommendTitle
       };
+    }
+    /** 6–20 进关/重试/下一关：艺术字「难度提升」。 */
+    applyLevelEntryTip(levelId) {
+      const art = levelDifficultyArt(levelId);
+      if (art) {
+        this.statusText = "";
+        this.difficultyArt = {
+          title: art.title,
+          subtitle: art.subtitle,
+          startMs: this.nowMs || Date.now(),
+          durationMs: 2800
+        };
+        this.requestPaint();
+        return;
+      }
+      this.statusText = "";
+      this.difficultyArt = null;
+    }
+    /** 进关艺术字：描边糖果色主标题 + 章节副标，弹入后淡出。 */
+    drawDifficultyArtTip() {
+      const tip = this.difficultyArt;
+      if (!tip || this.mode !== "playing") {
+        return;
+      }
+      const now = this.nowMs || Date.now();
+      const elapsed = now - tip.startMs;
+      if (elapsed >= tip.durationMs) {
+        this.difficultyArt = null;
+        return;
+      }
+      const t = elapsed / tip.durationMs;
+      let scale = 1;
+      let alpha = 1;
+      let lift = 0;
+      if (t < 0.18) {
+        const u = t / 0.18;
+        const bounce = Math.sin(u * Math.PI);
+        scale = 0.55 + 0.55 * bounce + 0.12 * Math.sin(u * Math.PI * 2);
+        alpha = Math.min(1, u * 1.4);
+      } else if (t > 0.72) {
+        const u = (t - 0.72) / 0.28;
+        alpha = 1 - u * u;
+        lift = -18 * u;
+        scale = 1 + 0.06 * u;
+      } else {
+        scale = 1 + 0.03 * Math.sin((now - tip.startMs) * 8e-3);
+      }
+      const { ctx, width } = this;
+      const cx = width / 2;
+      const cy = this.getHudBottom() + 52 + lift;
+      const titleSize = Math.max(34, Math.min(44, Math.round(width * 0.11)));
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(cx, cy);
+      ctx.scale(scale, scale);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, titleSize * 2.2);
+      glow.addColorStop(0, "rgba(255, 200, 120, 0.45)");
+      glow.addColorStop(0.55, "rgba(255, 140, 160, 0.18)");
+      glow.addColorStop(1, "rgba(255, 140, 160, 0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(0, tip.subtitle ? -6 : 0, titleSize * 2.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = `bold ${titleSize}px sans-serif`;
+      ctx.shadowColor = "rgba(180, 60, 40, 0.35)";
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetY = 3;
+      ctx.strokeStyle = "rgba(120, 40, 30, 0.88)";
+      ctx.lineWidth = Math.max(8, Math.round(titleSize * 0.22));
+      ctx.strokeText(tip.title, 0, tip.subtitle ? -10 : 0);
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+      ctx.strokeStyle = "rgba(255, 252, 245, 0.98)";
+      ctx.lineWidth = Math.max(5, Math.round(titleSize * 0.12));
+      ctx.strokeText(tip.title, 0, tip.subtitle ? -10 : 0);
+      const grad = ctx.createLinearGradient(0, -titleSize * 0.55, 0, titleSize * 0.55);
+      grad.addColorStop(0, "#ffe066");
+      grad.addColorStop(0.45, "#ff922b");
+      grad.addColorStop(1, "#ff6b6b");
+      ctx.fillStyle = grad;
+      ctx.fillText(tip.title, 0, tip.subtitle ? -10 : 0);
+      if (tip.subtitle) {
+        const subSize = Math.max(13, Math.min(16, Math.round(titleSize * 0.38)));
+        ctx.font = `bold ${subSize}px sans-serif`;
+        ctx.strokeStyle = "rgba(255,255,255,0.95)";
+        ctx.lineWidth = 3.5;
+        ctx.strokeText(tip.subtitle, 0, titleSize * 0.42);
+        ctx.fillStyle = "#c2255c";
+        ctx.fillText(tip.subtitle, 0, titleSize * 0.42);
+      }
+      const sparkleT = (now - tip.startMs) * 0.01;
+      for (const side of [-1, 1]) {
+        const sx = side * (titleSize * 1.55 + Math.sin(sparkleT + side) * 3);
+        const sy = -8 + Math.cos(sparkleT * 1.3 + side) * 4;
+        const sr = 3.2 + Math.sin(sparkleT * 2 + side) * 0.8;
+        ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+        ctx.beginPath();
+        for (let i = 0; i < 4; i += 1) {
+          const a = i / 4 * Math.PI * 2 - Math.PI / 2;
+          const r = i % 2 === 0 ? sr : sr * 0.4;
+          const px = sx + Math.cos(a) * r;
+          const py = sy + Math.sin(a) * r;
+          if (i === 0) {
+            ctx.moveTo(px, py);
+          } else {
+            ctx.lineTo(px, py);
+          }
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
     }
     async enterLevel(levelId) {
       this.leavingLobby = true;
@@ -12678,7 +14613,7 @@
       this.mode = "playing";
       this.buriedFx.clear();
       this.interceptLobbyBanner();
-      this.statusText = "";
+      this.applyLevelEntryTip(levelId);
       this.pendingResult = null;
       this.offerCleanPrompt = false;
       this.hammerTargeting = false;
@@ -12698,40 +14633,31 @@
     hitButton(x, y) {
       var _a;
       if (this.mode === "lobby" && this.overlay === "none") {
+        const side = this.hitLobbySideAction(x, y);
+        if (side) {
+          return side;
+        }
+      }
+      if (this.mode === "lobby" && this.overlay === "none") {
         let best = null;
         let bestDist = Number.POSITIVE_INFINITY;
         for (const btn of this.buttons) {
           if (btn.id !== "level") {
             continue;
           }
+          if (x < btn.x || x > btn.x + btn.w || y < btn.y || y > btn.y + btn.h) {
+            continue;
+          }
           const cx = btn.x + btn.w / 2;
           const cy = btn.y + btn.h / 2;
-          const r = Math.min(btn.w, btn.h) / 2;
           const dist = Math.hypot(x - cx, y - cy);
-          if (dist <= r && dist < bestDist) {
+          if (dist < bestDist) {
             best = btn;
             bestDist = dist;
           }
         }
         if (best) {
           return best;
-        }
-        let near = null;
-        let nearDist = 36;
-        for (const btn of this.buttons) {
-          if (btn.id !== "level") {
-            continue;
-          }
-          const cx = btn.x + btn.w / 2;
-          const cy = btn.y + btn.h / 2;
-          const dist = Math.hypot(x - cx, y - cy);
-          if (dist < nearDist) {
-            near = btn;
-            nearDist = dist;
-          }
-        }
-        if (near) {
-          return near;
         }
       }
       for (let i = this.buttons.length - 1; i >= 0; i -= 1) {
@@ -12746,65 +14672,94 @@
       }
       return null;
     }
+    hitLobbySideAction(x, y) {
+      var _a;
+      for (let i = this.buttons.length - 1; i >= 0; i -= 1) {
+        const btn = this.buttons[i];
+        if (btn.id !== "invite" && btn.id !== "howto" && btn.id !== "settings" && btn.id !== "claim_shuffle" && btn.id !== "recommend" && btn.id !== "club") {
+          continue;
+        }
+        const pad = (_a = btn.hitPad) != null ? _a : 0;
+        if (x >= btn.x - pad && x <= btn.x + btn.w + pad && y >= btn.y - pad && y <= btn.y + btn.h + pad) {
+          return btn;
+        }
+      }
+      return null;
+    }
     draw() {
       const { ctx } = this;
       this.buttons.length = 0;
-      const bgMode = this.mode === "lobby" ? "lobby" : "level";
-      this.sceneBg.draw(
-        ctx,
-        {
-          lobby: this.bgLobby,
-          level: this.bgLevel,
-          lobbyCloudPages: this.lobbyCloudPages
-        },
-        bgMode,
-        this.nowMs || Date.now(),
-        bgMode === "lobby" ? this.lobbyCamY : 0
-      );
-      if (this.mode === "lobby") {
-        this.drawLobby();
+      try {
+        ctx.fillStyle = this.mode === "lobby" ? "#a7f0d4" : "#b6e8fc";
+        ctx.fillRect(0, 0, this.width, this.height);
+      } catch (e) {
+      }
+      try {
+        const bgMode = this.mode === "lobby" ? "lobby" : "level";
+        this.sceneBg.draw(
+          ctx,
+          {
+            lobby: this.bgLobby,
+            level: this.bgLevel,
+            lobbyCloudPages: this.lobbyCloudPages
+          },
+          bgMode,
+          this.nowMs || Date.now(),
+          bgMode === "lobby" ? this.lobbyCamY : 0
+        );
+        if (this.mode === "lobby") {
+          this.drawLobby();
+          this.drawNavChips();
+          this.drawLobbySideActions();
+          this.drawPageOverlay();
+          return;
+        }
+        this.drawHud();
+        if (this.mode === "playing" || this.mode === "result" || this.mode === "crush" || this.mode === "clean") {
+          ctx.save();
+          if (this.shakeMs > 0 && (this.mode === "playing" || this.mode === "crush" || this.mode === "clean" || this.mode === "result")) {
+            const mag = this.mode === "result" ? Math.min(10, this.shakeMs / 16) : Math.min(7, this.shakeMs / 18);
+            ctx.translate(
+              Math.sin(this.nowMs * 0.08) * mag,
+              Math.cos(this.nowMs * 0.11) * mag
+            );
+          }
+          this.drawBoard();
+          if (this.mode === "crush" || this.mode === "clean") {
+            this.drawCrushOverlays();
+            this.drawCrushGuide();
+          } else if (this.mode === "playing") {
+            this.drawMatchJuiceOverlays();
+          }
+          ctx.restore();
+        }
+        if (this.mode === "crush") {
+          this.drawCrushChrome();
+        }
+        if (this.mode === "clean") {
+          this.drawCleanChrome();
+        }
+        if (this.mode === "playing") {
+          this.drawBoosterBar();
+        }
+        this.drawActionToast();
+        this.drawDifficultyArtTip();
+        if (this.hammerTargeting) {
+          this.drawHammerCursor();
+        }
+        if (this.mode === "result") {
+          this.drawResultOverlay();
+        }
         this.drawNavChips();
         this.drawPageOverlay();
-        return;
-      }
-      this.drawHud();
-      if (this.mode === "playing" || this.mode === "result" || this.mode === "crush" || this.mode === "clean") {
-        const { ctx: ctx2 } = this;
-        ctx2.save();
-        if (this.shakeMs > 0 && (this.mode === "playing" || this.mode === "crush" || this.mode === "clean" || this.mode === "result")) {
-          const mag = this.mode === "result" ? Math.min(10, this.shakeMs / 16) : Math.min(7, this.shakeMs / 18);
-          ctx2.translate(
-            Math.sin(this.nowMs * 0.08) * mag,
-            Math.cos(this.nowMs * 0.11) * mag
-          );
+      } catch (err) {
+        console.error("[crush-crush] draw failed", err);
+        try {
+          ctx.fillStyle = this.mode === "lobby" ? "#a7f0d4" : "#b6e8fc";
+          ctx.fillRect(0, 0, this.width, this.height);
+        } catch (e) {
         }
-        this.drawBoard();
-        if (this.mode === "crush" || this.mode === "clean") {
-          this.drawCrushOverlays();
-          this.drawCrushGuide();
-        } else if (this.mode === "playing") {
-          this.drawMatchJuiceOverlays();
-        }
-        ctx2.restore();
       }
-      if (this.mode === "crush") {
-        this.drawCrushChrome();
-      }
-      if (this.mode === "clean") {
-        this.drawCleanChrome();
-      }
-      if (this.mode === "playing") {
-        this.drawBoosterBar();
-      }
-      this.drawActionToast();
-      if (this.hammerTargeting) {
-        this.drawHammerCursor();
-      }
-      if (this.mode === "result") {
-        this.drawResultOverlay();
-      }
-      this.drawNavChips();
-      this.drawPageOverlay();
     }
     /** 锤子瞄准时绘制跟随指针的锤子光标 */
     drawHammerCursor() {
@@ -12842,7 +14797,7 @@
       ctx.restore();
     }
     /**
-     * 首页大厅：第 1 屏树上 1-5；其后每 5 关一朵糖果云，按配置表总关数翻页。
+     * 首页大厅：关卡列表夹在标题与底栏提示之间；云朵盖在糖果条之上。
      */
     drawLobby() {
       const { height } = this;
@@ -12851,37 +14806,366 @@
       const currentId = this.resolveEntryLevelId();
       const page = lobbyPageIndex(this.lobbyCamY, height);
       const maxPage = lobbyMaxPageIndex(this.session.getLevelCount());
-      const hideBelowY = this.getNavChipFrame().y - 10;
-      if (page > 0) {
-        this.drawLobbySkyTitle(page);
-      }
+      const hideBelowY = this.lobbyContentTop();
+      const { bandTop: hideAboveY } = this.getLobbyLadderLayout();
       const drawNodes = nodes.filter(
-        (node) => isLobbyNodeOnScreen(node, height) && isLobbyNodeExposed(node, this.lobbyCamY, height, hideBelowY)
-      ).sort((a, b) => b.nodeIndex - a.nodeIndex);
+        (node) => isLobbyNodeOnScreen(node, height) && isLobbyNodeExposed(node, this.lobbyCamY, height, hideBelowY, hideAboveY)
+      ).sort((a, b) => a.levelId - b.levelId);
+      this.drawLobbyLadderTrail(drawNodes, height);
       for (const node of drawNodes) {
         const unlocked = this.session.isLevelUnlocked(node.levelId);
         const cleared = this.session.isLevelCleared(node.levelId);
         const isCurrent = unlocked && node.levelId === currentId && !cleared;
-        const r = node.hitR;
+        const hit = lobbyLevelHitRect(node);
         this.buttons.push({
           id: "level",
           levelId: node.levelId,
-          x: node.x - r,
-          y: node.y - r,
-          w: r * 2,
-          h: r * 2,
+          x: hit.x,
+          y: hit.y,
+          w: hit.w,
+          h: hit.h,
           label: String(node.levelId)
         });
-        this.drawLobbyMacaronVisual(node, unlocked, cleared, isCurrent, now);
+        this.drawLobbyLevelBar(node, unlocked, cleared, isCurrent, now);
       }
+      this.drawLobbyCloudDecors(drawNodes, height);
+      this.drawLobbyBrandCopy();
       this.drawLobbySwipeHint(page, maxPage, now);
       this.drawLobbyPageDots(page, maxPage);
       this.drawLobbyStatusCaption();
-      this.drawLobbyPreviewUnlockHint(page);
+      this.drawLobbyNoticeBubble(now);
     }
-    /** 未解锁等提示画在树干标语处，不再压住底部按钮。 */
+    /** 首页公告冷色泡泡：左下↔右上乒乓循环，文案轮播，点一下打开公告。 */
+    drawLobbyNoticeBubble(nowMs) {
+      var _a, _b;
+      if (this.overlay !== "none" || this.lobbyCamY > this.height * 0.18) {
+        return;
+      }
+      const lines = lobbyNoticeBubbleLines({
+        body: notice_default.body,
+        bubbles: notice_default.bubbles
+      });
+      if (lines.length === 0) {
+        return;
+      }
+      const cycle = lobbyNoticeBubbleCycle(nowMs, lines.length);
+      const drift = lobbyNoticeBubbleDrift(nowMs);
+      const primary = (_a = lines[cycle.index]) != null ? _a : lines[0];
+      const secondary = cycle.nextOpacity > 0.02 ? (_b = lines[cycle.nextIndex]) != null ? _b : "" : "";
+      const { ctx } = this;
+      ctx.save();
+      ctx.font = "bold 12px sans-serif";
+      const frame = layoutLobbyNoticeBubble({
+        width: this.width,
+        height: this.height,
+        statusBarHeight: this.statusBarHeight,
+        contentTop: this.lobbyContentTop(),
+        progress: drift.progress,
+        text: primary.length >= secondary.length ? primary : secondary,
+        measureWidth: (text) => ctx.measureText(text).width
+      });
+      const bob = Math.sin(nowMs / 680) * this.fxAmt(2.2, 1);
+      const x = frame.x;
+      const y = frame.y + bob;
+      const { w, h } = frame;
+      const alpha = drift.opacity;
+      ctx.globalAlpha = 0.18 * alpha;
+      ctx.fillStyle = "#1c4b7a";
+      this.roundRectPath(x + 1, y + 3, w, h, h / 2);
+      ctx.fill();
+      ctx.globalAlpha = alpha;
+      const fill2 = ctx.createLinearGradient(x, y, x, y + h);
+      fill2.addColorStop(0, "rgba(255, 255, 255, 0.98)");
+      fill2.addColorStop(0.4, "rgba(232, 248, 255, 0.97)");
+      fill2.addColorStop(1, "rgba(208, 235, 255, 0.96)");
+      ctx.fillStyle = fill2;
+      this.roundRectPath(x, y, w, h, h / 2);
+      ctx.fill();
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2.4;
+      this.roundRectPath(x + 0.5, y + 0.5, w - 1, h - 1, h / 2 - 0.5);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(116, 192, 252, 0.55)";
+      ctx.lineWidth = 1;
+      this.roundRectPath(x - 0.5, y - 0.5, w + 1, h + 1, h / 2 + 0.5);
+      ctx.stroke();
+      ctx.globalAlpha = 0.5 * alpha;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+      this.roundRectPath(x + 8, y + 3, w - 16, h * 0.34, h * 0.2);
+      ctx.fill();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "bold 12px sans-serif";
+      const ink = "#1864ab";
+      if (cycle.opacity > 0.02) {
+        ctx.globalAlpha = cycle.opacity * alpha;
+        ctx.fillStyle = ink;
+        ctx.fillText(primary, x + w / 2, y + h / 2 + 0.5);
+      }
+      if (secondary && cycle.nextOpacity > 0.02) {
+        ctx.globalAlpha = cycle.nextOpacity * alpha;
+        ctx.fillStyle = ink;
+        ctx.fillText(secondary, x + w / 2, y + h / 2 + 0.5);
+      }
+      ctx.restore();
+      this.buttons.push({
+        id: "notice",
+        x,
+        y,
+        w,
+        h,
+        label: "",
+        hitPad: 4
+      });
+    }
+    /** 关卡列表左右两侧糖点轨，连接编号糖果（对齐设计稿）。 */
+    drawLobbyLadderTrail(nodes, height) {
+      const pts = lobbyLadderSideTrailPoints(nodes, height);
+      if (pts.length === 0) {
+        return;
+      }
+      const { ctx } = this;
+      ctx.save();
+      for (const p of pts) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = p.tone === "cream" ? "rgba(255,236,153,0.86)" : "rgba(255,255,255,0.92)";
+        ctx.fill();
+        if (p.r >= 3.6) {
+          ctx.beginPath();
+          ctx.arc(p.x - p.r * 0.22, p.y - p.r * 0.28, p.r * 0.35, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(255,255,255,0.55)";
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+    }
+    drawLobbyCloudDecors(nodes, height) {
+      const pts = lobbyCloudDecorPoints(nodes, height);
+      const cloudBig = this.uiIcons.get("ladder-cloud");
+      const cloudSm = this.uiIcons.get("ladder-cloudSm");
+      const { ctx } = this;
+      for (let i = 0; i < pts.length; i += 1) {
+        const p = pts[i];
+        const cloud = i % 2 === 0 ? cloudBig != null ? cloudBig : cloudSm : cloudSm != null ? cloudSm : cloudBig;
+        const drawW = Math.max(38, Math.min(68, p.circleR * 2.15));
+        if (cloud && (cloud.width || 0) > 0 && (cloud.height || 0) > 0) {
+          const iw = cloud.width || drawW;
+          const ih = cloud.height || drawW;
+          const drawH = drawW * (ih / Math.max(1, iw));
+          const x = p.x;
+          const y = p.y;
+          ctx.save();
+          ctx.globalAlpha = 0.98;
+          ctx.drawImage(cloud, x - drawW / 2, y - drawH / 2, drawW, drawH);
+          ctx.restore();
+        } else {
+          const r = drawW * 0.28;
+          const x = p.x;
+          const y = p.y;
+          ctx.save();
+          ctx.fillStyle = "rgba(255,255,255,0.96)";
+          ctx.beginPath();
+          ctx.arc(x, y - r * 0.1, r, 0, Math.PI * 2);
+          ctx.arc(x - r * 0.85, y + r * 0.25, r * 0.78, 0, Math.PI * 2);
+          ctx.arc(x + r * 0.85, y + r * 0.25, r * 0.78, 0, Math.PI * 2);
+          ctx.arc(x - r * 0.3, y - r * 0.55, r * 0.65, 0, Math.PI * 2);
+          ctx.arc(x + r * 0.3, y - r * 0.55, r * 0.65, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+    }
+    /** 设计稿胶囊关卡条：已通关 / 当前 / 锁定。 */
+    drawLobbyLevelBar(node, unlocked, cleared, isCurrent, nowMs) {
+      const state = !unlocked ? "locked" : isCurrent ? "current" : cleared ? "cleared" : "locked";
+      const theme = ladderThemeForLevel(node.levelId, state);
+      const { ctx } = this;
+      const { barX, barY, barW, barH, circleR, x: cx, y: cy } = node;
+      const r = barH / 2;
+      ctx.save();
+      ctx.shadowColor = "rgba(80, 120, 130, 0.22)";
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetY = 4;
+      this.roundRectPath(barX, barY, barW, barH, r);
+      const barGrad = ctx.createLinearGradient(barX, barY, barX, barY + barH);
+      barGrad.addColorStop(0, theme.barTop);
+      barGrad.addColorStop(1, theme.barBottom);
+      ctx.fillStyle = barGrad;
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(255,255,255,0.92)";
+      ctx.stroke();
+      if (theme.pattern === "stripe") {
+        this.drawLobbyBarStripes(barX, barY, barW, barH, r, theme.stripe);
+      } else if (theme.pattern === "sprinkle") {
+        this.drawLobbyBarSprinkles(barX, barY, barW, barH, node.levelId);
+      }
+      ctx.shadowColor = "rgba(60, 90, 110, 0.28)";
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetY = 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, circleR, 0, Math.PI * 2);
+      const cg = ctx.createLinearGradient(cx, cy - circleR, cx, cy + circleR);
+      cg.addColorStop(0, theme.circleTop);
+      cg.addColorStop(1, theme.circleBottom);
+      ctx.fillStyle = cg;
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.lineWidth = Math.max(3, circleR * 0.12);
+      ctx.strokeStyle = "#ffffff";
+      ctx.stroke();
+      if (state === "locked") {
+        const lock = this.uiIcons.get("ladder-lock");
+        const s = circleR * 1.1;
+        if (lock && (lock.width || 0) > 0) {
+          ctx.drawImage(lock, cx - s / 2, cy - s / 2, s, s);
+        } else {
+          ctx.fillStyle = "#ffffff";
+          ctx.font = `bold ${Math.round(circleR * 0.9)}px sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("\u9501", cx, cy + 1);
+        }
+      } else {
+        ctx.font = `bold ${Math.round(circleR * 1.05)}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = Math.max(3, Math.round(circleR * 0.14));
+        ctx.strokeStyle = "rgba(255,255,255,0.95)";
+        ctx.fillStyle = "#ffffff";
+        const label = String(node.levelId);
+        ctx.strokeText(label, cx, cy + 1);
+        ctx.fillText(label, cx, cy + 1);
+      }
+      if (cleared && unlocked) {
+        const check = this.uiIcons.get("ladder-check");
+        const badge = circleR * 0.72;
+        const bx = cx + circleR * 0.62;
+        const by = cy - circleR * 0.62;
+        if (check && (check.width || 0) > 0) {
+          ctx.drawImage(check, bx - badge / 2, by - badge / 2, badge, badge);
+        } else {
+          this.drawLobbyMacaronCheck(bx, by, badge * 0.55);
+        }
+      }
+      if (isCurrent) {
+        const star = this.uiIcons.get("ladder-star");
+        const badge = circleR * 0.7;
+        const bx = cx + circleR * 0.55;
+        const by = cy - circleR * 0.78;
+        if (star && (star.width || 0) > 0) {
+          const bob = Math.sin(nowMs * 6e-3) * 2;
+          ctx.drawImage(star, bx - badge / 2, by - badge / 2 + bob, badge, badge);
+        }
+        if ("startTop" in theme) {
+          this.drawLobbyStartChip(node, theme.startTop, theme.startBottom);
+        }
+      } else if (cleared && unlocked) {
+        const score = this.session.getBestScore(node.levelId);
+        if (score > 0) {
+          this.drawLobbyScoreChip(node, score);
+        }
+      }
+      ctx.restore();
+    }
+    drawLobbyBarStripes(x, y, w, h, r, color) {
+      const { ctx } = this;
+      ctx.save();
+      this.roundRectPath(x, y, w, h, r);
+      ctx.clip();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(6, h * 0.14);
+      ctx.lineCap = "butt";
+      for (let i = -2; i < 14; i += 1) {
+        const sx = x + i * h * 0.55;
+        ctx.beginPath();
+        ctx.moveTo(sx, y + h + 4);
+        ctx.lineTo(sx + h * 1.15, y - 4);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    drawLobbyBarSprinkles(x, y, w, h, seed) {
+      const { ctx } = this;
+      ctx.save();
+      this.roundRectPath(x, y, w, h, h / 2);
+      ctx.clip();
+      const colors = ["#ff8fab", "#ffe066", "#ffffff", "#74c0fc"];
+      for (let i = 0; i < 14; i += 1) {
+        const px = x + (seed * 37 + i * 53) % 97 / 97 * w;
+        const py = y + (seed * 19 + i * 29) % 71 / 71 * h;
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.beginPath();
+        ctx.arc(px, py, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    drawLobbyStartChip(node, top, bottom) {
+      const { ctx } = this;
+      const chipW = Math.min(92, node.barW * 0.28);
+      const chipH = Math.min(34, node.barH * 0.55);
+      const chipX = node.circleSide === "left" ? node.barX + node.barW - chipW - 16 : node.barX + 16;
+      const chipY = node.y - chipH / 2;
+      const g = ctx.createLinearGradient(chipX, chipY, chipX, chipY + chipH);
+      g.addColorStop(0, top);
+      g.addColorStop(1, bottom);
+      ctx.save();
+      ctx.shadowColor = "rgba(180, 60, 40, 0.35)";
+      ctx.shadowBlur = 6;
+      ctx.shadowOffsetY = 2;
+      this.roundRectPath(chipX, chipY, chipW, chipH, chipH / 2);
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.95)";
+      ctx.stroke();
+      ctx.font = `bold ${Math.round(chipH * 0.55)}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText("\u5F00\u59CB", chipX + chipW / 2, chipY + chipH / 2 + 1);
+      ctx.restore();
+    }
+    drawLobbyScoreChip(node, score) {
+      const { ctx } = this;
+      const label = String(Math.max(0, Math.floor(score)));
+      ctx.save();
+      ctx.font = `bold ${Math.max(11, Math.round(node.barH * 0.28))}px sans-serif`;
+      const tw = ctx.measureText(label).width;
+      const chipW = tw + 18;
+      const chipH = Math.min(26, node.barH * 0.42);
+      const chipX = node.circleSide === "left" ? node.barX + node.barW * 0.42 : node.barX + node.barW * 0.22;
+      const chipY = node.y - chipH / 2;
+      this.roundRectPath(chipX, chipY, chipW, chipH, chipH / 2);
+      ctx.fillStyle = "rgba(255,255,255,0.94)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.98)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = "#6b5b6e";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, chipX + chipW / 2, chipY + chipH / 2 + 0.5);
+      ctx.restore();
+    }
+    lobbyContentTop() {
+      const daily = this.session.getDailyLoop();
+      return layoutLobbyBottom({
+        width: this.width,
+        height: this.height,
+        bannerReserve: this.mode === "lobby" ? this.session.getLobbyBannerReservePx() : 0,
+        safeBottom: this.safeAreaBottom,
+        clearsToday: daily.clearsToday,
+        shuffleGranted: daily.playShuffleGranted
+      }).contentTop;
+    }
+    /** 未解锁等提示画在树干标语处。树屏的文案由 drawLobbyTreePrompt 盖住底图。 */
     drawLobbyStatusCaption() {
-      if (!this.statusText) {
+      if (!this.statusText || lobbyPageIndex(this.lobbyCamY, this.height) === 0) {
         return;
       }
       const { ctx, width } = this;
@@ -12901,25 +15185,6 @@
       ctx.strokeText(this.statusText, width / 2, y);
       ctx.fillStyle = "#c2255c";
       ctx.fillText(this.statusText, width / 2, y);
-      ctx.restore();
-    }
-    /** 开发/体验版提示：正式上线后仍按通关锁关。 */
-    drawLobbyPreviewUnlockHint(page) {
-      if (page > 0 || !this.session.isPreviewUnlockAll()) {
-        return;
-      }
-      const { ctx, width } = this;
-      const y = Math.max(this.statusBarHeight + 18, 36);
-      ctx.save();
-      ctx.font = "bold 12px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.lineJoin = "round";
-      ctx.strokeStyle = "rgba(255,255,255,0.92)";
-      ctx.lineWidth = 5;
-      ctx.strokeText("\u6D4B\u8BD5\u5305\uFF1A\u53EF\u70B9\u4EFB\u610F\u5173", width / 2, y);
-      ctx.fillStyle = "#7048e8";
-      ctx.fillText("\u6D4B\u8BD5\u5305\uFF1A\u53EF\u70B9\u4EFB\u610F\u5173", width / 2, y);
       ctx.restore();
     }
     /** 与树上底图马卡龙同一视觉半径。 */
@@ -13026,18 +15291,11 @@
       const { ctx } = this;
       ctx.save();
       ctx.translate(x, y);
-      ctx.strokeStyle = `rgba(255,255,255,${0.4 + pulse * 0.4})`;
-      ctx.lineWidth = this.lite ? 2.4 : 3.2;
+      ctx.strokeStyle = `rgba(255,255,255,${0.45 + pulse * 0.4})`;
+      ctx.lineWidth = 2.6;
       ctx.beginPath();
       ctx.arc(0, 0, r * (0.97 + 0.02 * pulse), 0, Math.PI * 2);
       ctx.stroke();
-      if (!this.lite) {
-        ctx.strokeStyle = `rgba(255, 150, 210,${0.4 + pulse * 0.35})`;
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        ctx.arc(0, 0, r * 1.02, 0, Math.PI * 2);
-        ctx.stroke();
-      }
       ctx.restore();
     }
     /**
@@ -13061,8 +15319,7 @@
     }
     getLobbyLevelNodes() {
       const cover = this.getLobbyCoverRect();
-      const nav = this.getNavChipFrame();
-      const macaronR = lobbyMacaronRadius(cover.dw);
+      const { ceiling, step } = this.getLobbyLadderLayout();
       return layoutLobbyLevelNodes({
         vines: this.session.listLobbyVineNodes(),
         cover,
@@ -13070,7 +15327,20 @@
         width: this.width,
         height: this.height,
         camY: this.lobbyCamY,
-        maxCloudCenterY: nav.y - 36 - macaronR
+        ladderBottomY: ceiling,
+        maxCloudCenterY: ceiling,
+        ladderStep: step
+      });
+    }
+    /** 标题区～底栏留白后的带宽 → 首屏约 8 关紧凑步长（布局与相机共用）。 */
+    getLobbyLadderLayout() {
+      const cover = this.getLobbyCoverRect();
+      const titleBandTop = lobbyLevelBandTop(cover, this.statusBarHeight);
+      const { h: barH } = lobbyBarSize(this.width, this.height);
+      return lobbyFirstScreenLadderLayout({
+        bandTop: titleBandTop,
+        contentTop: this.lobbyContentTop(),
+        barH
       });
     }
     prepareLobbyCamera() {
@@ -13082,11 +15352,14 @@
         this.lobbyCamSnapFrom = 0;
         this.lobbyCamSnapAtMs = 0;
         this.lobbyCamVel = 0;
+        this.lobbySwipeHintShownAtMs = 0;
+        this.lobbySwipeHintDismissed = false;
       }
     }
     getLobbyCamRange() {
-      const maxNode = lobbyMaxPageIndex(this.session.getLevelCount());
-      return { min: 0, max: lobbyCameraMax(maxNode, this.height) };
+      const total = this.session.getLevelCount();
+      const { step } = this.getLobbyLadderLayout();
+      return { min: 0, max: lobbyCameraMax(total, this.height, step) };
     }
     beginLobbyDrag(x, y) {
       this.lobbyCamVel = 0;
@@ -13111,6 +15384,7 @@
         drag.moved = true;
         this.lobbyCamUserHeld = true;
         this.lobbyCamAutoTarget = null;
+        this.lobbySwipeHintDismissed = true;
       }
       if (drag.moved) {
         const range = this.getLobbyCamRange();
@@ -13137,17 +15411,17 @@
         return false;
       }
       const range = this.getLobbyCamRange();
-      const maxPage = Math.round(range.max / Math.max(1, this.height));
-      this.lobbyCamVel = 0;
       this.lobbyCamUserHeld = false;
+      this.lobbyCamVel = Math.max(-1.8, Math.min(1.8, drag.velY));
       this.lobbyCamSnapFrom = this.lobbyCamY;
       this.lobbyCamSnapAtMs = this.nowMs || Date.now();
       this.lobbyCamAutoTarget = lobbySnapTarget(
         drag.camStart,
         this.lobbyCamY,
         this.height,
-        maxPage,
-        drag.velY
+        range.max,
+        drag.velY,
+        this.getLobbyLadderLayout().step
       );
       return true;
     }
@@ -13192,30 +15466,48 @@
         this.lobbyCamVel *= 0.4;
       }
     }
-    drawLobbySkyTitle(page) {
+    /** 品牌主标题 + 副标题 +「20关后…」：固定在关卡列表上方，上滑不换样式。 */
+    drawLobbyBrandCopy() {
       const { ctx, width } = this;
-      const y = Math.max(this.statusBarHeight + 26, 44);
-      const caption = lobbyPageCaption(page, this.session.getLevelCount());
-      const comingSoon = lobbyComingSoonLine(page, this.session.getLevelCount());
+      const cover = this.getLobbyCoverRect();
+      const titleY = lobbyBrandAnchorY(cover, 0, LOBBY_TITLE_UY);
+      const subY = lobbyBrandAnchorY(cover, 0, LOBBY_SUBTITLE_UY);
+      if (subY < this.statusBarHeight) {
+        return;
+      }
+      const titleSize = Math.max(28, Math.min(40, Math.round(cover.dh * 0.048)));
+      const subSize = Math.max(13, Math.min(17, Math.round(cover.dh * 0.018)));
+      const teaser = lobbyComingSoonLine();
+      const teaserY = subY + Math.max(22, cover.dh * 0.028);
       ctx.save();
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.font = "bold 20px sans-serif";
-      ctx.strokeStyle = "rgba(255,255,255,0.95)";
-      ctx.lineWidth = 6;
       ctx.lineJoin = "round";
-      ctx.strokeText("\u7CD6\u679C\u4E91\u6735", width / 2, y);
-      ctx.fillStyle = "#ff8cc8";
-      ctx.fillText("\u7CD6\u679C\u4E91\u6735", width / 2, y);
-      if (caption) {
+      ctx.font = `bold ${titleSize}px sans-serif`;
+      ctx.shadowColor = "rgba(70, 130, 180, 0.35)";
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetY = 2;
+      ctx.strokeStyle = "rgba(140, 200, 230, 0.95)";
+      ctx.lineWidth = Math.max(5, Math.round(titleSize * 0.18));
+      ctx.strokeText(LOBBY_BRAND_TITLE, width / 2, titleY);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(LOBBY_BRAND_TITLE, width / 2, titleY);
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+      ctx.font = `bold ${subSize}px sans-serif`;
+      ctx.strokeStyle = "rgba(120, 180, 215, 0.7)";
+      ctx.lineWidth = 3;
+      ctx.strokeText(LOBBY_BRAND_SUBTITLE, width / 2, subY);
+      ctx.fillStyle = "rgba(255,255,255,0.98)";
+      ctx.fillText(LOBBY_BRAND_SUBTITLE, width / 2, subY);
+      if (teaser) {
         ctx.font = "bold 12px sans-serif";
-        ctx.fillStyle = "#7a3e6a";
-        ctx.fillText(caption, width / 2, y + 22);
-      }
-      if (comingSoon) {
-        ctx.font = "bold 12px sans-serif";
+        ctx.strokeStyle = "rgba(255,255,255,0.96)";
+        ctx.lineWidth = 4;
+        ctx.strokeText(teaser, width / 2, teaserY);
         ctx.fillStyle = "#c2255c";
-        ctx.fillText(comingSoon, width / 2, y + (caption ? 42 : 22));
+        ctx.fillText(teaser, width / 2, teaserY);
       }
       ctx.restore();
     }
@@ -13224,45 +15516,67 @@
         return;
       }
       const { ctx, width } = this;
-      const bob = Math.sin(nowMs / 260) * this.fxAmt(5, 3);
-      ctx.save();
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
       if (page < maxPage) {
-        const y = page <= 0 ? Math.max(this.statusBarHeight + 18, 36) + bob : Math.max(this.statusBarHeight + 88, 108) + bob;
-        ctx.fillStyle = "rgba(255,255,255,0.9)";
-        this.roundRectPath(width / 2 - 72, y - 16, 144, 32, 16);
-        ctx.fill();
-        ctx.strokeStyle = "rgba(255, 140, 200, 0.95)";
-        ctx.lineWidth = 2;
-        this.roundRectPath(width / 2 - 72, y - 16, 144, 32, 16);
-        ctx.stroke();
-        this.drawSwipeChevrons(width / 2 - 54, y, -1);
-        ctx.font = "bold 12px sans-serif";
-        ctx.fillStyle = "#c2255c";
-        ctx.fillText(page <= 0 ? "\u4E0A\u6ED1\u770B\u4E91\u6735\u5173\u5361" : "\u4E0A\u6ED1\u7EE7\u7EED", width / 2 + 12, y);
+        if (this.lobbySwipeHintShownAtMs <= 0) {
+          this.lobbySwipeHintShownAtMs = nowMs;
+        }
+        const alpha = lobbySwipeHintOpacity(
+          this.lobbySwipeHintShownAtMs,
+          nowMs,
+          this.lobbySwipeHintDismissed
+        );
+        if (alpha <= 0.01) {
+          this.lobbySwipeHintDismissed = true;
+        } else {
+          const bob = Math.sin(nowMs / 520) * this.fxAmt(4, 2.5);
+          const frame = layoutLobbyMoreLevelsHint(width, this.statusBarHeight, bob);
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = "rgba(32, 40, 56, 0.42)";
+          this.roundRectPath(frame.x, frame.y, width - frame.x + 10, frame.h, frame.r);
+          ctx.fill();
+          ctx.strokeStyle = "rgba(255,255,255,0.28)";
+          ctx.lineWidth = 1;
+          this.roundRectPath(frame.x, frame.y, width - frame.x + 10, frame.h, frame.r);
+          ctx.stroke();
+          this.drawSwipeChevrons(frame.chevronX, frame.cy, -1);
+          ctx.font = "bold 11px sans-serif";
+          ctx.fillStyle = "rgba(255,255,255,0.95)";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(
+            page <= 0 ? LOBBY_MORE_LEVELS_HINT : "\u4E0A\u6ED1\u7EE7\u7EED",
+            frame.textX,
+            frame.cy
+          );
+          ctx.restore();
+        }
       }
       if (page > 0) {
         const nav = this.getNavChipFrame();
+        const bob = Math.sin(nowMs / 520) * this.fxAmt(3, 2);
         const y = nav.y - 44 - bob * 0.35;
+        ctx.save();
         ctx.font = "bold 11px sans-serif";
-        ctx.fillStyle = "rgba(122, 62, 106, 0.85)";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "rgba(255,255,255,0.78)";
         ctx.fillText("\u4E0B\u6ED1\u8FD4\u56DE", width / 2, y);
+        ctx.restore();
       }
-      ctx.restore();
     }
     drawSwipeChevrons(x, y, dir) {
       const { ctx } = this;
-      ctx.strokeStyle = "#ff6baf";
-      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = "rgba(255,255,255,0.92)";
+      ctx.lineWidth = 2;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       for (let i = 0; i < 2; i += 1) {
         const oy = dir * i * 5;
         ctx.beginPath();
-        ctx.moveTo(x - 6, y + 4 + oy);
-        ctx.lineTo(x, y - 2 + oy);
-        ctx.lineTo(x + 6, y + 4 + oy);
+        ctx.moveTo(x - 5, y + 3.5 + oy);
+        ctx.lineTo(x, y - 1.5 + oy);
+        ctx.lineTo(x + 5, y + 3.5 + oy);
         ctx.stroke();
       }
     }
@@ -13274,17 +15588,14 @@
       const total = maxPage + 1;
       const x = width - 16;
       const gap = Math.min(14, height * 0.22 / Math.max(1, total - 1));
-      const r = 4;
-      const startY = height * 0.38 - (total - 1) * gap / 2;
+      const r = 3.5;
+      const startY = height * 0.42 - (total - 1) * gap / 2;
       ctx.save();
       for (let i = 0; i < total; i += 1) {
         ctx.beginPath();
-        ctx.arc(x, startY + i * gap, i === page ? 5 : r, 0, Math.PI * 2);
-        ctx.fillStyle = i === page ? "#ff6baf" : "rgba(255,255,255,0.7)";
+        ctx.arc(x, startY + i * gap, i === page ? 4.5 : r, 0, Math.PI * 2);
+        ctx.fillStyle = i === page ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.38)";
         ctx.fill();
-        ctx.strokeStyle = "rgba(255, 140, 200, 0.85)";
-        ctx.lineWidth = 1.2;
-        ctx.stroke();
       }
       ctx.restore();
     }
@@ -13362,7 +15673,7 @@
       ctx.beginPath();
       ctx.arc(0, 1, r * 0.72, 0, Math.PI * 2);
       ctx.fill();
-      const pearls = this.lite ? 8 : 12;
+      const pearls = 8;
       const ring = r * 0.82;
       const pr = r * 0.09;
       ctx.fillStyle = "#f3e2c8";
@@ -13476,12 +15787,7 @@
           active: this.hammerTargeting
         },
         { id: "booster_shuffle", iconKey: "shuffle", count: stock.shuffle },
-        { id: "booster_extra", iconKey: "extra", count: stock.extraMoves },
-        {
-          id: "mute",
-          iconKey: this.session.isMuted() ? "mute" : "sound",
-          count: -1
-        }
+        { id: "booster_extra", iconKey: "extra", count: stock.extraMoves }
       ];
       const totalW = items.length * size + (items.length - 1) * gap;
       const nav = this.getNavChipFrame();
@@ -13489,7 +15795,9 @@
       const avail = Math.max(totalW, width - leftReserve - 14);
       let x = leftReserve + Math.floor((avail - totalW) / 2);
       for (const item of items) {
-        const extraAd = item.id === "booster_extra" && item.count === 0 && this.session.allowsRewardedBooster("extraMoves") || item.id === "booster_hammer" && item.count === 0 && this.session.allowsRewardedBooster("hammer") || item.id === "booster_shuffle" && item.count === 0 && this.session.allowsRewardedBooster("shuffle");
+        const boosterId = this.boosterIdFromButton(item.id);
+        const refill = item.count === 0 ? this.session.getBoosterRefillChannel(boosterId) : "none";
+        const extraAd = refill !== "none";
         const disabled = item.count === 0 && !extraAd;
         const btn = {
           id: item.id,
@@ -13505,7 +15813,7 @@
           disabled,
           active: !!item.active,
           count: extraAd ? -1 : item.count,
-          ad: extraAd
+          badge: extraAd && refill !== "none" ? boosterRefillBadge(refill) : void 0
         });
         x += size + gap;
       }
@@ -13592,10 +15900,11 @@
         const fallback = iconKey === "hammer" ? "\u9524" : iconKey === "shuffle" ? "\u6392" : iconKey === "extra" ? "+5" : iconKey === "mute" ? "\u9759" : "\u97F3";
         ctx.fillText(fallback, cx, cy);
       }
-      if (opts.ad) {
+      if (opts.badge) {
         const bx = btn.x + btn.w - 2;
         const by = btn.y + 6;
-        ctx.fillStyle = "#ff922b";
+        const fill2 = opts.badge === "\u597D\u53CB" ? "#12b886" : opts.badge === "\u7FA4" ? "#339af0" : "#ff922b";
+        ctx.fillStyle = fill2;
         this.roundRectPath(bx - 18, by - 9, 36, 18, 9);
         ctx.fill();
         ctx.strokeStyle = "#ffffff";
@@ -13606,7 +15915,7 @@
         ctx.font = "bold 9px sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText("\u5E7F\u544A", bx, by + 0.5);
+        ctx.fillText(opts.badge, bx, by + 0.5);
       } else if (opts.count >= 0) {
         const bx = btn.x + btn.w - 4;
         const by = btn.y + 4;
@@ -13681,15 +15990,6 @@
       const cardRight = frame.right;
       const cardW = Math.max(100, cardRight - cardLeft);
       const cardH = 64;
-      if (!this.lite) {
-        this.drawHudCandyBranchRail(
-          circleCx,
-          circleCy,
-          cardLeft + cardW - 8,
-          rowY + cardH * 0.58,
-          candy
-        );
-      }
       const lowMoves = !inBurst && moves <= 5;
       const movePulse = lowMoves ? 1 + 0.05 * Math.sin((this.nowMs || Date.now()) * 0.02) : 1;
       const circleValue = inBurst ? String(Math.ceil(((_d = burstSession == null ? void 0 : burstSession.remainingMs) != null ? _d : 0) / 1e3)) : String(moves);
@@ -13724,11 +16024,11 @@
       let progress = 0;
       let goalLabel = "\u76EE\u6807 -";
       let barTheme = {
-        track: "#ffe8cc",
-        fillTop: "#ffc078",
-        fillMid: "#ff922b",
-        fillBottom: "#f76707",
-        border: "#ffa94d"
+        track: "#d0ebff",
+        fillTop: "#a5d8ff",
+        fillMid: "#4dabf7",
+        fillBottom: "#228be6",
+        border: "#74c0fc"
       };
       if (inClean && clean) {
         progress = this.hudBurstBarDisplay;
@@ -13744,11 +16044,11 @@
         progress = this.hudBurstBarDisplay;
         goalLabel = `\u7C89\u788E +${crush.crushScore}`;
         barTheme = {
-          track: "#ffe3e3",
-          fillTop: "#ff9f7a",
-          fillMid: "#ff6b6b",
-          fillBottom: "#e03131",
-          border: "#ff8787"
+          track: "#c5f6fa",
+          fillTop: "#66d9e8",
+          fillMid: "#22b8cf",
+          fillBottom: "#1098ad",
+          border: "#3bc9db"
         };
       } else if (hudGoal.text) {
         progress = hudGoal.progress;
@@ -13775,7 +16075,7 @@
         ctx.scale(this.hudScorePunch, this.hudScorePunch);
         ctx.translate(-labelX, -labelY);
       }
-      ctx.strokeStyle = "rgba(90,40,20,0.35)";
+      ctx.strokeStyle = inBurst ? "rgba(12, 80, 100, 0.35)" : "rgba(24, 100, 160, 0.35)";
       ctx.lineWidth = 3.5;
       ctx.strokeText(goalLabel, labelX, labelY);
       ctx.fillStyle = "#ffffff";
@@ -13785,22 +16085,20 @@
         const tipY = this.getHudBottom() + 2;
         ctx.font = "12px sans-serif";
         const tipW = Math.min(frame.width, ctx.measureText(this.statusText).width + 20);
-        this.drawHudPill(frame.left, tipY, tipW, 22, "rgba(255,248,230,0.95)", "#ffb347");
-        ctx.fillStyle = "#d35400";
+        this.drawHudPill(frame.left, tipY, tipW, 22, "rgba(232,248,255,0.95)", "#74c0fc");
+        ctx.fillStyle = "#1864ab";
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         ctx.fillText(this.statusText, frame.left + 10, tipY + 11);
       }
     }
-    /** 糖果枝配色：对局粉 / 粉碎红 / 清洁薄荷绿 */
+    /** 糖果枝配色：对局 / 粉碎 / 清洁统一天蓝冷色 */
     getHudCandyPalette(inClean, inCrush) {
       if (inClean) {
         return {
           deep: "#1c7ed6",
           mid: "#74c0fc",
           lite: "#d0ebff",
-          stripe: "#ffffff",
-          accent: "#339af0",
           ink: "#1864ab",
           inkSoft: "#4dabf7",
           shadow: "#1c4b7a"
@@ -13808,84 +16106,22 @@
       }
       if (inCrush) {
         return {
-          deep: "#e03131",
-          mid: "#ff8787",
-          lite: "#ffe3e3",
-          stripe: "#ffffff",
-          accent: "#ff6b6b",
-          ink: "#c92a2a",
-          inkSoft: "#fa5252",
-          shadow: "#862e2e"
+          deep: "#1098ad",
+          mid: "#3bc9db",
+          lite: "#c5f6fa",
+          ink: "#0b7285",
+          inkSoft: "#15aabf",
+          shadow: "#0b4f5c"
         };
       }
       return {
-        deep: "#f06595",
-        mid: "#ffa8cc",
-        lite: "#ffe3f0",
-        stripe: "#ffffff",
-        accent: "#ff85c0",
-        ink: "#a61e4d",
-        inkSoft: "#e64980",
-        shadow: "#862e4b"
+        deep: "#339af0",
+        mid: "#74c0fc",
+        lite: "#d0ebff",
+        ink: "#1864ab",
+        inkSoft: "#4dabf7",
+        shadow: "#1c4b7a"
       };
-    }
-    /** 连接步数环与信息牌的立体糖果枝（拐杖糖条纹） */
-    drawHudCandyBranchRail(fromX, fromY, toX, toY, candy) {
-      const { ctx } = this;
-      const midX = (fromX + toX) * 0.5;
-      const midY = Math.min(fromY, toY) - 6;
-      const pointAt = (t) => {
-        const u = 1 - t;
-        return {
-          x: u * u * fromX + 2 * u * t * midX + t * t * toX,
-          y: u * u * fromY + 2 * u * t * midY + t * t * toY
-        };
-      };
-      ctx.save();
-      ctx.globalAlpha = 0.16;
-      ctx.strokeStyle = candy.shadow;
-      ctx.lineWidth = 15;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(fromX + 2, fromY + 5);
-      ctx.quadraticCurveTo(midX + 2, midY + 8, toX + 2, toY + 5);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-      const body = ctx.createLinearGradient(fromX, fromY - 12, fromX, fromY + 14);
-      body.addColorStop(0, candy.lite);
-      body.addColorStop(0.4, candy.mid);
-      body.addColorStop(1, candy.deep);
-      ctx.strokeStyle = body;
-      ctx.lineWidth = 14;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(fromX, fromY);
-      ctx.quadraticCurveTo(midX, midY, toX, toY);
-      ctx.stroke();
-      ctx.strokeStyle = candy.stripe;
-      ctx.lineWidth = 5;
-      ctx.lineCap = "round";
-      ctx.globalAlpha = 0.92;
-      for (let i = 0; i < 7; i += 1) {
-        const t0 = 0.08 + i * 0.12;
-        const t1 = Math.min(0.98, t0 + 0.045);
-        const a = pointAt(t0);
-        const b = pointAt(t1);
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = "rgba(255,255,255,0.85)";
-      ctx.lineWidth = 3.2;
-      ctx.beginPath();
-      ctx.moveTo(fromX, fromY - 4);
-      ctx.quadraticCurveTo(midX, midY - 5, toX, toY - 4);
-      ctx.stroke();
-      this.drawHudCandyBud(fromX + (toX - fromX) * 0.28, midY + 4, -0.65, candy);
-      this.drawHudCandyBud(fromX + (toX - fromX) * 0.7, midY + 2, 0.5, candy);
-      ctx.restore();
     }
     /** 兼容微信 Canvas 的椭圆填充 */
     fillEllipse(cx, cy, rx, ry, rot = 0) {
@@ -13902,46 +16138,6 @@
         ctx.restore();
       }
       ctx.fill();
-    }
-    /** 糖果枝上的糖珠 / 小棒棒糖 */
-    drawHudCandyBud(x, y, tilt, candy) {
-      const { ctx } = this;
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate(tilt);
-      ctx.strokeStyle = candy.mid;
-      ctx.lineWidth = 3.5;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.quadraticCurveTo(5, -7, 8, -14);
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(255,255,255,0.7)";
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.moveTo(0, -1);
-      ctx.lineTo(7, -12);
-      ctx.stroke();
-      const ball = ctx.createRadialGradient(8, -18, 1, 8, -17, 7);
-      ball.addColorStop(0, "#ffffff");
-      ball.addColorStop(0.35, candy.lite);
-      ball.addColorStop(1, candy.deep);
-      ctx.fillStyle = ball;
-      ctx.beginPath();
-      ctx.arc(8, -17, 6.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.fillStyle = "#ffe066";
-      ctx.beginPath();
-      ctx.arc(2, -8, 2.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#74c0fc";
-      ctx.beginPath();
-      ctx.arc(12, -10, 1.8, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
     }
     /** 立体糖果环步数徽章（马卡龙感） */
     drawHudCandyMovesBadge(cx, cy, r, opts) {
@@ -13976,15 +16172,15 @@
       ctx.beginPath();
       ctx.arc(cx, cy, r + 1, -Math.PI * 0.9, -Math.PI * 0.18);
       ctx.stroke();
-      ctx.strokeStyle = opts.low ? "#ff6b6b" : "#ffffff";
+      ctx.strokeStyle = opts.low ? "#339af0" : "#ffffff";
       ctx.lineWidth = opts.low ? 3.2 : 2.2;
       ctx.beginPath();
       ctx.arc(cx, cy, r - 3.8, 0, Math.PI * 2);
       ctx.stroke();
       const pearls = [
-        { x: -0.55, y: -0.82, color: "#ffe066" },
-        { x: 0.05, y: -0.95, color: "#ff85c0" },
-        { x: 0.58, y: -0.78, color: "#74c0fc" }
+        { x: -0.55, y: -0.82, color: "#a5d8ff" },
+        { x: 0.05, y: -0.95, color: "#74c0fc" },
+        { x: 0.58, y: -0.78, color: "#4dabf7" }
       ];
       for (const p of pearls) {
         ctx.fillStyle = p.color;
@@ -13992,12 +16188,12 @@
         ctx.arc(cx + r * p.x, cy + r * p.y, 2.6, 0, Math.PI * 2);
         ctx.fill();
       }
-      ctx.fillStyle = opts.low ? "#e03131" : c.inkSoft;
+      ctx.fillStyle = opts.low ? "#1c7ed6" : c.inkSoft;
       ctx.font = "bold 11px sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(opts.label, cx, cy - 9);
-      ctx.fillStyle = opts.low ? "#c92a2a" : c.ink;
+      ctx.fillStyle = opts.low ? "#1864ab" : c.ink;
       ctx.font = "bold 19px sans-serif";
       ctx.fillText(opts.value, cx, cy + 8);
       ctx.restore();
@@ -14052,12 +16248,12 @@
         ctx.translate(-cx, -cy);
       }
       ctx.save();
-      ctx.globalAlpha = 0.18;
-      ctx.fillStyle = "#8d6e4a";
+      ctx.globalAlpha = 0.16;
+      ctx.fillStyle = "#4a7090";
       this.roundRectPath(x + 1.5, y + 3, w, h, r);
       ctx.fill();
       ctx.restore();
-      ctx.fillStyle = "#fff8f0";
+      ctx.fillStyle = "#f1f8ff";
       this.roundRectPath(x, y, w, h, r);
       ctx.fill();
       const trackGrad = ctx.createLinearGradient(x, y, x, y + h);
@@ -14156,11 +16352,11 @@
       const b = clamp3(parseInt(raw.slice(4, 6), 16) + delta);
       return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
     }
-    drawHudPill(x, y, w, h, fill, stroke) {
+    drawHudPill(x, y, w, h, fill2, stroke) {
       const { ctx } = this;
       const r = Math.min(h / 2, 14);
       ctx.save();
-      ctx.fillStyle = fill;
+      ctx.fillStyle = fill2;
       ctx.strokeStyle = stroke;
       ctx.lineWidth = 1.5;
       this.roundRectPath(x, y, w, h, r);
@@ -14429,8 +16625,8 @@
       const y = layout.originY - board.size.rows * layout.cellSize - pad;
       const radius = Math.min(22, Math.floor(layout.cellSize * 0.38));
       ctx.save();
-      ctx.globalAlpha = 0.2;
-      ctx.fillStyle = "#7a5a3a";
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = "#4a7090";
       this.roundRectPath(x + 2, y + 5, w, h, radius);
       ctx.fill();
       ctx.restore();
@@ -14611,33 +16807,7 @@
       return ((_a = this.session.getLevelConfig()) == null ? void 0 : _a.iceStyle) === "encase";
     }
     drawIceOnSlot(x, y, s, slotR) {
-      const { ctx } = this;
-      ctx.save();
-      this.roundRectPath(x, y, s, s, slotR);
-      ctx.clip();
-      const frost = ctx.createLinearGradient(x, y, x + s, y + s);
-      frost.addColorStop(0, "rgba(186, 232, 255, 0.95)");
-      frost.addColorStop(0.5, "rgba(140, 206, 242, 0.88)");
-      frost.addColorStop(1, "rgba(210, 244, 255, 0.92)");
-      ctx.fillStyle = frost;
-      ctx.fillRect(x, y, s, s);
-      ctx.strokeStyle = "rgba(255,255,255,0.75)";
-      ctx.lineWidth = 1.1;
-      ctx.beginPath();
-      ctx.moveTo(x + s * 0.1, y + s * 0.82);
-      ctx.lineTo(x + s * 0.28, y + s * 0.92);
-      ctx.moveTo(x + s * 0.72, y + s * 0.1);
-      ctx.lineTo(x + s * 0.9, y + s * 0.22);
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(90, 170, 220, 0.95)";
-      ctx.lineWidth = 2.2;
-      this.roundRectPath(x + 1, y + 1, s - 2, s - 2, Math.max(3, slotR - 1));
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(255,255,255,0.55)";
-      ctx.lineWidth = 1;
-      this.roundRectPath(x + 3, y + 3, s - 6, s - 6, Math.max(2, slotR - 2));
-      ctx.stroke();
-      ctx.restore();
+      this.paintIceCell(x, y, s, slotR, false, 0, 0);
     }
     drawIceOverlays(board, layout) {
       const cs = layout.cellSize;
@@ -14649,54 +16819,34 @@
           }
           const x = layout.originX + c * cs;
           const y = layout.originY - (r + 1) * cs;
-          this.drawFrozenOverlay(x, y, cs, slotR, r, c);
+          this.paintIceCell(x, y, cs, slotR, true, r, c);
         }
       }
     }
-    drawFrozenOverlay(x, y, s, slotR, row, col) {
+    /** 冰块：实色玻璃罩 + 一笔裂纹，避免每格两套渐变。 */
+    paintIceCell(x, y, s, slotR, encase, row, col) {
       const { ctx } = this;
       ctx.save();
       this.roundRectPath(x + 1, y + 1, s - 2, s - 2, slotR);
       ctx.clip();
-      const sheet = ctx.createLinearGradient(x, y, x + s, y + s);
-      sheet.addColorStop(0, "rgba(236, 250, 255, 0.42)");
-      sheet.addColorStop(0.35, "rgba(164, 220, 245, 0.5)");
-      sheet.addColorStop(0.7, "rgba(120, 198, 236, 0.46)");
-      sheet.addColorStop(1, "rgba(210, 242, 255, 0.4)");
-      ctx.fillStyle = sheet;
+      ctx.fillStyle = encase ? "rgba(164, 220, 245, 0.46)" : "rgba(186, 232, 255, 0.9)";
       ctx.fillRect(x, y, s, s);
-      const gloss = ctx.createLinearGradient(x, y, x, y + s * 0.45);
-      gloss.addColorStop(0, "rgba(255,255,255,0.55)");
-      gloss.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.fillStyle = gloss;
-      ctx.fillRect(x, y, s, s * 0.38);
       ctx.strokeStyle = "rgba(255,255,255,0.72)";
-      ctx.lineWidth = 1.15;
+      ctx.lineWidth = 1.1;
       ctx.beginPath();
       ctx.moveTo(x + s * 0.12, y + s * 0.22);
-      ctx.lineTo(x + s * 0.28, y + s * 0.08);
-      ctx.moveTo(x + s * 0.18, y + s * 0.7);
-      ctx.lineTo(x + s * 0.34, y + s * 0.88);
-      ctx.moveTo(x + s * 0.62, y + s * 0.16);
-      ctx.lineTo(x + s * 0.86, y + s * 0.34);
-      ctx.stroke();
-      const crack = this.cottonHash(row, col, 9);
-      ctx.strokeStyle = "rgba(70, 150, 200, 0.45)";
-      ctx.lineWidth = 0.9;
-      ctx.beginPath();
-      ctx.moveTo(x + s * (0.2 + crack * 0.15), y + s * 0.12);
-      ctx.lineTo(x + s * 0.42, y + s * (0.4 + crack * 0.1));
-      ctx.lineTo(x + s * (0.55 + crack * 0.1), y + s * 0.78);
+      ctx.lineTo(x + s * 0.3, y + s * 0.08);
+      if (encase) {
+        const crack = this.cottonHash(row, col, 9);
+        ctx.moveTo(x + s * (0.2 + crack * 0.15), y + s * 0.14);
+        ctx.lineTo(x + s * 0.55, y + s * 0.78);
+      }
       ctx.stroke();
       ctx.restore();
       ctx.save();
-      ctx.strokeStyle = "rgba(255,255,255,0.85)";
-      ctx.lineWidth = 2.4;
-      this.roundRectPath(x + 2, y + 2, s - 4, s - 4, Math.max(4, slotR - 1));
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(80, 170, 220, 0.55)";
-      ctx.lineWidth = 1.2;
-      this.roundRectPath(x + 4, y + 4, s - 8, s - 8, Math.max(3, slotR - 2));
+      ctx.strokeStyle = encase ? "rgba(255,255,255,0.85)" : "rgba(90, 170, 220, 0.95)";
+      ctx.lineWidth = 2.2;
+      this.roundRectPath(x + 2, y + 2, s - 4, s - 4, Math.max(3, slotR - 1));
       ctx.stroke();
       ctx.restore();
     }
@@ -14728,99 +16878,18 @@
       const r = s * (underCloud ? 0.26 : 0.34);
       ctx.save();
       ctx.globalAlpha = underCloud ? 0.35 : 1;
-      ctx.save();
       ctx.fillStyle = "rgba(90, 40, 70, 0.28)";
-      ctx.translate(cx, cy + r * 0.55);
-      ctx.scale(1, 0.3);
-      ctx.beginPath();
-      ctx.arc(0, 0, r * 0.92, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      ctx.save();
+      this.fillEllipse(cx, cy + r * 0.42, r * 0.92, r * 0.28, 0);
+      ctx.fillStyle = "#ff7eb6";
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.clip();
-      const ball = ctx.createRadialGradient(
-        cx - r * 0.28,
-        cy - r * 0.4,
-        r * 0.06,
-        cx + r * 0.1,
-        cy + r * 0.14,
-        r * 1.08
-      );
-      ball.addColorStop(0, "#fff7fb");
-      ball.addColorStop(0.16, "#ffc4de");
-      ball.addColorStop(0.42, "#ff7eb6");
-      ball.addColorStop(0.74, "#ee4588");
-      ball.addColorStop(1, "#b01d58");
-      ctx.fillStyle = ball;
-      ctx.fillRect(cx - r - 1, cy - r - 1, r * 2 + 2, r * 2 + 2);
-      const shade = ctx.createRadialGradient(
-        cx,
-        cy + r * 0.58,
-        r * 0.08,
-        cx,
-        cy + r * 0.12,
-        r
-      );
-      shade.addColorStop(0, "rgba(132, 18, 68, 0.46)");
-      shade.addColorStop(1, "rgba(132, 18, 68, 0)");
-      ctx.fillStyle = shade;
-      ctx.fillRect(cx - r - 1, cy - r - 1, r * 2 + 2, r * 2 + 2);
-      ctx.lineCap = "round";
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
-      ctx.lineWidth = Math.max(1.1, r * 0.11);
-      for (let i = 0; i < 3; i += 1) {
-        const oy = cy - r * 0.24 + i * r * 0.27;
-        ctx.beginPath();
-        ctx.moveTo(cx - r * 0.74, oy);
-        ctx.quadraticCurveTo(cx, oy + (i % 2 === 0 ? -r * 0.18 : r * 0.18), cx + r * 0.76, oy);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = "rgba(190, 28, 92, 0.32)";
-      ctx.lineWidth = Math.max(0.7, r * 0.065);
-      for (let i = 0; i < 3; i += 1) {
-        const oy = cy - r * 0.16 + i * r * 0.27;
-        ctx.beginPath();
-        ctx.moveTo(cx - r * 0.7, oy + r * 0.05);
-        ctx.quadraticCurveTo(cx + r * 0.06, oy + (i % 2 === 0 ? r * 0.16 : -r * 0.16), cx + r * 0.72, oy);
-        ctx.stroke();
-      }
-      const grain = Math.max(8, Math.round(r * 0.6));
-      const seed = Math.floor(cx * 13 + cy * 17);
-      for (let i = 0; i < grain; i += 1) {
-        const a = (i * 2.39996 + seed * 0.01) % (Math.PI * 2);
-        const d = r * (0.16 + (i * 19 + seed) % 72 / 125);
-        const gx = cx + Math.cos(a) * d;
-        const gy = cy + Math.sin(a) * d * 0.9;
-        ctx.fillStyle = i % 2 === 0 ? "rgba(255,255,255,0.5)" : "rgba(255, 176, 208, 0.58)";
-        ctx.beginPath();
-        ctx.arc(gx, gy, r * (0.026 + i % 3 * 0.01), 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-      ctx.save();
-      ctx.fillStyle = "rgba(255,255,255,0.78)";
-      ctx.translate(cx - r * 0.3, cy - r * 0.36);
-      ctx.rotate(-0.55);
-      ctx.scale(1, 0.52);
-      ctx.beginPath();
-      ctx.arc(0, 0, r * 0.34, 0, Math.PI * 2);
       ctx.fill();
-      ctx.restore();
-      ctx.fillStyle = "rgba(255,255,255,0.92)";
-      ctx.beginPath();
-      ctx.arc(cx + r * 0.22, cy - r * 0.2, r * 0.065, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.72)";
+      this.fillEllipse(cx - r * 0.28, cy - r * 0.32, r * 0.32, r * 0.18, -0.5);
       ctx.strokeStyle = "rgba(176, 32, 90, 0.5)";
       ctx.lineWidth = Math.max(0.9, s * 0.022);
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(255, 232, 242, 0.95)";
-      ctx.lineWidth = Math.max(1.1, s * 0.026);
-      ctx.beginPath();
-      ctx.arc(cx, cy, r * 0.94, Math.PI * 1.05, Math.PI * 1.85);
       ctx.stroke();
       ctx.restore();
     }
@@ -15086,100 +17155,250 @@
       return layers;
     }
     drawCloudOverlays(board, layout) {
+      var _a, _b;
       const { ctx } = this;
       const cs = layout.cellSize;
       const slotR = Math.max(6, Math.floor(cs * 0.18));
       const cloudy = [];
+      const keyOf = (r, c) => r * board.size.cols + c;
+      const layerAt = /* @__PURE__ */ new Map();
       for (let r = 0; r < board.size.rows; r += 1) {
         for (let c = 0; c < board.size.cols; c += 1) {
           const layers = this.getDisplayCloud(board, r, c);
           if (layers > 0) {
             cloudy.push({ r, c, layers });
+            layerAt.set(keyOf(r, c), layers);
           }
         }
       }
       if (cloudy.length === 0) {
         return;
       }
-      const cloudyAt = (row, col) => row >= 0 && col >= 0 && row < board.size.rows && col < board.size.cols && this.getDisplayCloud(board, row, col) > 0;
-      for (const cell of cloudy) {
-        const layers = cell.layers;
-        const left = cloudyAt(cell.r, cell.c - 1);
-        const right = cloudyAt(cell.r, cell.c + 1);
-        const up = cloudyAt(cell.r + 1, cell.c);
-        const down = cloudyAt(cell.r - 1, cell.c);
-        let x = layout.originX + cell.c * cs;
-        let y = layout.originY - (cell.r + 1) * cs;
-        let w = cs;
-        let h = cs;
-        const join = Math.max(3, Math.ceil(cs * 0.08));
-        if (left) {
-          x -= join;
-          w += join;
+      const cloudyAt = (row, col) => layerAt.has(keyOf(row, col));
+      const visited = /* @__PURE__ */ new Set();
+      const blobs = [];
+      for (const seed of cloudy) {
+        const sk = keyOf(seed.r, seed.c);
+        if (visited.has(sk)) {
+          continue;
         }
-        if (right) {
-          w += join;
+        const blob = [];
+        const queue = [seed];
+        visited.add(sk);
+        while (queue.length > 0) {
+          const cur = queue.pop();
+          blob.push(cur);
+          const nbs = [
+            [cur.r + 1, cur.c],
+            [cur.r - 1, cur.c],
+            [cur.r, cur.c + 1],
+            [cur.r, cur.c - 1]
+          ];
+          for (const [nr, nc] of nbs) {
+            const nk = keyOf(nr, nc);
+            if (visited.has(nk) || !layerAt.has(nk)) {
+              continue;
+            }
+            visited.add(nk);
+            queue.push({ r: nr, c: nc, layers: layerAt.get(nk) });
+          }
         }
-        if (up) {
-          y -= join;
-          h += join;
-        }
-        if (down) {
-          h += join;
-        }
-        const cx = layout.originX + (cell.c + 0.5) * cs;
-        const cy = layout.originY - (cell.r + 0.5) * cs;
+        blobs.push(blob);
+      }
+      const join = Math.max(6, Math.ceil(cs * 0.22));
+      const corner = Math.max(6, slotR * 0.7);
+      for (const blob of blobs) {
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
         ctx.save();
-        this.roundRectPath(x, y, w, h, Math.max(4, slotR * 0.45));
+        ctx.beginPath();
+        for (const cell of blob) {
+          let x = layout.originX + cell.c * cs;
+          let y = layout.originY - (cell.r + 1) * cs;
+          let w = cs;
+          let h = cs;
+          if (cloudyAt(cell.r, cell.c - 1)) {
+            x -= join;
+            w += join;
+          }
+          if (cloudyAt(cell.r, cell.c + 1)) {
+            w += join;
+          }
+          if (cloudyAt(cell.r + 1, cell.c)) {
+            y -= join;
+            h += join;
+          }
+          if (cloudyAt(cell.r - 1, cell.c)) {
+            h += join;
+          }
+          this.appendRoundRectPath(x, y, w, h, corner);
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x + w);
+          maxY = Math.max(maxY, y + h);
+        }
         ctx.clip();
-        ctx.fillStyle = layers <= 1 ? "rgba(242, 246, 250, 0.38)" : "#f2f6fa";
-        ctx.fillRect(x, y, w, h);
-        this.drawThickCotton(cx, cy, cs * 0.98, cell.r, cell.c, layers);
+        const wornBlob = blob.every((cell) => cell.layers <= 1);
+        const midX = (minX + maxX) / 2;
+        const midY = (minY + maxY) / 2;
+        const span = Math.max(maxX - minX, maxY - minY);
+        const sheet = ctx.createRadialGradient(midX, midY - span * 0.08, span * 0.05, midX, midY, span * 0.72);
+        if (wornBlob) {
+          sheet.addColorStop(0, "rgba(255,255,255,0.5)");
+          sheet.addColorStop(0.55, "rgba(234,242,250,0.32)");
+          sheet.addColorStop(1, "rgba(214,226,240,0.1)");
+        } else {
+          sheet.addColorStop(0, "rgba(255,255,255,0.82)");
+          sheet.addColorStop(0.5, "rgba(238,246,252,0.62)");
+          sheet.addColorStop(1, "rgba(216,228,242,0.2)");
+        }
+        ctx.fillStyle = sheet;
+        ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+        for (const cell of blob) {
+          const cx = layout.originX + (cell.c + 0.5) * cs;
+          const cy = layout.originY - (cell.r + 0.5) * cs;
+          this.drawThickCotton(cx, cy, cs * 1.12, cell.r, cell.c, cell.layers);
+          if (cloudyAt(cell.r, cell.c + 1)) {
+            this.drawThickCotton(
+              cx + cs * 0.5,
+              cy,
+              cs * 0.88,
+              cell.r,
+              cell.c + 17,
+              Math.min(cell.layers, (_a = layerAt.get(keyOf(cell.r, cell.c + 1))) != null ? _a : cell.layers)
+            );
+          }
+          if (cloudyAt(cell.r + 1, cell.c)) {
+            this.drawThickCotton(
+              cx,
+              cy - cs * 0.5,
+              cs * 0.88,
+              cell.r + 17,
+              cell.c,
+              Math.min(cell.layers, (_b = layerAt.get(keyOf(cell.r + 1, cell.c))) != null ? _b : cell.layers)
+            );
+          }
+        }
         ctx.restore();
       }
+    }
+    /** 往当前 path 追加圆角矩形子路径（不 beginPath），用于棉花并集裁剪。 */
+    appendRoundRectPath(x, y, w, h, r) {
+      const { ctx } = this;
+      const width = Math.max(0, w);
+      const height = Math.max(0, h);
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+      const rr = Math.max(0, Math.min(r, width / 2, height / 2));
+      if (rr <= 0) {
+        ctx.rect(x, y, width, height);
+        return;
+      }
+      ctx.moveTo(x + rr, y);
+      ctx.lineTo(x + width - rr, y);
+      ctx.arc(x + width - rr, y + rr, rr, -Math.PI / 2, 0);
+      ctx.lineTo(x + width, y + height - rr);
+      ctx.arc(x + width - rr, y + height - rr, rr, 0, Math.PI / 2);
+      ctx.lineTo(x + rr, y + height);
+      ctx.arc(x + rr, y + height - rr, rr, Math.PI / 2, Math.PI);
+      ctx.lineTo(x, y + rr);
+      ctx.arc(x + rr, y + rr, rr, Math.PI, Math.PI * 1.5);
+      ctx.closePath();
     }
     drawThickCotton(cx, cy, s, row, col, layers = 2) {
       const { ctx } = this;
       const worn = layers <= 1;
       ctx.save();
-      ctx.globalAlpha = worn ? 0.42 : 1;
+      ctx.globalAlpha = worn ? 0.52 : 1;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      const puffCount = worn ? 4 : 6;
+      const core = ctx.createRadialGradient(
+        cx - s * 0.12,
+        cy - s * 0.18,
+        s * 0.06,
+        cx,
+        cy,
+        s * 0.5
+      );
+      core.addColorStop(0, worn ? "rgba(255,255,255,0.62)" : "rgba(255,255,255,0.92)");
+      core.addColorStop(0.5, worn ? "rgba(236,244,252,0.34)" : "rgba(232,242,252,0.55)");
+      core.addColorStop(1, "rgba(200,214,232,0)");
+      ctx.fillStyle = core;
+      ctx.beginPath();
+      ctx.arc(cx, cy, s * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      const pastels = [
+        [255, 246, 250],
+        [234, 246, 255],
+        [236, 252, 244],
+        [246, 238, 255],
+        [255, 250, 236],
+        [240, 248, 255]
+      ];
+      const puffCount = worn ? 5 : 7;
       for (let i = 0; i < puffCount; i += 1) {
         const u = this.cottonHash(row, col, i);
         const v = this.cottonHash(row, col, i + 18);
         const w = this.cottonHash(row, col, i + 36);
-        const px = cx + (u - 0.5) * s * 0.58;
-        const py = cy + (v - 0.5) * s * 0.58;
-        const pr = s * (0.18 + w * 0.16);
-        ctx.fillStyle = `rgba(${210 + Math.round(w * 30)}, ${220 + Math.round(u * 20)}, ${228 + Math.round(v * 18)}, ${worn ? 0.55 : 0.92})`;
+        const px = cx + (u - 0.5) * s * 0.52;
+        const py = cy + (v - 0.5) * s * 0.5;
+        const pr = s * (0.2 + w * 0.17);
+        const [pr_, pg, pb] = pastels[i % pastels.length];
+        const hx = px - pr * 0.32;
+        const hy = py - pr * 0.38;
+        const g = ctx.createRadialGradient(hx, hy, pr * 0.06, px + pr * 0.08, py + pr * 0.18, pr);
+        g.addColorStop(0, `rgba(255,255,255,${worn ? 0.88 : 1})`);
+        g.addColorStop(
+          0.42,
+          `rgba(${pr_}, ${pg}, ${pb}, ${worn ? 0.72 : 0.94})`
+        );
+        g.addColorStop(
+          0.82,
+          `rgba(${Math.max(180, pr_ - 36)}, ${Math.max(190, pg - 28)}, ${Math.max(205, pb - 18)}, ${worn ? 0.28 : 0.48})`
+        );
+        g.addColorStop(1, "rgba(186, 200, 218, 0.02)");
+        ctx.fillStyle = g;
         ctx.beginPath();
         ctx.arc(px, py, pr, 0, Math.PI * 2);
         ctx.fill();
+        if (!worn || i % 2 === 0) {
+          ctx.fillStyle = `rgba(255,255,255,${worn ? 0.45 : 0.7})`;
+          ctx.beginPath();
+          ctx.arc(hx + pr * 0.08, hy + pr * 0.1, pr * 0.16, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
-      const fiber = this.lite ? 5 : 8;
-      ctx.strokeStyle = "rgba(255,255,255,0.55)";
-      ctx.lineWidth = 1.1;
+      const fiber = worn ? 3 : 5;
       for (let i = 0; i < fiber; i += 1) {
         const u = this.cottonHash(row, col, i + 80);
         const v = this.cottonHash(row, col, i + 102);
         const ang = u * Math.PI * 2;
-        const len = s * (0.12 + v * 0.22);
-        const ox = cx + (u - 0.5) * s * 0.5;
-        const oy = cy + (v - 0.5) * s * 0.5;
+        const len = s * (0.1 + v * 0.16);
+        const ox = cx + (u - 0.5) * s * 0.42;
+        const oy = cy + (v - 0.5) * s * 0.42;
+        ctx.strokeStyle = `rgba(255,255,255,${worn ? 0.35 : 0.55})`;
+        ctx.lineWidth = 1.4;
         ctx.beginPath();
-        ctx.moveTo(ox, oy);
-        ctx.lineTo(ox + Math.cos(ang) * len, oy + Math.sin(ang) * len);
+        ctx.arc(ox, oy, len, ang - 0.55, ang + 0.55);
         ctx.stroke();
       }
-      ctx.fillStyle = "rgba(255,255,255,0.7)";
-      const dots = this.lite ? 4 : 6;
+      const dots = worn ? 3 : 6;
       for (let i = 0; i < dots; i += 1) {
         const u = this.cottonHash(row, col, i + 280);
         const v = this.cottonHash(row, col, i + 300);
+        const dr = 0.9 + this.cottonHash(row, col, i + 320) * 1.4;
+        ctx.fillStyle = `rgba(255,255,255,${worn ? 0.5 : 0.78})`;
         ctx.beginPath();
-        ctx.arc(cx + (u - 0.5) * s * 0.62, cy + (v - 0.5) * s * 0.62, 1.1, 0, Math.PI * 2);
+        ctx.arc(
+          cx + (u - 0.5) * s * 0.58,
+          cy + (v - 0.5) * s * 0.58,
+          dr,
+          0,
+          Math.PI * 2
+        );
         ctx.fill();
       }
       ctx.restore();
@@ -15268,7 +17487,7 @@
         this.roundRectPath(x0, y0, box, box, radius);
         ctx.fillStyle = thick ? "rgba(20, 64, 40, 0.08)" : "rgba(27, 67, 50, 0.06)";
         ctx.fill();
-        const count = this.lite ? 8 : 10;
+        const count = 8;
         const len = s * (ring === 0 ? 0.155 : 0.12);
         const wid = s * (ring === 0 ? 0.07 : 0.055);
         for (let i = 0; i < count; i += 1) {
@@ -15291,7 +17510,7 @@
       if (row + 1 < board.size.rows && this.getDisplayVine(board, row + 1, col) > 0) {
         links.push({ tx: cx + (h(8) - 0.5) * s * 0.04, ty: y });
       }
-      const beads = this.lite ? 2 : 3;
+      const beads = 2;
       for (const link of links) {
         for (let i = 1; i <= beads; i += 1) {
           const t = i / (beads + 1);
@@ -15750,8 +17969,8 @@
       const h = 34;
       ctx.save();
       ctx.globalAlpha = 0.6 + pulse * 0.4;
-      const fill = this.mode === "clean" ? "rgba(51, 154, 240, 0.94)" : "rgba(255, 90, 120, 0.94)";
-      this.drawHudPill(x, y, w, h, fill, "#ffffff");
+      const fill2 = this.mode === "clean" ? "rgba(51, 154, 240, 0.94)" : "rgba(255, 90, 120, 0.94)";
+      this.drawHudPill(x, y, w, h, fill2, "#ffffff");
       ctx.fillStyle = "#ffffff";
       ctx.font = "bold 14px sans-serif";
       ctx.textAlign = "center";
@@ -15791,14 +18010,14 @@
       };
       this.buttons.push(extendBtn, skipBtn);
       this.drawCuteButton(extendBtn, {
-        top: "#ffb347",
-        bottom: "#ff8c42",
+        top: "#66d9e8",
+        bottom: "#1098ad",
         border: "#ffffff",
         gloss: true
       });
       this.drawCuteButton(skipBtn, {
-        top: "#ff7eb3",
-        bottom: "#ff4d8d",
+        top: "#74c0fc",
+        bottom: "#1c7ed6",
         border: "#ffffff",
         gloss: true
       });
@@ -15933,9 +18152,9 @@
       }
       this.drawCuteCard(-panelW / 2, -panelH / 2, panelW, panelH, {
         radius: 24,
-        fillTop: isFail ? "rgba(255,255,255,0.96)" : "rgba(180, 235, 120, 0.98)",
-        fillBottom: isFail ? "rgba(240,240,245,0.94)" : "rgba(120, 200, 70, 0.96)",
-        border: isFail ? "#c5c8d0" : "#7bc84a",
+        fillTop: isFail ? "rgba(255,255,255,0.97)" : "rgba(180, 235, 120, 0.98)",
+        fillBottom: isFail ? "rgba(232, 248, 255, 0.95)" : "rgba(120, 200, 70, 0.96)",
+        border: isFail ? "#74c0fc" : "#7bc84a",
         borderWidth: 3,
         shadow: false,
         sparkle: !isFail,
@@ -15949,11 +18168,11 @@
       ctx.strokeStyle = "rgba(255,255,255,0.9)";
       ctx.lineWidth = 5;
       ctx.strokeText(title, 0, -14);
-      ctx.fillStyle = isFail ? "#7f8c8d" : "#2d6a1f";
+      ctx.fillStyle = isFail ? "#1864ab" : "#2d6a1f";
       ctx.fillText(title, 0, -14);
       ctx.restore();
       ctx.font = "bold 17px sans-serif";
-      ctx.fillStyle = isFail ? "#6b5344" : "#3d5c2e";
+      ctx.fillStyle = isFail ? "#4dabf7" : "#3d5c2e";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.save();
@@ -15962,7 +18181,7 @@
       ctx.restore();
       if (isFail) {
         ctx.font = "bold 12px sans-serif";
-        ctx.fillStyle = "#8d6e63";
+        ctx.fillStyle = "#339af0";
         ctx.fillText("\u6CA1\u5173\u7CFB\uFF0C\u518D\u8BD5\u4E00\u6B21\u5C31\u597D", 0, 42);
       }
       if (!isFail && crushBonus > 0) {
@@ -16027,7 +18246,7 @@
         const b = btns[i];
         const stagger = clamp012((anim.buttonProgress - i * 0.12) / 0.55);
         const slide = (1 - easeOutBackLocal(stagger)) * 36;
-        const palette = b.id === "revive" ? { top: "#ffc078", bottom: "#ff922b", border: "#ffffff", gloss: true } : b.id === "next" ? { top: "#8ce99a", bottom: "#37b24d", border: "#ffffff", gloss: true } : b.id === "lobby" ? { top: "#a5d8ff", bottom: "#4dabf7", border: "#ffffff", gloss: true } : { top: "#ffa8d4", bottom: "#ff6baf", border: "#ffffff", gloss: true };
+        const palette = b.id === "revive" ? { top: "#74c0fc", bottom: "#1c7ed6", border: "#ffffff", gloss: true } : b.id === "next" ? { top: "#8ce99a", bottom: "#37b24d", border: "#ffffff", gloss: true } : b.id === "lobby" ? { top: "#d0ebff", bottom: "#74c0fc", border: "#ffffff", gloss: true } : { top: "#a5d8ff", bottom: "#339af0", border: "#ffffff", gloss: true };
         ctx.save();
         ctx.globalAlpha = stagger;
         this.drawCuteButton(
@@ -16176,7 +18395,7 @@
         const b = btns[i];
         const stagger = clamp012((anim.buttonProgress - i * 0.1) / 0.55);
         const slide = (1 - easeOutBackLocal(stagger)) * 20;
-        const palette = b.id === "next" ? { top: "#ffd43b", bottom: "#ff922b", border: "#ffffff", gloss: true } : b.id === "lobby" ? { top: "#a5d8ff", bottom: "#4dabf7", border: "#ffffff", gloss: true } : { top: "#ffa8d4", bottom: "#ff6baf", border: "#ffffff", gloss: true };
+        const palette = b.id === "next" ? { top: "#74c0fc", bottom: "#1c7ed6", border: "#ffffff", gloss: true } : b.id === "lobby" ? { top: "#d0ebff", bottom: "#74c0fc", border: "#ffffff", gloss: true } : { top: "#a5d8ff", bottom: "#339af0", border: "#ffffff", gloss: true };
         ctx.save();
         ctx.globalAlpha = stagger;
         this.drawCuteButton(
@@ -16281,7 +18500,7 @@
      * 可爱圆角卡片：渐变填充 + 粗描边 + 高光 + 可选星点。
      */
     drawCuteCard(x, y, w, h, style) {
-      var _a;
+      var _a, _b;
       const { ctx } = this;
       const r = style.radius;
       if (style.shadow) {
@@ -16328,7 +18547,7 @@
           const twinkle = 0.45 + 0.55 * Math.abs(Math.sin(t + i));
           ctx.save();
           ctx.globalAlpha = twinkle;
-          ctx.fillStyle = "#ffd6ef";
+          ctx.fillStyle = (_b = style.sparkleColor) != null ? _b : "#ffd6ef";
           ctx.beginPath();
           ctx.arc(x + d.dx, y + d.dy, 2.2, 0, Math.PI * 2);
           ctx.fill();
@@ -16340,6 +18559,7 @@
      * 泡泡感可爱按钮：圆角胶囊 + 渐变 + 白边 + 顶部高光。
      */
     drawCuteButton(btn, palette, scale = 1) {
+      var _a;
       const { ctx } = this;
       const now = this.nowMs || Date.now();
       const idle = scale !== 1 ? scale : 1 + this.fxAmt(0.018, 0.01) * Math.sin(now * 6e-3 + btn.x * 0.02);
@@ -16363,30 +18583,32 @@
       this.roundRectPath(btn.x, btn.y, btn.w, btn.h, r);
       ctx.fill();
       if (palette.gloss !== false) {
+        const insetX = btn.h <= 22 ? 3 : 6;
+        const insetY = btn.h <= 22 ? 2 : 4;
         ctx.save();
         ctx.globalAlpha = 0.5;
         ctx.fillStyle = "rgba(255,255,255,0.72)";
         this.roundRectPath(
-          btn.x + 6,
-          btn.y + 4,
-          btn.w - 12,
+          btn.x + insetX,
+          btn.y + insetY,
+          btn.w - insetX * 2,
           btn.h * 0.38,
-          Math.max(8, r - 8)
+          Math.max(btn.h <= 22 ? 4 : 8, r - 8)
         );
         ctx.fill();
         ctx.restore();
       }
       ctx.strokeStyle = palette.border;
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = btn.h <= 22 ? 1.5 : 2.5;
       this.roundRectPath(btn.x + 1.5, btn.y + 1.5, btn.w - 3, btn.h - 3, r - 1);
       ctx.stroke();
       if (btn.label) {
-        const fontSize = btn.h <= 28 ? 13 : btn.h <= 36 ? 15 : 17;
+        const fontSize = (_a = palette.fontSize) != null ? _a : btn.h <= 22 ? 11 : btn.h <= 28 ? 12 : btn.h <= 36 ? 15 : 17;
         ctx.font = `bold ${fontSize}px sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.strokeStyle = "rgba(120,40,90,0.25)";
-        ctx.lineWidth = 3;
+        ctx.lineWidth = fontSize <= 11 ? 2 : 3;
         ctx.strokeText(btn.label, cx, cy + 1);
         ctx.fillStyle = "#ffffff";
         ctx.fillText(btn.label, cx, cy);

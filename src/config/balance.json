@@ -3,5 +3,23 @@
   "crushDefaultTapPower": 1,
   "crushFinaleMaxBursts": 64,
   "cleanScoreThreshold": 1500,
-  "cleanDurationMs": 20000
+  "cleanDurationMs": 20000,
+  "challengeDailyInviteCap": 3,
+  "dailyRewardPerDay": 1,
+  "dailyChallenge": {
+    "poolSize": 20,
+    "streakDays": 3,
+    "complete": { "id": "shuffle", "amount": 1 },
+    "streak": { "id": "extraMoves", "amount": 1 }
+  },
+  "leaderboard": {
+    "limit": 50,
+    "rewardRanks": 3,
+    "settleWeekday": 1,
+    "settleHour": 0,
+    "rewards": [
+      { "id": "hammer", "amount": 1 },
+      { "id": "shuffle", "amount": 1 }
+    ]
+  }
 }

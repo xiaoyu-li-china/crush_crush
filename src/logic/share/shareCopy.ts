@@ -4,7 +4,14 @@
 
 import { withInviterQuery } from '../economy/InviteLoop';
 
-export type ShareScene = 'lobby' | 'playing' | 'crush' | 'clean' | 'result';
+export type ShareScene =
+  | 'lobby'
+  | 'playing'
+  | 'crush'
+  | 'clean'
+  | 'result'
+  | 'booster_friend'
+  | 'booster_group';
 
 export function buildShareTitle(
   scene: ShareScene,
@@ -22,8 +29,12 @@ export function buildShareTitle(
       return `第 ${level} 关打扫中，一起来收尾`;
     case 'result':
       return `我在第 ${level} 关拿了 ${points} 分，你来挑战`;
+    case 'booster_friend':
+      return `我在第 ${level} 关缺个道具，转发给我就行`;
+    case 'booster_group':
+      return `发到群里一起玩，第 ${level} 关更好过`;
     default:
-      return '萌宠粉碎消，点树上马卡龙就能玩';
+      return '萌宠粉碎消，沿糖果梯子冲进糖果屋';
   }
 }
 
@@ -44,6 +55,10 @@ export function buildShareQuery(
     query = `from=clean&level=${level}`;
   } else if (scene === 'result') {
     query = `from=result&level=${level}&score=${points}`;
+  } else if (scene === 'booster_friend') {
+    query = `from=booster_friend&level=${level}`;
+  } else if (scene === 'booster_group') {
+    query = `from=booster_group&level=${level}`;
   }
   return withInviterQuery(query, inviteCode);
 }

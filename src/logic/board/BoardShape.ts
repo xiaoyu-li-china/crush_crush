@@ -57,6 +57,13 @@ export function isCellPlayable(
     return isSplit34Cell(col, cols);
   }
   if (shape === 'plus') {
+    const midR = (rows - 1) / 2;
+    const midC = (cols - 1) / 2;
+    // 奇数边：略加厚十字，避免 7×7 单线过瘦；偶数边仍用双心行/列
+    if (Number.isInteger(midR) && Number.isInteger(midC)) {
+      const arm = rows >= 7 ? 1 : 0;
+      return Math.abs(row - midR) <= arm || Math.abs(col - midC) <= arm;
+    }
     const midR0 = Math.floor((rows - 1) / 2);
     const midR1 = Math.ceil((rows - 1) / 2);
     const midC0 = Math.floor((cols - 1) / 2);

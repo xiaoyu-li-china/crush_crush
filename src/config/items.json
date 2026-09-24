@@ -1,5 +1,19 @@
 {
   "extraMoves": {
     "moves": 5
+  },
+  "challenge": {
+    "success": {
+      "invitee": { "id": "extraMoves", "amount": 1 },
+      "inviter": { "id": "hammer", "amount": 1 }
+    },
+    "fail": {
+      "invitee": { "id": "shuffle", "amount": 1 },
+      "inviter": { "id": "shuffle", "amount": 1 }
+    }
+  },
+  "dailyChallenge": {
+    "reward": { "id": "shuffle", "amount": 1 },
+    "streakReward": { "id": "extraMoves", "amount": 1 }
   }
 }

@@ -9,6 +9,7 @@ import {
   createMemoryDeps,
   miniLevels,
   paintSwapMatch,
+  unlockBoosterAds,
 } from '../helpers/memory-deps';
 import { GameSession } from '../../src/services/GameSession';
 
@@ -52,6 +53,7 @@ describe('GameSession 非法态与边界', () => {
     await session.init();
     await session.startLevel(1);
     assert.equal(session.allowsRewardedExtraMoves(), true);
+    unlockBoosterAds(session, 'extraMoves');
     const before = session.getMovesLeft();
     assert.equal(await session.watchAdToAddMoves(), 'skipped');
     assert.equal(session.getMovesLeft(), before);

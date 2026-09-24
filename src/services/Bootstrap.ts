@@ -15,6 +15,9 @@ import type {
 } from '../core';
 import { GameSession } from './GameSession';
 import adPlacementsJson from '../config/ad-placements.json';
+import { HttpChallengeApi } from '../core/adapters/HttpChallengeApi';
+import { WxCloudChallengeApi } from '../core/adapters/WxCloudChallengeApi';
+import challengeJson from '../config/challenge.json';
 
 /** Composition Root：集中创建 Adapter 并注入会话。 */
 export interface AppContainer {
@@ -24,6 +27,14 @@ export interface AppContainer {
   analytics: IAnalytics;
   platform: IPlatform;
   session: GameSession;
+}
+
+function createChallengeApi() {
+  const provider = String((challengeJson as { provider?: string }).provider || '').toLowerCase();
+  if (provider === 'cloud' || !challengeJson.baseUrl) {
+    return new WxCloudChallengeApi();
+  }
+  return new HttpChallengeApi();
 }
 
 export function createAppContainer(): AppContainer {
@@ -39,6 +50,7 @@ export function createAppContainer(): AppContainer {
   const platform = new WxPlatformAdapter();
 
   const cloudSave = new WxCloudSaveAdapter();
+  const challengeApi = createChallengeApi();
 
   const session = new GameSession({
     storage,
@@ -47,6 +59,7 @@ export function createAppContainer(): AppContainer {
     analytics,
     platform,
     cloudSave,
+    challengeApi,
   });
 
   return {

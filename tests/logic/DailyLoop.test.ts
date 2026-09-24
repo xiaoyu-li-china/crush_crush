@@ -3,8 +3,10 @@ import { describe, it } from 'node:test';
 
 import {
   applyDailyLogin,
+  claimDailyShuffle,
   DAILY_GOAL_CLEARS,
   lobbyDailyHint,
+  lobbyDailyProgress,
   localYmd,
   recordDailyClear,
 } from '../../src/logic/economy/DailyLoop';
@@ -42,5 +44,28 @@ describe('DailyLoop', () => {
     assert.match(lobbyDailyHint(3, true), /重排已到账/);
     assert.match(lobbyDailyHint(3, false), /目标完成/);
     assert.match(lobbyDailyHint(0, false), /再过 3 关/);
+  });
+
+  it('进度条按通关格数前进，满 3 关后才能领取重排', () => {
+    const now = Date.parse('2026-09-14T12:00:00+08:00');
+    let data = applyDailyLogin(null, now).data;
+    assert.equal(lobbyDailyProgress(0, false).label, '今日通关进度 [0/3]');
+    data = recordDailyClear(data, now);
+    const one = lobbyDailyProgress(data.clearsToday, data.playShuffleGranted);
+    assert.equal(one.label, '今日通关进度 [1/3]');
+    assert.equal(one.done, 1);
+    assert.equal(one.readyToClaim, false);
+    data = recordDailyClear(data, now);
+    data = recordDailyClear(data, now);
+    const full = lobbyDailyProgress(data.clearsToday, data.playShuffleGranted);
+    assert.equal(full.label, '今日通关进度 [3/3]');
+    assert.equal(full.readyToClaim, true);
+    const early = claimDailyShuffle({ ...data, clearsToday: 2, playShuffleGranted: false });
+    assert.equal(early.granted, false);
+    const claimed = claimDailyShuffle(data);
+    assert.equal(claimed.granted, true);
+    assert.equal(claimed.data.playShuffleGranted, true);
+    assert.equal(claimDailyShuffle(claimed.data).granted, false);
+    assert.equal(lobbyDailyProgress(3, true).readyToClaim, false);
   });
 });

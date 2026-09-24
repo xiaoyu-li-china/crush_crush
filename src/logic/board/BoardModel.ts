@@ -1157,6 +1157,108 @@ export class BoardModel {
     return n;
   }
 
+  /**
+   * 底部满铺若干行，再在上一行居中盖 centerCap 格（如底 2 行满 + 第三层居中 3 格）。
+   * 行 0 为底。
+   */
+  public coverBottomRowsWithCloudCap(bottomRows: number, centerCap: number): number {
+    let n = this.coverBottomRowsWithCloud(bottomRows);
+    const base = Math.max(0, Math.min(this.size.rows, Math.floor(bottomRows)));
+    if (base >= this.size.rows) {
+      return n;
+    }
+    const cap = Math.max(0, Math.min(this.size.cols, Math.floor(centerCap)));
+    if (cap <= 0) {
+      return n;
+    }
+    const startCol = Math.floor((this.size.cols - cap) / 2);
+    const r = base;
+    for (let c = startCol; c < startCol + cap; c += 1) {
+      const i = this.index(r, c);
+      if ((this.cells[i] as TileKind) === TileKind.Hole) {
+        continue;
+      }
+      this.cloud[i] = CLOUD_HIT_LAYERS;
+      n += 1;
+    }
+    if (n > 0) {
+      this.bumpVersion();
+    }
+    return n;
+  }
+
+  /**
+   * 底部满铺若干行，最上一层中间 topCenterGap 格留空；
+   * rightClear > 0 时，其下各层再清空右侧若干列（最上层两侧翅膀保留）。
+   * 行 0 为底。
+   */
+  public coverBottomRowsWithCloudTopGap(
+    bottomRows: number,
+    topCenterGap: number,
+    rightClear = 0,
+  ): number {
+    const rows = Math.max(0, Math.min(this.size.rows, Math.floor(bottomRows)));
+    const cols = this.size.cols;
+    const gap = Math.max(0, Math.min(cols, Math.floor(topCenterGap)));
+    const gapStart = Math.floor((cols - gap) / 2);
+    const clearRight = Math.max(0, Math.min(cols, Math.floor(rightClear)));
+    const topRow = rows - 1;
+    let n = 0;
+    for (let r = 0; r < rows; r += 1) {
+      const skipCenter = gap > 0 && r === topRow;
+      const skipRight = clearRight > 0 && r < topRow;
+      for (let c = 0; c < cols; c += 1) {
+        if (skipCenter && c >= gapStart && c < gapStart + gap) {
+          continue;
+        }
+        if (skipRight && c >= cols - clearRight) {
+          continue;
+        }
+        const i = this.index(r, c);
+        if ((this.cells[i] as TileKind) === TileKind.Hole) {
+          continue;
+        }
+        this.cloud[i] = CLOUD_HIT_LAYERS;
+        n += 1;
+      }
+    }
+    if (n > 0) {
+      this.bumpVersion();
+    }
+    return n;
+  }
+
+  /** 居中铺若干行棉花（上下留白，行 0 为底），返回格数。
+   * bottomCenterGap：最底一层中间留空若干格（第四层中间 3 格不盖棉）。 */
+  public coverMiddleRowsWithCloud(midRows: number, bottomCenterGap = 0): number {
+    const total = this.size.rows;
+    const cols = this.size.cols;
+    const want = Math.max(0, Math.min(total, Math.floor(midRows)));
+    const start = Math.floor((total - want) / 2);
+    const end = start + want;
+    const gap = Math.max(0, Math.min(cols, Math.floor(bottomCenterGap)));
+    const gapStart = Math.floor((cols - gap) / 2);
+    let n = 0;
+    for (let r = start; r < end; r += 1) {
+      const skipCenter = gap > 0 && r === start;
+      for (let c = 0; c < cols; c += 1) {
+        if (skipCenter && c >= gapStart && c < gapStart + gap) {
+          continue;
+        }
+        const i = this.index(r, c);
+        if ((this.cells[i] as TileKind) === TileKind.Hole) {
+          continue;
+        }
+        this.cloud[i] = CLOUD_HIT_LAYERS;
+        n += 1;
+      }
+    }
+    if (n > 0) {
+      this.bumpVersion();
+    }
+    return n;
+  }
+
   /** 从底部铺 N 个粉球（不改云）。 */
   public placeGemsFromBottom(count: number): number {
     const want = Math.max(0, Math.floor(count));

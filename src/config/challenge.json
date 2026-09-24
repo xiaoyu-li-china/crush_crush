@@ -1,0 +1,6 @@
+{
+  "provider": "cloud",
+  "cloudFunction": "leaderboard",
+  "baseUrl": "",
+  "_comment": "体验版/正式版走微信云函数 leaderboard；本地 HTTP 调试可改 provider=http 并填 baseUrl。"
+}
