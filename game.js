@@ -11008,6 +11008,9 @@
       /** 防止 canvas.requestAnimationFrame 同步重入把模拟器卡死 */
       this.frameGuard = false;
       this.onHideBound = () => {
+        if (this.pendingBoosterShare) {
+          this.pendingBoosterShareHiddenAtMs = this.nowMs || Date.now();
+        }
         if (!isWxDesktopIdeHost()) {
           this.foreground.onHide();
         }
@@ -11053,6 +11056,8 @@
       /** 空道具转发补给：从分享页返回后发奖 */
       this.pendingBoosterShare = null;
       this.pendingBoosterShareAtMs = 0;
+      /** 有待结算转发时，onHide 记下离开时刻；未离开过不发奖 */
+      this.pendingBoosterShareHiddenAtMs = 0;
       this.boosterShareScene = null;
       this.lobbyDrag = null;
       /** 动画播放期间暂存胜负，播完再弹结算或进入粉碎 */
@@ -13934,33 +13939,38 @@
       this.boosterShareScene = channel === "friend" ? "booster_friend" : "booster_group";
       this.pendingBoosterShare = id;
       this.pendingBoosterShareAtMs = this.nowMs || Date.now();
+      this.pendingBoosterShareHiddenAtMs = 0;
       const opened = this.share.shareToFriend();
       this.boosterShareScene = null;
       if (!opened) {
+        this.pendingBoosterShare = null;
         this.pendingBoosterShareAtMs = 0;
-        this.settlePendingBoosterShare();
+        this.pendingBoosterShareHiddenAtMs = 0;
+        this.notifyUser("\u8BF7\u8F6C\u53D1\u7ED9\u597D\u53CB\uFF0C\u56DE\u6765\u540E\u9053\u5177 +1", "\u8BF7\u5148\u8F6C\u53D1");
         return;
       }
       this.notifyUser(
-        channel === "friend" ? "\u8F6C\u53D1\u7ED9\u597D\u53CB\uFF0C\u8FD4\u56DE\u5173\u5361\u540E\u91CD\u6392 +1" : "\u8F6C\u53D1\u5230\u7FA4\uFF0C\u8FD4\u56DE\u5173\u5361\u540E\u518D\u9886\u91CD\u6392 +1",
+        channel === "friend" ? "\u8F6C\u53D1\u7ED9\u597D\u53CB\uFF0C\u56DE\u6765\u540E\u91CD\u6392\u89D2\u6807 +1" : "\u8F6C\u53D1\u5230\u7FA4\uFF0C\u56DE\u6765\u540E\u518D\u9886\u91CD\u6392 +1",
         channel === "friend" ? "\u8F6C\u53D1\u597D\u53CB" : "\u8F6C\u53D1\u5230\u7FA4"
       );
-      if (isWxDesktopIdeHost()) {
-        setTimeout(() => {
-          this.settlePendingBoosterShare();
-        }, 700);
-      }
     }
     settlePendingBoosterShare() {
       const id = this.pendingBoosterShare;
       if (!id) {
         return;
       }
-      const elapsed = (this.nowMs || Date.now()) - this.pendingBoosterShareAtMs;
-      if (elapsed < 280) {
+      const now = this.nowMs || Date.now();
+      if (!this.pendingBoosterShareHiddenAtMs) {
+        return;
+      }
+      const awayMs = now - this.pendingBoosterShareHiddenAtMs;
+      const elapsed = now - this.pendingBoosterShareAtMs;
+      if (awayMs < 400 || elapsed < 500) {
         return;
       }
       this.pendingBoosterShare = null;
+      this.pendingBoosterShareAtMs = 0;
+      this.pendingBoosterShareHiddenAtMs = 0;
       const channel = this.session.getBoosterRefillChannel(id);
       if (channel !== "friend" && channel !== "group") {
         return;
@@ -13982,9 +13992,10 @@
       }
       if (id === "shuffle") {
         this.notifyUser(
-          `\u91CD\u6392 x1 \u5DF2\u5230\u8D26 \xB7 \u5269\u4F59 ${this.session.getBoosterCount("shuffle")}`,
+          `\u91CD\u6392 +1 \xB7 \u5269\u4F59 ${this.session.getBoosterCount("shuffle")}`,
           "\u91CD\u6392+1"
         );
+        this.requestPaint();
         return;
       }
       this.notifyUser(`\u6B65\u6570 +${5} \xB7 \u5269\u4F59 ${this.session.getMovesLeft()}`, "\u6B65\u6570+5");

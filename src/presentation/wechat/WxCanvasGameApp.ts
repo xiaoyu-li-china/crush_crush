@@ -481,6 +481,10 @@ export class WxCanvasGameApp {
   /** 防止 canvas.requestAnimationFrame 同步重入把模拟器卡死 */
   private frameGuard = false;
   private readonly onHideBound = (): void => {
+    // 记录离开时刻：只有真正进过分享页再回来才发奖，避免未转发完就入包。
+    if (this.pendingBoosterShare) {
+      this.pendingBoosterShareHiddenAtMs = this.nowMs || Date.now();
+    }
     if (!isWxDesktopIdeHost()) {
       this.foreground.onHide();
     }
@@ -527,6 +531,8 @@ export class WxCanvasGameApp {
   /** 空道具转发补给：从分享页返回后发奖 */
   private pendingBoosterShare: BoosterId | null = null;
   private pendingBoosterShareAtMs = 0;
+  /** 有待结算转发时，onHide 记下离开时刻；未离开过不发奖 */
+  private pendingBoosterShareHiddenAtMs = 0;
   private boosterShareScene: Extract<ShareScene, 'booster_friend' | 'booster_group'> | null =
     null;
   private lobbyDrag: {
@@ -3827,27 +3833,23 @@ export class WxCanvasGameApp {
     this.boosterShareScene = channel === 'friend' ? 'booster_friend' : 'booster_group';
     this.pendingBoosterShare = id;
     this.pendingBoosterShareAtMs = this.nowMs || Date.now();
+    this.pendingBoosterShareHiddenAtMs = 0;
     const opened = this.share.shareToFriend();
     this.boosterShareScene = null;
     if (!opened) {
-      // 无分享接口时立刻入包（开发者工具等）。
+      // 拉不起转发时绝不发奖，避免「没转发完就拿到道具 / 重排」。
+      this.pendingBoosterShare = null;
       this.pendingBoosterShareAtMs = 0;
-      this.settlePendingBoosterShare();
+      this.pendingBoosterShareHiddenAtMs = 0;
+      this.notifyUser('请转发给好友，回来后道具 +1', '请先转发');
       return;
     }
     this.notifyUser(
       channel === 'friend'
-        ? '转发给好友，返回关卡后重排 +1'
-        : '转发到群，返回关卡后再领重排 +1',
+        ? '转发给好友，回来后重排角标 +1'
+        : '转发到群，回来后再领重排 +1',
       channel === 'friend' ? '转发好友' : '转发到群',
     );
-    // 真机：从分享页返回时 onShow → settlePendingBoosterShare 入包。
-    // 开发者工具往往不触发 onShow，短延迟兜底。
-    if (isWxDesktopIdeHost()) {
-      setTimeout(() => {
-        this.settlePendingBoosterShare();
-      }, 700);
-    }
   }
 
   private settlePendingBoosterShare(): void {
@@ -3855,11 +3857,19 @@ export class WxCanvasGameApp {
     if (!id) {
       return;
     }
-    const elapsed = (this.nowMs || Date.now()) - this.pendingBoosterShareAtMs;
-    if (elapsed < 280) {
+    const now = this.nowMs || Date.now();
+    // 必须先 onHide 进过分享页，再 onShow 回来才结算。
+    if (!this.pendingBoosterShareHiddenAtMs) {
+      return;
+    }
+    const awayMs = now - this.pendingBoosterShareHiddenAtMs;
+    const elapsed = now - this.pendingBoosterShareAtMs;
+    if (awayMs < 400 || elapsed < 500) {
       return;
     }
     this.pendingBoosterShare = null;
+    this.pendingBoosterShareAtMs = 0;
+    this.pendingBoosterShareHiddenAtMs = 0;
     const channel = this.session.getBoosterRefillChannel(id);
     if (channel !== 'friend' && channel !== 'group') {
       return;
@@ -3881,11 +3891,12 @@ export class WxCanvasGameApp {
       return;
     }
     if (id === 'shuffle') {
-      // 补给只入包；真正洗牌等玩家再点重排按钮。
+      // 只入包并亮红色数量角标；不洗牌，等玩家再点重排。
       this.notifyUser(
-        `重排 x1 已到账 · 剩余 ${this.session.getBoosterCount('shuffle')}`,
+        `重排 +1 · 剩余 ${this.session.getBoosterCount('shuffle')}`,
         '重排+1',
       );
+      this.requestPaint();
       return;
     }
     this.notifyUser(`步数 +${5} · 剩余 ${this.session.getMovesLeft()}`, '步数+5');
