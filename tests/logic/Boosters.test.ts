@@ -142,7 +142,7 @@ describe('Boosters', () => {
     assert.equal(session.getBoosterCount('hammer'), 0);
   });
 
-  it('重排需转发好友→群后，看完广告才洗牌', async () => {
+  it('转发好友/群后重排入包，再点才洗牌并扣库存', async () => {
     const deps = createDeps();
     const session = new GameSession(deps);
     await session.init();
@@ -158,21 +158,23 @@ describe('Boosters', () => {
     assert.equal(session.getBoosterRefillChannel('shuffle'), 'friend');
     assert.equal(await session.watchAdForBooster('shuffle'), 'unavailable');
     assert.equal(session.claimBoosterShare('shuffle'), true);
-    assert.equal(session.getBoosterCount('shuffle'), 0);
+    assert.equal(session.getBoosterCount('shuffle'), 1);
     assert.equal(shuffled, false);
     assert.equal(session.getBoosterRefillChannel('shuffle'), 'group');
     assert.equal(session.claimBoosterShare('shuffle'), true);
-    assert.equal(session.getBoosterCount('shuffle'), 0);
+    assert.equal(session.getBoosterCount('shuffle'), 2);
     assert.equal(shuffled, false);
+    assert.equal(session.useShuffle(), true);
+    assert.equal(session.getBoosterCount('shuffle'), 1);
+    assert.equal(shuffled, true);
     assert.equal(session.getBoosterRefillChannel('shuffle'), 'ad');
     assert.equal(await session.watchAdForBooster('shuffle'), 'revived');
-    assert.equal(session.getBoosterCount('shuffle'), 0);
-    assert.equal(shuffled, true);
+    assert.equal(session.getBoosterCount('shuffle'), 2);
     assert.equal(await session.watchAdForBooster('shuffle'), 'revived');
-    assert.equal(session.getBoosterCount('shuffle'), 0);
+    assert.equal(session.getBoosterCount('shuffle'), 3);
   });
 
-  it('看广告领重排才记一次使用，转发不洗牌', async () => {
+  it('补给重排只入包，不算已使用', async () => {
     const deps = createDeps();
     const session = new GameSession(deps);
     await session.init();
@@ -187,8 +189,12 @@ describe('Boosters', () => {
     assert.equal(session.claimBoosterShare('shuffle'), true);
     assert.equal(session.claimBoosterShare('shuffle'), true);
     assert.deepEqual(used, []);
+    assert.equal(session.getBoosterCount('shuffle'), 2);
     assert.equal(await session.watchAdForBooster('shuffle'), 'revived');
+    assert.deepEqual(used, []);
+    assert.equal(session.getBoosterCount('shuffle'), 3);
+    assert.equal(session.useShuffle(), true);
     assert.deepEqual(used, ['shuffle']);
-    assert.equal(session.getBoosterCount('shuffle'), 0);
+    assert.equal(session.getBoosterCount('shuffle'), 2);
   });
 });
