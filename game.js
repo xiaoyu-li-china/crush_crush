@@ -11026,7 +11026,9 @@
         if (inviteToast) {
           this.notifyUser(inviteToast, "\u9524\u5B50\u5230\u8D26");
         }
-        this.trySettleBoosterShareAfterReturn();
+        if (!isWxDesktopIdeHost()) {
+          this.trySettleBoosterShareAfterReturn();
+        }
       };
       this.onAudioInterruptionBeginBound = () => {
         this.session.suspendForBackground();
@@ -11055,9 +11057,14 @@
       this.lobbySwipeHintDismissed = false;
       /** 空道具转发补给：从分享页返回后发奖 */
       this.pendingBoosterShare = null;
+      /** 墙钟时间，避免 nowMs 暂停/重置导致误判已超时 */
       this.pendingBoosterShareAtMs = 0;
       /** 有待结算转发时，onHide 记下离开时刻；未离开过不发奖 */
       this.pendingBoosterShareHiddenAtMs = 0;
+      /** 已从分享返回、等待玩家再点道具领取（防止面板未关就入包） */
+      this.boosterShareClaimReady = null;
+      /** 开发者工具领取弹窗进行中，避免重复弹出 */
+      this.boosterShareModalOpen = false;
       this.boosterShareScene = null;
       this.lobbyDrag = null;
       /** 动画播放期间暂存胜负，播完再弹结算或进入粉碎 */
@@ -13921,6 +13928,10 @@
       return "extraMoves";
     }
     async requestBoosterRefill(id) {
+      if (this.boosterShareClaimReady === id) {
+        this.grantBoosterShareClaim(id);
+        return;
+      }
       const channel = this.session.getBoosterRefillChannel(id);
       if (channel === "none") {
         this.notifyUser("\u73B0\u5728\u4E0D\u80FD\u9886\u9053\u5177", "\u6682\u65F6\u4E0D\u80FD\u9886");
@@ -13939,51 +13950,109 @@
       }
       this.boosterShareScene = channel === "friend" ? "booster_friend" : "booster_group";
       this.pendingBoosterShare = id;
-      this.pendingBoosterShareAtMs = this.nowMs || Date.now();
+      this.pendingBoosterShareAtMs = Date.now();
       this.pendingBoosterShareHiddenAtMs = 0;
+      this.boosterShareClaimReady = null;
       const opened = this.share.shareToFriend();
       this.boosterShareScene = null;
       if (!opened) {
-        this.pendingBoosterShare = null;
-        this.pendingBoosterShareAtMs = 0;
-        this.pendingBoosterShareHiddenAtMs = 0;
-        this.notifyUser("\u8BF7\u8F6C\u53D1\u7ED9\u597D\u53CB\uFF0C\u56DE\u6765\u540E\u9053\u5177 +1", "\u8BF7\u5148\u8F6C\u53D1");
+        this.clearPendingBoosterShare();
+        this.notifyUser("\u8BF7\u8F6C\u53D1\u7ED9\u597D\u53CB\u540E\u518D\u9886\u53D6", "\u8BF7\u5148\u8F6C\u53D1");
         return;
       }
       this.notifyUser(
-        channel === "friend" ? "\u8BF7\u70B9\u300C\u53D1\u9001\u300D\uFF0C\u56DE\u6765\u540E\u91CD\u6392\u51FA\u73B0\u7EA2\u8272 1" : "\u8BF7\u70B9\u300C\u53D1\u9001\u300D\uFF0C\u56DE\u6765\u540E\u518D\u9886\u91CD\u6392\u7EA2\u8272 1",
+        channel === "friend" ? "\u8BF7\u70B9\u300C\u53D1\u9001\u300D\uFF0C\u5173\u95ED\u540E\u518D\u9886\u53D6\u7EA2\u8272 1" : "\u8BF7\u70B9\u300C\u53D1\u9001\u300D\uFF0C\u5173\u95ED\u540E\u518D\u9886\u53D6\u7EA2\u8272 1",
         channel === "friend" ? "\u8F6C\u53D1\u597D\u53CB" : "\u8F6C\u53D1\u5230\u7FA4"
       );
     }
+    clearPendingBoosterShare() {
+      this.pendingBoosterShare = null;
+      this.pendingBoosterShareAtMs = 0;
+      this.pendingBoosterShareHiddenAtMs = 0;
+      this.boosterShareClaimReady = null;
+      this.boosterShareModalOpen = false;
+    }
+    /** 开发者工具：分享面板关掉并点到游戏后，才弹出领取确认。 */
+    promptDevtoolsBoosterClaim(id) {
+      return new Promise((resolve) => {
+        if (typeof wx.showModal !== "function") {
+          this.grantBoosterShareClaim(id);
+          resolve();
+          return;
+        }
+        try {
+          wx.showModal({
+            title: id === "shuffle" ? "\u9886\u53D6\u91CD\u6392" : "\u9886\u53D6\u9053\u5177",
+            content: "\u82E5\u5DF2\u70B9\u5206\u4EAB\u9762\u677F\u300C\u53D1\u9001\u300D\uFF0C\u8BF7\u70B9\u300C\u9886\u53D6\u300D\u3002\n\u91CD\u6392\u4F1A\u50CF\u9524\u5B50\u4E00\u6837\u51FA\u73B0\u7EA2\u8272 1\u3002",
+            confirmText: "\u9886\u53D6",
+            cancelText: "\u672A\u8F6C\u53D1",
+            success: (res) => {
+              if (res.confirm && (this.pendingBoosterShare === id || this.boosterShareClaimReady === id)) {
+                this.grantBoosterShareClaim(id);
+              } else {
+                this.clearPendingBoosterShare();
+                this.notifyUser("\u672A\u9886\u53D6\uFF0C\u8F6C\u53D1\u540E\u53EF\u518D\u8BD5", "\u672A\u9886\u53D6");
+              }
+              resolve();
+            },
+            fail: () => {
+              this.grantBoosterShareClaim(id);
+              resolve();
+            }
+          });
+        } catch (e) {
+          this.grantBoosterShareClaim(id);
+          resolve();
+        }
+      });
+    }
     /**
-     * 分享面板关掉并回到游戏后结算。
-     * - 真机：onShow
-     * - 开发者工具：分享层挡住触摸，关掉后点到画布才会进这里（绝不用定时器抢先发奖）
+     * 从分享返回后的结算入口。
+     * 分享面板开着时点不到画布，因此开发者工具里「点到游戏」= 面板已关。
      */
     trySettleBoosterShareAfterReturn() {
-      this.settlePendingBoosterShare();
-    }
-    settlePendingBoosterShare() {
       const id = this.pendingBoosterShare;
       if (!id) {
         return;
       }
-      const now = this.nowMs || Date.now();
-      const elapsed = now - this.pendingBoosterShareAtMs;
+      const elapsed = Date.now() - this.pendingBoosterShareAtMs;
       if (elapsed < 900) {
         return;
       }
-      this.pendingBoosterShare = null;
-      this.pendingBoosterShareAtMs = 0;
-      this.pendingBoosterShareHiddenAtMs = 0;
+      if (isWxDesktopIdeHost()) {
+        if (this.boosterShareModalOpen) {
+          return;
+        }
+        this.boosterShareModalOpen = true;
+        this.boosterShareClaimReady = id;
+        void this.promptDevtoolsBoosterClaim(id).finally(() => {
+          this.boosterShareModalOpen = false;
+        });
+        return;
+      }
+      if (this.boosterShareClaimReady === id) {
+        return;
+      }
+      this.boosterShareClaimReady = id;
+      this.notifyUser(
+        id === "shuffle" ? "\u8F6C\u53D1\u5B8C\u6210\uFF0C\u518D\u70B9\u91CD\u6392\u9886\u53D6\u7EA2\u8272 1" : "\u8F6C\u53D1\u5B8C\u6210\uFF0C\u518D\u70B9\u9053\u5177\u9886\u53D6",
+        "\u518D\u70B9\u9886\u53D6"
+      );
+      this.requestPaint();
+    }
+    grantBoosterShareClaim(id) {
+      if (this.pendingBoosterShare !== id && this.boosterShareClaimReady !== id) {
+        return;
+      }
       const channel = this.session.getBoosterRefillChannel(id);
+      this.clearPendingBoosterShare();
       if (channel !== "friend" && channel !== "group") {
         return;
       }
       if (!this.session.claimBoosterShare(id)) {
         return;
       }
-      this.inputMuteUntilMs = Math.max(this.inputMuteUntilMs, now + 480);
+      this.inputMuteUntilMs = Math.max(this.inputMuteUntilMs, (this.nowMs || Date.now()) + 480);
       this.onBoosterRefillGranted(id, channel);
     }
     onBoosterRefillGranted(id, channel) {
