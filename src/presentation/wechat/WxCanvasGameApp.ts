@@ -328,7 +328,7 @@ const HOWTO_LINES: ReadonlyArray<{ tag: string; text: string }> = [
   { tag: '伙伴', text: '雪人、企鹅藏在冰下，各占多格。占地冰块全碎后才露出并收获；雪人露出时会震碎周围一圈冰。' },
   { tag: '大招', text: '四连或 L/T 形出闪光（范围爆炸）；五连出超级猫头鹰（清同色）。两枚闪光互滑可同时引爆。' },
   { tag: '粉碎', text: '通关后进入限时点击粉碎加分，可看广告加时。总分够高时还可选清洁小游戏（不加主线分）。' },
-  { tag: '道具', text: '锤子砸一格、重排洗盘、加步 +5，开局不送。库存空时：先转发好友 → 再转发群 → 再看广告领取；重排入包后需再点一次才洗牌。' },
+  { tag: '道具', text: '锤子砸一格、重排洗盘、加步 +5，开局不送。库存空时：转发好友返回 +1 → 转发群返回 +1 → 再看广告；重排入包后需再点一次才洗牌。' },
   { tag: '奖励', text: '每日登录送锤子；当日通关满 3 关领重排；某次剩 ≥6 步通关送加步。道具可带入下关，各最多 9 个。' },
   { tag: '邀请', text: '分享给没玩过的好友，对方通关后双方各得 1 锤子。' },
 ];
@@ -3830,17 +3830,24 @@ export class WxCanvasGameApp {
     const opened = this.share.shareToFriend();
     this.boosterShareScene = null;
     if (!opened) {
+      // 无分享接口时立刻入包（开发者工具等）。
       this.pendingBoosterShareAtMs = 0;
       this.settlePendingBoosterShare();
       return;
     }
     this.notifyUser(
-      channel === 'friend' ? '转发给 1 个好友就能领' : '转发到群就能再领 1 个',
+      channel === 'friend'
+        ? '转发给好友，返回关卡后重排 +1'
+        : '转发到群，返回关卡后再领重排 +1',
       channel === 'friend' ? '转发好友' : '转发到群',
     );
-    setTimeout(() => {
-      this.settlePendingBoosterShare();
-    }, 700);
+    // 真机：从分享页返回时 onShow → settlePendingBoosterShare 入包。
+    // 开发者工具往往不触发 onShow，短延迟兜底。
+    if (isWxDesktopIdeHost()) {
+      setTimeout(() => {
+        this.settlePendingBoosterShare();
+      }, 700);
+    }
   }
 
   private settlePendingBoosterShare(): void {

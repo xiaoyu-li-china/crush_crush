@@ -1051,10 +1051,10 @@ export class GameSession {
       return;
     }
     if (id === 'shuffle') {
+      // 只入包；洗牌音效留给玩家点击 useShuffle。
       this.boosters.add('shuffle', 1);
       this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
       void this.persistBoosters();
-      this.playSfx('sfx_shuffle');
       return;
     }
     this.boosters.add(id, 1);
