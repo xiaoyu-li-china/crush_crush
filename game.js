@@ -11008,7 +11008,7 @@
       /** 防止 canvas.requestAnimationFrame 同步重入把模拟器卡死 */
       this.frameGuard = false;
       this.onHideBound = () => {
-        if (this.pendingBoosterShare) {
+        if (this.pendingBoosterShare && !this.pendingBoosterShareHiddenAtMs) {
           this.pendingBoosterShareHiddenAtMs = this.nowMs || Date.now();
         }
         if (!isWxDesktopIdeHost()) {
@@ -13953,6 +13953,11 @@
         channel === "friend" ? "\u8F6C\u53D1\u7ED9\u597D\u53CB\uFF0C\u56DE\u6765\u540E\u91CD\u6392\u89D2\u6807 +1" : "\u8F6C\u53D1\u5230\u7FA4\uFF0C\u56DE\u6765\u540E\u518D\u9886\u91CD\u6392 +1",
         channel === "friend" ? "\u8F6C\u53D1\u597D\u53CB" : "\u8F6C\u53D1\u5230\u7FA4"
       );
+      if (isWxDesktopIdeHost()) {
+        setTimeout(() => {
+          this.settlePendingBoosterShare();
+        }, 1200);
+      }
     }
     settlePendingBoosterShare() {
       const id = this.pendingBoosterShare;
@@ -13960,12 +13965,8 @@
         return;
       }
       const now = this.nowMs || Date.now();
-      if (!this.pendingBoosterShareHiddenAtMs) {
-        return;
-      }
-      const awayMs = now - this.pendingBoosterShareHiddenAtMs;
       const elapsed = now - this.pendingBoosterShareAtMs;
-      if (awayMs < 400 || elapsed < 500) {
+      if (elapsed < 900) {
         return;
       }
       this.pendingBoosterShare = null;

@@ -481,8 +481,8 @@ export class WxCanvasGameApp {
   /** 防止 canvas.requestAnimationFrame 同步重入把模拟器卡死 */
   private frameGuard = false;
   private readonly onHideBound = (): void => {
-    // 记录离开时刻：只有真正进过分享页再回来才发奖，避免未转发完就入包。
-    if (this.pendingBoosterShare) {
+    // 可选信号：进过分享页。结算以 onShow + 停留时长为准（部分环境分享不触发 onHide）。
+    if (this.pendingBoosterShare && !this.pendingBoosterShareHiddenAtMs) {
       this.pendingBoosterShareHiddenAtMs = this.nowMs || Date.now();
     }
     if (!isWxDesktopIdeHost()) {
@@ -3850,6 +3850,12 @@ export class WxCanvasGameApp {
         : '转发到群，回来后再领重排 +1',
       channel === 'friend' ? '转发好友' : '转发到群',
     );
+    // 开发者工具常不触发 onShow：分享拉起成功后延迟结算（仍受 900ms 门槛约束）。
+    if (isWxDesktopIdeHost()) {
+      setTimeout(() => {
+        this.settlePendingBoosterShare();
+      }, 1200);
+    }
   }
 
   private settlePendingBoosterShare(): void {
@@ -3858,13 +3864,9 @@ export class WxCanvasGameApp {
       return;
     }
     const now = this.nowMs || Date.now();
-    // 必须先 onHide 进过分享页，再 onShow 回来才结算。
-    if (!this.pendingBoosterShareHiddenAtMs) {
-      return;
-    }
-    const awayMs = now - this.pendingBoosterShareHiddenAtMs;
     const elapsed = now - this.pendingBoosterShareAtMs;
-    if (awayMs < 400 || elapsed < 500) {
+    // 刚点开就闪回的 onShow 不发奖；转发完成后返回（或工具里延迟）才会入包出红角标。
+    if (elapsed < 900) {
       return;
     }
     this.pendingBoosterShare = null;
