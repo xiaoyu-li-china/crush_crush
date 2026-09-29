@@ -500,7 +500,7 @@ export class WxCanvasGameApp {
     if (inviteToast) {
       this.notifyUser(inviteToast, '锤子到账');
     }
-    this.settlePendingBoosterShare();
+    this.trySettleBoosterShareAfterReturn();
   };
   private readonly onAudioInterruptionBeginBound = (): void => {
     this.session.suspendForBackground();
@@ -2330,6 +2330,8 @@ export class WxCanvasGameApp {
   private handleTouchStart(e: WxTouchEvent): void {
     this.markUserActivity();
     this.tryStartBgm();
+    // 开发者工具：分享面板关掉后点到游戏，才结算入包（面板开着时触摸到不了这里）。
+    this.trySettleBoosterShareAfterReturn();
     if (this.isInputMuted()) {
       return;
     }
@@ -3846,16 +3848,20 @@ export class WxCanvasGameApp {
     }
     this.notifyUser(
       channel === 'friend'
-        ? '转发给好友，回来后重排角标 +1'
-        : '转发到群，回来后再领重排 +1',
+        ? '请点「发送」，回来后重排出现红色 1'
+        : '请点「发送」，回来后再领重排红色 1',
       channel === 'friend' ? '转发好友' : '转发到群',
     );
-    // 开发者工具常不触发 onShow：分享拉起成功后延迟结算（仍受 900ms 门槛约束）。
-    if (isWxDesktopIdeHost()) {
-      setTimeout(() => {
-        this.settlePendingBoosterShare();
-      }, 1200);
-    }
+    // 注意：绝不能在分享面板还开着时用 setTimeout 发奖（开发者工具会重现「未发送就出现群角标」）。
+  }
+
+  /**
+   * 分享面板关掉并回到游戏后结算。
+   * - 真机：onShow
+   * - 开发者工具：分享层挡住触摸，关掉后点到画布才会进这里（绝不用定时器抢先发奖）
+   */
+  private trySettleBoosterShareAfterReturn(): void {
+    this.settlePendingBoosterShare();
   }
 
   private settlePendingBoosterShare(): void {
@@ -3865,7 +3871,7 @@ export class WxCanvasGameApp {
     }
     const now = this.nowMs || Date.now();
     const elapsed = now - this.pendingBoosterShareAtMs;
-    // 刚点开就闪回的 onShow 不发奖；转发完成后返回（或工具里延迟）才会入包出红角标。
+    // 分享面板还开着 / 刚点开就回调：不发奖。
     if (elapsed < 900) {
       return;
     }
@@ -3879,6 +3885,8 @@ export class WxCanvasGameApp {
     if (!this.session.claimBoosterShare(id)) {
       return;
     }
+    // 避免「到账的同一下」立刻把重排用掉，红角标还没看清就变成「群」。
+    this.inputMuteUntilMs = Math.max(this.inputMuteUntilMs, now + 480);
     this.onBoosterRefillGranted(id, channel);
   }
 

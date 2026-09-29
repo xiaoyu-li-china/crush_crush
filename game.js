@@ -11026,7 +11026,7 @@
         if (inviteToast) {
           this.notifyUser(inviteToast, "\u9524\u5B50\u5230\u8D26");
         }
-        this.settlePendingBoosterShare();
+        this.trySettleBoosterShareAfterReturn();
       };
       this.onAudioInterruptionBeginBound = () => {
         this.session.suspendForBackground();
@@ -12640,6 +12640,7 @@
     handleTouchStart(e) {
       this.markUserActivity();
       this.tryStartBgm();
+      this.trySettleBoosterShareAfterReturn();
       if (this.isInputMuted()) {
         return;
       }
@@ -13950,14 +13951,17 @@
         return;
       }
       this.notifyUser(
-        channel === "friend" ? "\u8F6C\u53D1\u7ED9\u597D\u53CB\uFF0C\u56DE\u6765\u540E\u91CD\u6392\u89D2\u6807 +1" : "\u8F6C\u53D1\u5230\u7FA4\uFF0C\u56DE\u6765\u540E\u518D\u9886\u91CD\u6392 +1",
+        channel === "friend" ? "\u8BF7\u70B9\u300C\u53D1\u9001\u300D\uFF0C\u56DE\u6765\u540E\u91CD\u6392\u51FA\u73B0\u7EA2\u8272 1" : "\u8BF7\u70B9\u300C\u53D1\u9001\u300D\uFF0C\u56DE\u6765\u540E\u518D\u9886\u91CD\u6392\u7EA2\u8272 1",
         channel === "friend" ? "\u8F6C\u53D1\u597D\u53CB" : "\u8F6C\u53D1\u5230\u7FA4"
       );
-      if (isWxDesktopIdeHost()) {
-        setTimeout(() => {
-          this.settlePendingBoosterShare();
-        }, 1200);
-      }
+    }
+    /**
+     * 分享面板关掉并回到游戏后结算。
+     * - 真机：onShow
+     * - 开发者工具：分享层挡住触摸，关掉后点到画布才会进这里（绝不用定时器抢先发奖）
+     */
+    trySettleBoosterShareAfterReturn() {
+      this.settlePendingBoosterShare();
     }
     settlePendingBoosterShare() {
       const id = this.pendingBoosterShare;
@@ -13979,6 +13983,7 @@
       if (!this.session.claimBoosterShare(id)) {
         return;
       }
+      this.inputMuteUntilMs = Math.max(this.inputMuteUntilMs, now + 480);
       this.onBoosterRefillGranted(id, channel);
     }
     onBoosterRefillGranted(id, channel) {
