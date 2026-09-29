@@ -142,7 +142,7 @@ describe('Boosters', () => {
     assert.equal(session.getBoosterCount('hammer'), 0);
   });
 
-  it('看广告获得重排后可洗牌', async () => {
+  it('重排需转发好友→群后，看完广告才洗牌', async () => {
     const deps = createDeps();
     const session = new GameSession(deps);
     await session.init();
@@ -158,7 +158,13 @@ describe('Boosters', () => {
     assert.equal(session.getBoosterRefillChannel('shuffle'), 'friend');
     assert.equal(await session.watchAdForBooster('shuffle'), 'unavailable');
     assert.equal(session.claimBoosterShare('shuffle'), true);
+    assert.equal(session.getBoosterCount('shuffle'), 0);
+    assert.equal(shuffled, false);
+    assert.equal(session.getBoosterRefillChannel('shuffle'), 'group');
     assert.equal(session.claimBoosterShare('shuffle'), true);
+    assert.equal(session.getBoosterCount('shuffle'), 0);
+    assert.equal(shuffled, false);
+    assert.equal(session.getBoosterRefillChannel('shuffle'), 'ad');
     assert.equal(await session.watchAdForBooster('shuffle'), 'revived');
     assert.equal(session.getBoosterCount('shuffle'), 0);
     assert.equal(shuffled, true);
@@ -166,7 +172,7 @@ describe('Boosters', () => {
     assert.equal(session.getBoosterCount('shuffle'), 0);
   });
 
-  it('看广告领重排不会当成已经洗过牌', async () => {
+  it('看广告领重排才记一次使用，转发不洗牌', async () => {
     const deps = createDeps();
     const session = new GameSession(deps);
     await session.init();
@@ -180,8 +186,9 @@ describe('Boosters', () => {
     });
     assert.equal(session.claimBoosterShare('shuffle'), true);
     assert.equal(session.claimBoosterShare('shuffle'), true);
+    assert.deepEqual(used, []);
     assert.equal(await session.watchAdForBooster('shuffle'), 'revived');
-    assert.deepEqual(used, ['shuffle', 'shuffle', 'shuffle']);
+    assert.deepEqual(used, ['shuffle']);
     assert.equal(session.getBoosterCount('shuffle'), 0);
   });
 });

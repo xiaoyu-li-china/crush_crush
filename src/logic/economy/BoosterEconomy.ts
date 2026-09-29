@@ -1,6 +1,7 @@
 /**
  * 道具获取：库存跨关保存；空库存按阶梯补给。
  * 每个道具每天：先转发 1 个好友 → 再转发 1 个群 → 之后看广告。
+ * 重排：好友/群只推进阶梯，看完广告才发奖；锤子/加步仍可在转发后立刻到账。
  */
 import type { BoosterId, BoosterStock } from './BoosterInventory';
 

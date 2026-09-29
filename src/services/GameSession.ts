@@ -978,14 +978,18 @@ export class GameSession {
   }
 
   /**
-   * 转发好友 / 群成功后发 1 个道具。每个道具每天各允许 1 次。
+   * 转发好友 / 群成功：锤子/加步立刻发 1 个；重排只推进阶梯，需再看广告才发奖。
+   * 每个道具每天好友、群各允许 1 次。
    */
   public claimBoosterShare(id: BoosterId): boolean {
     const channel = this.getBoosterRefillChannel(id);
     if (channel !== 'friend' && channel !== 'group') {
       return false;
     }
-    this.applyBoosterRefill(id, id === 'shuffle');
+    // 重排必须走完好友→群→广告，转发本身不发奖、不洗牌。
+    if (id !== 'shuffle') {
+      this.applyBoosterRefill(id, false);
+    }
     this.daily = { ...this.daily, ...markBoosterShare(this.daily, id, channel) };
     void this.persistDaily();
     this.deps.analytics.track('booster_share', {
@@ -1008,7 +1012,7 @@ export class GameSession {
   }
 
   /**
-   * 库存为 0 且已用完当日好友/群转发后看广告：锤子/重排 +1；加步立刻 +5。
+   * 库存为 0 且已用完当日好友/群转发后看广告：锤子/重排 +1（重排立刻洗牌）；加步立刻 +5。
    */
   public async watchAdForBooster(id: BoosterId): Promise<ReviveAdResult> {
     if (this.getBoosterRefillChannel(id) !== 'ad') {

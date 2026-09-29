@@ -328,7 +328,7 @@ const HOWTO_LINES: ReadonlyArray<{ tag: string; text: string }> = [
   { tag: '伙伴', text: '雪人、企鹅藏在冰下，各占多格。占地冰块全碎后才露出并收获；雪人露出时会震碎周围一圈冰。' },
   { tag: '大招', text: '四连或 L/T 形出闪光（范围爆炸）；五连出超级猫头鹰（清同色）。两枚闪光互滑可同时引爆。' },
   { tag: '粉碎', text: '通关后进入限时点击粉碎加分，可看广告加时。总分够高时还可选清洁小游戏（不加主线分）。' },
-  { tag: '道具', text: '锤子砸一格、重排洗盘、加步 +5，开局不送。库存空时：先转发好友 → 再转发群 → 再看广告领取。' },
+  { tag: '道具', text: '锤子砸一格、重排洗盘、加步 +5，开局不送。库存空时：先转发好友 → 再转发群 → 再看广告；重排必须看完广告才到手。' },
   { tag: '奖励', text: '每日登录送锤子；当日通关满 3 关领重排；某次剩 ≥6 步通关送加步。道具可带入下关，各最多 9 个。' },
   { tag: '邀请', text: '分享给没玩过的好友，对方通关后双方各得 1 锤子。' },
 ];
@@ -3835,12 +3835,21 @@ export class WxCanvasGameApp {
       return;
     }
     this.notifyUser(
-      channel === 'friend' ? '转发给 1 个好友就能领' : '转发到群就能再领 1 个',
+      this.boosterSharePrompt(id, channel),
       channel === 'friend' ? '转发好友' : '转发到群',
     );
     setTimeout(() => {
       this.settlePendingBoosterShare();
     }, 700);
+  }
+
+  private boosterSharePrompt(id: BoosterId, channel: 'friend' | 'group'): string {
+    if (id === 'shuffle') {
+      return channel === 'friend'
+        ? '先转发给 1 个好友，再转发群并看广告才能重排'
+        : '再转发到群，然后看广告才能重排';
+    }
+    return channel === 'friend' ? '转发给 1 个好友就能领' : '转发到群就能再领 1 个';
   }
 
   private settlePendingBoosterShare(): void {
@@ -3858,6 +3867,15 @@ export class WxCanvasGameApp {
       return;
     }
     if (!this.session.claimBoosterShare(id)) {
+      return;
+    }
+    // 重排：转发只推进阶梯，提示下一步；真正洗牌等看完广告。
+    if (id === 'shuffle') {
+      this.notifyUser(
+        channel === 'friend' ? '已转发好友，再转发到群' : '已转发到群，再看广告领取重排',
+        channel === 'friend' ? '再转发到群' : '再看广告',
+      );
+      this.requestPaint();
       return;
     }
     this.onBoosterRefillGranted(id, channel);

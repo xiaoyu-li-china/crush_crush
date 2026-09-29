@@ -6694,7 +6694,8 @@
       return boosterRefillChannel(this.daily, id);
     }
     /**
-     * 转发好友 / 群成功后发 1 个道具。每个道具每天各允许 1 次。
+     * 转发好友 / 群成功：锤子/加步立刻发 1 个；重排只推进阶梯，需再看广告才发奖。
+     * 每个道具每天好友、群各允许 1 次。
      */
     claimBoosterShare(id) {
       var _a, _b;
@@ -6702,7 +6703,9 @@
       if (channel !== "friend" && channel !== "group") {
         return false;
       }
-      this.applyBoosterRefill(id, id === "shuffle");
+      if (id !== "shuffle") {
+        this.applyBoosterRefill(id, false);
+      }
       this.daily = { ...this.daily, ...markBoosterShare(this.daily, id, channel) };
       void this.persistDaily();
       this.deps.analytics.track("booster_share", {
@@ -6723,7 +6726,7 @@
       return true;
     }
     /**
-     * 库存为 0 且已用完当日好友/群转发后看广告：锤子/重排 +1；加步立刻 +5。
+     * 库存为 0 且已用完当日好友/群转发后看广告：锤子/重排 +1（重排立刻洗牌）；加步立刻 +5。
      */
     async watchAdForBooster(id) {
       if (this.getBoosterRefillChannel(id) !== "ad") {
@@ -10919,7 +10922,7 @@
     { tag: "\u4F19\u4F34", text: "\u96EA\u4EBA\u3001\u4F01\u9E45\u85CF\u5728\u51B0\u4E0B\uFF0C\u5404\u5360\u591A\u683C\u3002\u5360\u5730\u51B0\u5757\u5168\u788E\u540E\u624D\u9732\u51FA\u5E76\u6536\u83B7\uFF1B\u96EA\u4EBA\u9732\u51FA\u65F6\u4F1A\u9707\u788E\u5468\u56F4\u4E00\u5708\u51B0\u3002" },
     { tag: "\u5927\u62DB", text: "\u56DB\u8FDE\u6216 L/T \u5F62\u51FA\u95EA\u5149\uFF08\u8303\u56F4\u7206\u70B8\uFF09\uFF1B\u4E94\u8FDE\u51FA\u8D85\u7EA7\u732B\u5934\u9E70\uFF08\u6E05\u540C\u8272\uFF09\u3002\u4E24\u679A\u95EA\u5149\u4E92\u6ED1\u53EF\u540C\u65F6\u5F15\u7206\u3002" },
     { tag: "\u7C89\u788E", text: "\u901A\u5173\u540E\u8FDB\u5165\u9650\u65F6\u70B9\u51FB\u7C89\u788E\u52A0\u5206\uFF0C\u53EF\u770B\u5E7F\u544A\u52A0\u65F6\u3002\u603B\u5206\u591F\u9AD8\u65F6\u8FD8\u53EF\u9009\u6E05\u6D01\u5C0F\u6E38\u620F\uFF08\u4E0D\u52A0\u4E3B\u7EBF\u5206\uFF09\u3002" },
-    { tag: "\u9053\u5177", text: "\u9524\u5B50\u7838\u4E00\u683C\u3001\u91CD\u6392\u6D17\u76D8\u3001\u52A0\u6B65 +5\uFF0C\u5F00\u5C40\u4E0D\u9001\u3002\u5E93\u5B58\u7A7A\u65F6\uFF1A\u5148\u8F6C\u53D1\u597D\u53CB \u2192 \u518D\u8F6C\u53D1\u7FA4 \u2192 \u518D\u770B\u5E7F\u544A\u9886\u53D6\u3002" },
+    { tag: "\u9053\u5177", text: "\u9524\u5B50\u7838\u4E00\u683C\u3001\u91CD\u6392\u6D17\u76D8\u3001\u52A0\u6B65 +5\uFF0C\u5F00\u5C40\u4E0D\u9001\u3002\u5E93\u5B58\u7A7A\u65F6\uFF1A\u5148\u8F6C\u53D1\u597D\u53CB \u2192 \u518D\u8F6C\u53D1\u7FA4 \u2192 \u518D\u770B\u5E7F\u544A\uFF1B\u91CD\u6392\u5FC5\u987B\u770B\u5B8C\u5E7F\u544A\u624D\u5230\u624B\u3002" },
     { tag: "\u5956\u52B1", text: "\u6BCF\u65E5\u767B\u5F55\u9001\u9524\u5B50\uFF1B\u5F53\u65E5\u901A\u5173\u6EE1 3 \u5173\u9886\u91CD\u6392\uFF1B\u67D0\u6B21\u5269 \u22656 \u6B65\u901A\u5173\u9001\u52A0\u6B65\u3002\u9053\u5177\u53EF\u5E26\u5165\u4E0B\u5173\uFF0C\u5404\u6700\u591A 9 \u4E2A\u3002" },
     { tag: "\u9080\u8BF7", text: "\u5206\u4EAB\u7ED9\u6CA1\u73A9\u8FC7\u7684\u597D\u53CB\uFF0C\u5BF9\u65B9\u901A\u5173\u540E\u53CC\u65B9\u5404\u5F97 1 \u9524\u5B50\u3002" }
   ];
@@ -13945,12 +13948,18 @@
         return;
       }
       this.notifyUser(
-        channel === "friend" ? "\u8F6C\u53D1\u7ED9 1 \u4E2A\u597D\u53CB\u5C31\u80FD\u9886" : "\u8F6C\u53D1\u5230\u7FA4\u5C31\u80FD\u518D\u9886 1 \u4E2A",
+        this.boosterSharePrompt(id, channel),
         channel === "friend" ? "\u8F6C\u53D1\u597D\u53CB" : "\u8F6C\u53D1\u5230\u7FA4"
       );
       setTimeout(() => {
         this.settlePendingBoosterShare();
       }, 700);
+    }
+    boosterSharePrompt(id, channel) {
+      if (id === "shuffle") {
+        return channel === "friend" ? "\u5148\u8F6C\u53D1\u7ED9 1 \u4E2A\u597D\u53CB\uFF0C\u518D\u8F6C\u53D1\u7FA4\u5E76\u770B\u5E7F\u544A\u624D\u80FD\u91CD\u6392" : "\u518D\u8F6C\u53D1\u5230\u7FA4\uFF0C\u7136\u540E\u770B\u5E7F\u544A\u624D\u80FD\u91CD\u6392";
+      }
+      return channel === "friend" ? "\u8F6C\u53D1\u7ED9 1 \u4E2A\u597D\u53CB\u5C31\u80FD\u9886" : "\u8F6C\u53D1\u5230\u7FA4\u5C31\u80FD\u518D\u9886 1 \u4E2A";
     }
     settlePendingBoosterShare() {
       const id = this.pendingBoosterShare;
@@ -13967,6 +13976,14 @@
         return;
       }
       if (!this.session.claimBoosterShare(id)) {
+        return;
+      }
+      if (id === "shuffle") {
+        this.notifyUser(
+          channel === "friend" ? "\u5DF2\u8F6C\u53D1\u597D\u53CB\uFF0C\u518D\u8F6C\u53D1\u5230\u7FA4" : "\u5DF2\u8F6C\u53D1\u5230\u7FA4\uFF0C\u518D\u770B\u5E7F\u544A\u9886\u53D6\u91CD\u6392",
+          channel === "friend" ? "\u518D\u8F6C\u53D1\u5230\u7FA4" : "\u518D\u770B\u5E7F\u544A"
+        );
+        this.requestPaint();
         return;
       }
       this.onBoosterRefillGranted(id, channel);
