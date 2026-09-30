@@ -1406,10 +1406,12 @@
       this.pendingPlay = /* @__PURE__ */ new WeakSet();
       this.bgm = null;
       this.bgmWanted = false;
-      this.bgmVolume = 0.42;
+      this.bgmVolume = 0.38;
       this.innerAudioOptionApplied = false;
       this.bgmKeepAliveTimer = 0;
       this.lastBgmPlayMs = 0;
+      /** BGM 已成功 kick 过；paused 读不到时禁止被音效保活反复 play 造成爆音 */
+      this.bgmPlayingAssumed = false;
     }
     play(clipId, options) {
       var _a;
@@ -1427,11 +1429,12 @@
       this.applyInnerAudioOption();
       const ctx = this.acquire(src);
       ctx.loop = false;
-      ctx.volume = (_a = options == null ? void 0 : options.volume) != null ? _a : 0.85;
+      ctx.volume = (_a = options == null ? void 0 : options.volume) != null ? _a : 0.8;
       this.startSfx(ctx);
       this.scheduleBgmKeepAlive();
     }
     suspendForBackground() {
+      this.bgmPlayingAssumed = false;
       if (!this.bgm) {
         return;
       }
@@ -1515,6 +1518,7 @@
             } catch (e2) {
             }
           }
+          this.bgmPlayingAssumed = false;
         }
         return;
       }
@@ -1580,11 +1584,18 @@
       try {
         this.bgm.play();
         this.lastBgmPlayMs = Date.now();
+        this.bgmPlayingAssumed = true;
       } catch (e) {
       }
     }
     scheduleBgmKeepAlive() {
       if (!this.bgmWanted || this.muted) {
+        return;
+      }
+      if (this.bgm && this.bgm.paused === false) {
+        return;
+      }
+      if (this.bgm && this.bgm.paused !== true && this.bgmPlayingAssumed) {
         return;
       }
       if (this.bgmKeepAliveTimer) {
@@ -1593,7 +1604,7 @@
       this.bgmKeepAliveTimer = setTimeout(() => {
         this.bgmKeepAliveTimer = 0;
         this.resumeBgm();
-      }, 80);
+      }, 120);
     }
     resumeBgm() {
       if (!this.bgmWanted || this.muted) {
@@ -1610,26 +1621,33 @@
       try {
         this.bgm.play();
         this.lastBgmPlayMs = Date.now();
+        this.bgmPlayingAssumed = true;
       } catch (e) {
       }
     }
-    /** paused===false 已在播；系统掐掉后 paused 变 true，必须再 play。 */
+    /**
+     * 仅在 BGM 确实需要重启时返回 true。
+     * paused 读不到时禁止周期性 play()，否则微信里会叠轨产生沙沙声/爆音。
+     */
     shouldKickBgm() {
       if (!this.bgm) {
         return true;
       }
       if (this.bgm.paused === false) {
+        this.bgmPlayingAssumed = true;
         return false;
       }
       if (this.bgm.paused === true) {
+        this.bgmPlayingAssumed = false;
         return true;
       }
-      return this.lastBgmPlayMs === 0 || Date.now() - this.lastBgmPlayMs > 800;
+      return !this.bgmPlayingAssumed;
     }
     stopBgm(clearWant) {
       if (clearWant) {
         this.bgmWanted = false;
       }
+      this.bgmPlayingAssumed = false;
       if (!this.bgm) {
         return;
       }
@@ -6794,7 +6812,7 @@
     }
     /** 启动循环背景音乐（可重复调用，适配器内幂等） */
     startBgm() {
-      this.deps.audio.play("bgm_main", { loop: true, volume: 0.55 });
+      this.deps.audio.play("bgm_main", { loop: true, volume: 0.45 });
     }
     suspendForBackground() {
       var _a, _b;
