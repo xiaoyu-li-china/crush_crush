@@ -32,7 +32,7 @@ describe('广告开关与关卡恢复', () => {
     assert.equal(session.fsm.getCurrent(), 'PlayerInput');
     unlockBoosterAds(session, 'shuffle');
     assert.equal(await session.watchAdForBooster('shuffle'), 'revived');
-    assert.equal(session.getBoosterCount('shuffle'), 0);
+    assert.equal(session.getBoosterCount('shuffle'), 1);
     assert.equal(session.fsm.getCurrent(), 'PlayerInput');
     const board = session.getBoard();
     assert.ok(board);

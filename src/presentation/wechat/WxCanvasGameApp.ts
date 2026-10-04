@@ -328,7 +328,7 @@ const HOWTO_LINES: ReadonlyArray<{ tag: string; text: string }> = [
   { tag: '伙伴', text: '雪人、企鹅藏在冰下，各占多格。占地冰块全碎后才露出并收获；雪人露出时会震碎周围一圈冰。' },
   { tag: '大招', text: '四连或 L/T 形出闪光（范围爆炸）；五连出超级猫头鹰（清同色）。两枚闪光互滑可同时引爆。' },
   { tag: '粉碎', text: '通关后进入限时点击粉碎加分，可看广告加时。总分够高时还可选清洁小游戏（不加主线分）。' },
-  { tag: '道具', text: '锤子砸一格、重排洗盘、加步 +5，开局不送。库存空时：先转发好友 → 再转发群 → 再看广告领取。' },
+  { tag: '道具', text: '锤子砸一格、重排洗盘、加步 +5，开局不送。库存空时：转发好友返回 +1 → 转发群返回 +1 → 再看广告；重排入包后需再点一次才洗牌。' },
   { tag: '奖励', text: '每日登录送锤子；当日通关满 3 关领重排；某次剩 ≥6 步通关送加步。道具可带入下关，各最多 9 个。' },
   { tag: '邀请', text: '分享给没玩过的好友，对方通关后双方各得 1 锤子。' },
 ];
@@ -481,6 +481,10 @@ export class WxCanvasGameApp {
   /** 防止 canvas.requestAnimationFrame 同步重入把模拟器卡死 */
   private frameGuard = false;
   private readonly onHideBound = (): void => {
+    // 可选信号：进过分享页。结算以 onShow + 停留时长为准（部分环境分享不触发 onHide）。
+    if (this.pendingBoosterShare && !this.pendingBoosterShareHiddenAtMs) {
+      this.pendingBoosterShareHiddenAtMs = this.nowMs || Date.now();
+    }
     if (!isWxDesktopIdeHost()) {
       this.foreground.onHide();
     }
@@ -496,7 +500,10 @@ export class WxCanvasGameApp {
     if (inviteToast) {
       this.notifyUser(inviteToast, '锤子到账');
     }
-    this.settlePendingBoosterShare();
+    // 开发者工具分享面板开着时也可能触发 onShow，不能在这里发奖；改由触摸回到画布时结算。
+    if (!isWxDesktopIdeHost()) {
+      this.trySettleBoosterShareAfterReturn();
+    }
   };
   private readonly onAudioInterruptionBeginBound = (): void => {
     this.session.suspendForBackground();
@@ -526,7 +533,14 @@ export class WxCanvasGameApp {
   private lobbySwipeHintDismissed = false;
   /** 空道具转发补给：从分享页返回后发奖 */
   private pendingBoosterShare: BoosterId | null = null;
+  /** 墙钟时间，避免 nowMs 暂停/重置导致误判已超时 */
   private pendingBoosterShareAtMs = 0;
+  /** 有待结算转发时，onHide 记下离开时刻；未离开过不发奖 */
+  private pendingBoosterShareHiddenAtMs = 0;
+  /** 已从分享返回、等待玩家再点道具领取（防止面板未关就入包） */
+  private boosterShareClaimReady: BoosterId | null = null;
+  /** 开发者工具领取弹窗进行中，避免重复弹出 */
+  private boosterShareModalOpen = false;
   private boosterShareScene: Extract<ShareScene, 'booster_friend' | 'booster_group'> | null =
     null;
   private lobbyDrag: {
@@ -2324,6 +2338,8 @@ export class WxCanvasGameApp {
   private handleTouchStart(e: WxTouchEvent): void {
     this.markUserActivity();
     this.tryStartBgm();
+    // 开发者工具：分享面板关掉后点到游戏，才结算入包（面板开着时触摸到不了这里）。
+    this.trySettleBoosterShareAfterReturn();
     if (this.isInputMuted()) {
       return;
     }
@@ -3808,6 +3824,11 @@ export class WxCanvasGameApp {
   }
 
   private async requestBoosterRefill(id: BoosterId): Promise<void> {
+    // 已从分享返回：再点一次才真正入包，显示红色数量角标（不会在转发面板还开着时发奖）。
+    if (this.boosterShareClaimReady === id) {
+      this.grantBoosterShareClaim(id);
+      return;
+    }
     const channel = this.session.getBoosterRefillChannel(id);
     if (channel === 'none') {
       this.notifyUser('现在不能领道具', '暂时不能领');
@@ -3826,40 +3847,116 @@ export class WxCanvasGameApp {
     }
     this.boosterShareScene = channel === 'friend' ? 'booster_friend' : 'booster_group';
     this.pendingBoosterShare = id;
-    this.pendingBoosterShareAtMs = this.nowMs || Date.now();
+    this.pendingBoosterShareAtMs = Date.now();
+    this.pendingBoosterShareHiddenAtMs = 0;
+    this.boosterShareClaimReady = null;
     const opened = this.share.shareToFriend();
     this.boosterShareScene = null;
     if (!opened) {
-      this.pendingBoosterShareAtMs = 0;
-      this.settlePendingBoosterShare();
+      this.clearPendingBoosterShare();
+      this.notifyUser('请转发给好友后再领取', '请先转发');
       return;
     }
     this.notifyUser(
-      channel === 'friend' ? '转发给 1 个好友就能领' : '转发到群就能再领 1 个',
+      channel === 'friend'
+        ? '请点「发送」，关闭后再领取红色 1'
+        : '请点「发送」，关闭后再领取红色 1',
       channel === 'friend' ? '转发好友' : '转发到群',
     );
-    setTimeout(() => {
-      this.settlePendingBoosterShare();
-    }, 700);
   }
 
-  private settlePendingBoosterShare(): void {
+  private clearPendingBoosterShare(): void {
+    this.pendingBoosterShare = null;
+    this.pendingBoosterShareAtMs = 0;
+    this.pendingBoosterShareHiddenAtMs = 0;
+    this.boosterShareClaimReady = null;
+    this.boosterShareModalOpen = false;
+  }
+
+  /** 开发者工具：分享面板关掉并点到游戏后，才弹出领取确认。 */
+  private promptDevtoolsBoosterClaim(id: BoosterId): Promise<void> {
+    return new Promise((resolve) => {
+      if (typeof wx.showModal !== 'function') {
+        this.grantBoosterShareClaim(id);
+        resolve();
+        return;
+      }
+      try {
+        wx.showModal({
+          title: id === 'shuffle' ? '领取重排' : '领取道具',
+          content: '若已点分享面板「发送」，请点「领取」。\n重排会像锤子一样出现红色 1。',
+          confirmText: '领取',
+          cancelText: '未转发',
+          success: (res) => {
+            if (res.confirm && (this.pendingBoosterShare === id || this.boosterShareClaimReady === id)) {
+              this.grantBoosterShareClaim(id);
+            } else {
+              this.clearPendingBoosterShare();
+              this.notifyUser('未领取，转发后可再试', '未领取');
+            }
+            resolve();
+          },
+          fail: () => {
+            this.grantBoosterShareClaim(id);
+            resolve();
+          },
+        });
+      } catch {
+        this.grantBoosterShareClaim(id);
+        resolve();
+      }
+    });
+  }
+
+  /**
+   * 从分享返回后的结算入口。
+   * 分享面板开着时点不到画布，因此开发者工具里「点到游戏」= 面板已关。
+   */
+  private trySettleBoosterShareAfterReturn(): void {
     const id = this.pendingBoosterShare;
     if (!id) {
       return;
     }
-    const elapsed = (this.nowMs || Date.now()) - this.pendingBoosterShareAtMs;
-    if (elapsed < 280) {
+    const elapsed = Date.now() - this.pendingBoosterShareAtMs;
+    if (elapsed < 900) {
       return;
     }
-    this.pendingBoosterShare = null;
+    if (isWxDesktopIdeHost()) {
+      if (this.boosterShareModalOpen) {
+        return;
+      }
+      this.boosterShareModalOpen = true;
+      this.boosterShareClaimReady = id;
+      void this.promptDevtoolsBoosterClaim(id).finally(() => {
+        this.boosterShareModalOpen = false;
+      });
+      return;
+    }
+    if (this.boosterShareClaimReady === id) {
+      return;
+    }
+    // 真机：只标记可领取，再点道具才入包出红角标。
+    this.boosterShareClaimReady = id;
+    this.notifyUser(
+      id === 'shuffle' ? '转发完成，再点重排领取红色 1' : '转发完成，再点道具领取',
+      '再点领取',
+    );
+    this.requestPaint();
+  }
+
+  private grantBoosterShareClaim(id: BoosterId): void {
+    if (this.pendingBoosterShare !== id && this.boosterShareClaimReady !== id) {
+      return;
+    }
     const channel = this.session.getBoosterRefillChannel(id);
+    this.clearPendingBoosterShare();
     if (channel !== 'friend' && channel !== 'group') {
       return;
     }
     if (!this.session.claimBoosterShare(id)) {
       return;
     }
+    this.inputMuteUntilMs = Math.max(this.inputMuteUntilMs, (this.nowMs || Date.now()) + 480);
     this.onBoosterRefillGranted(id, channel);
   }
 
@@ -3874,9 +3971,12 @@ export class WxCanvasGameApp {
       return;
     }
     if (id === 'shuffle') {
-      this.boardView.clearSelection();
-      this.syncBoardView();
-      this.notifyUser('小动物重新排列啦！', '已重排');
+      // 只入包并亮红色数量角标；不洗牌，等玩家再点重排。
+      this.notifyUser(
+        `重排 +1 · 剩余 ${this.session.getBoosterCount('shuffle')}`,
+        '重排+1',
+      );
+      this.requestPaint();
       return;
     }
     this.notifyUser(`步数 +${5} · 剩余 ${this.session.getMovesLeft()}`, '步数+5');

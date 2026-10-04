@@ -978,14 +978,15 @@ export class GameSession {
   }
 
   /**
-   * 转发好友 / 群成功后发 1 个道具。每个道具每天各允许 1 次。
+   * 转发好友 / 群成功后发 1 个道具（重排只入包，不自动洗牌）。
+   * 每个道具每天好友、群各允许 1 次。
    */
   public claimBoosterShare(id: BoosterId): boolean {
     const channel = this.getBoosterRefillChannel(id);
     if (channel !== 'friend' && channel !== 'group') {
       return false;
     }
-    this.applyBoosterRefill(id, id === 'shuffle');
+    this.applyBoosterRefill(id);
     this.daily = { ...this.daily, ...markBoosterShare(this.daily, id, channel) };
     void this.persistDaily();
     this.deps.analytics.track('booster_share', {
@@ -1008,7 +1009,7 @@ export class GameSession {
   }
 
   /**
-   * 库存为 0 且已用完当日好友/群转发后看广告：锤子/重排 +1；加步立刻 +5。
+   * 库存为 0 且已用完当日好友/群转发后看广告：锤子/重排 +1 入包；加步立刻 +5。
    */
   public async watchAdForBooster(id: BoosterId): Promise<ReviveAdResult> {
     if (this.getBoosterRefillChannel(id) !== 'ad') {
@@ -1021,7 +1022,7 @@ export class GameSession {
     });
     const result = await this.deps.ads.show('rewarded_revive');
     if (result === 'completed') {
-      this.applyBoosterRefill(id, true);
+      this.applyBoosterRefill(id);
       this.daily = { ...this.daily, ...bumpBoosterAd(this.daily, id) };
       void this.persistDaily();
       this.deps.analytics.track('ad_complete', {
@@ -1036,7 +1037,8 @@ export class GameSession {
     return result === 'not_ready' ? 'unavailable' : 'error';
   }
 
-  private applyBoosterRefill(id: BoosterId, consumeShuffle: boolean): void {
+  /** 补给入包；重排不自动洗牌，需玩家再点道具。 */
+  private applyBoosterRefill(id: BoosterId): void {
     if (id === 'extraMoves') {
       this.movesLeft += this.extraMovesGrant;
       this.playSfx('sfx_extra');
@@ -1049,14 +1051,10 @@ export class GameSession {
       return;
     }
     if (id === 'shuffle') {
+      // 只入包；洗牌音效留给玩家点击 useShuffle。
       this.boosters.add('shuffle', 1);
       this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
-      if (consumeShuffle) {
-        this.useShuffle();
-      } else {
-        void this.persistBoosters();
-        this.playSfx('sfx_shuffle');
-      }
+      void this.persistBoosters();
       return;
     }
     this.boosters.add(id, 1);
@@ -1084,7 +1082,7 @@ export class GameSession {
 
   /** 启动循环背景音乐（可重复调用，适配器内幂等） */
   public startBgm(): void {
-    this.deps.audio.play('bgm_main', { loop: true, volume: 0.55 });
+    this.deps.audio.play('bgm_main', { loop: true, volume: 0.45 });
   }
 
   public suspendForBackground(): void {

@@ -36,10 +36,12 @@ export class WxAudioAdapter implements IAudio {
   private readonly pendingPlay = new WeakSet<WxInnerAudioContext>();
   private bgm: WxInnerAudioContext | null = null;
   private bgmWanted = false;
-  private bgmVolume = 0.42;
+  private bgmVolume = 0.38;
   private innerAudioOptionApplied = false;
   private bgmKeepAliveTimer = 0;
   private lastBgmPlayMs = 0;
+  /** BGM 已成功 kick 过；paused 读不到时禁止被音效保活反复 play 造成爆音 */
+  private bgmPlayingAssumed = false;
   private webAudioCtx: WxWebAudioContext | null | undefined;
 
   public play(clipId: AudioClipId, options?: { loop?: boolean; volume?: number }): void {
@@ -58,12 +60,14 @@ export class WxAudioAdapter implements IAudio {
     this.applyInnerAudioOption();
     const ctx = this.acquire(src);
     ctx.loop = false;
-    ctx.volume = options?.volume ?? 0.85;
+    ctx.volume = options?.volume ?? 0.8;
     this.startSfx(ctx);
+    // 仅在 BGM 明确被系统掐掉时再续；不要每次音效后都 play()，否则会叠音杂音。
     this.scheduleBgmKeepAlive();
   }
 
   public suspendForBackground(): void {
+    this.bgmPlayingAssumed = false;
     if (!this.bgm) {
       return;
     }
@@ -158,6 +162,7 @@ export class WxAudioAdapter implements IAudio {
             // ignore
           }
         }
+        this.bgmPlayingAssumed = false;
       }
       return;
     }
@@ -226,6 +231,7 @@ export class WxAudioAdapter implements IAudio {
     try {
       this.bgm.play();
       this.lastBgmPlayMs = Date.now();
+      this.bgmPlayingAssumed = true;
     } catch {
       // ignore
     }
@@ -235,13 +241,21 @@ export class WxAudioAdapter implements IAudio {
     if (!this.bgmWanted || this.muted) {
       return;
     }
+    // 已在播且 paused 可读为 false：不必保活。
+    if (this.bgm && this.bgm.paused === false) {
+      return;
+    }
+    // paused 读不到且我们认定仍在播：不要乱踢，避免爆音。
+    if (this.bgm && this.bgm.paused !== true && this.bgmPlayingAssumed) {
+      return;
+    }
     if (this.bgmKeepAliveTimer) {
       clearTimeout(this.bgmKeepAliveTimer);
     }
     this.bgmKeepAliveTimer = setTimeout(() => {
       this.bgmKeepAliveTimer = 0;
       this.resumeBgm();
-    }, 80) as unknown as number;
+    }, 120) as unknown as number;
   }
 
   private resumeBgm(): void {
@@ -259,29 +273,36 @@ export class WxAudioAdapter implements IAudio {
     try {
       this.bgm.play();
       this.lastBgmPlayMs = Date.now();
+      this.bgmPlayingAssumed = true;
     } catch {
       // ignore
     }
   }
 
-  /** paused===false 已在播；系统掐掉后 paused 变 true，必须再 play。 */
+  /**
+   * 仅在 BGM 确实需要重启时返回 true。
+   * paused 读不到时禁止周期性 play()，否则微信里会叠轨产生沙沙声/爆音。
+   */
   private shouldKickBgm(): boolean {
     if (!this.bgm) {
       return true;
     }
     if (this.bgm.paused === false) {
+      this.bgmPlayingAssumed = true;
       return false;
     }
     if (this.bgm.paused === true) {
+      this.bgmPlayingAssumed = false;
       return true;
     }
-    return this.lastBgmPlayMs === 0 || Date.now() - this.lastBgmPlayMs > 800;
+    return !this.bgmPlayingAssumed;
   }
 
   private stopBgm(clearWant: boolean): void {
     if (clearWant) {
       this.bgmWanted = false;
     }
+    this.bgmPlayingAssumed = false;
     if (!this.bgm) {
       return;
     }
