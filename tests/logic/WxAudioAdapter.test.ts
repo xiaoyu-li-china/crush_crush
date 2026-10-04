@@ -138,4 +138,35 @@ describe('WxAudioAdapter', () => {
     adapter.stop('bgm_main');
     adapter.dispose();
   });
+
+  it('BGM 播放中播音效不会反复 play 造成叠音噪音', async () => {
+    const { WxAudioAdapter } = await import('../../src/core/adapters/WxAudioAdapter');
+    const adapter = new WxAudioAdapter();
+    adapter.play('bgm_main', { loop: true, volume: 0.45 });
+    const bgm = created.find((c) => c.src.includes('bgm_main'));
+    assert.ok(bgm);
+    const playsAfterStart = bgm.plays;
+    bgm.paused = false;
+    adapter.play('sfx_match');
+    adapter.play('sfx_swap');
+    adapter.play('sfx_ui');
+    await new Promise((r) => setTimeout(r, 180));
+    assert.equal(bgm.plays, playsAfterStart);
+    adapter.dispose();
+  });
+
+  it('BGM paused 读不到时，音效保活也不会反复 kick', async () => {
+    const { WxAudioAdapter } = await import('../../src/core/adapters/WxAudioAdapter');
+    const adapter = new WxAudioAdapter();
+    adapter.play('bgm_main', { loop: true });
+    const bgm = created.find((c) => c.src.includes('bgm_main'));
+    assert.ok(bgm);
+    const playsAfterStart = bgm.plays;
+    // 模拟部分基础库 paused 为 undefined
+    (bgm as { paused: boolean | undefined }).paused = undefined;
+    adapter.play('sfx_match');
+    await new Promise((r) => setTimeout(r, 180));
+    assert.equal(bgm.plays, playsAfterStart);
+    adapter.dispose();
+  });
 });

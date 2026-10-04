@@ -1084,7 +1084,7 @@ export class GameSession {
 
   /** 启动循环背景音乐（可重复调用，适配器内幂等） */
   public startBgm(): void {
-    this.deps.audio.play('bgm_main', { loop: true, volume: 0.55 });
+    this.deps.audio.play('bgm_main', { loop: true, volume: 0.45 });
   }
 
   public suspendForBackground(): void {
