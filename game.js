@@ -6712,7 +6712,8 @@
       return boosterRefillChannel(this.daily, id);
     }
     /**
-     * 转发好友 / 群成功后发 1 个道具。每个道具每天各允许 1 次。
+     * 转发好友 / 群成功后发 1 个道具（重排只入包，不自动洗牌）。
+     * 每个道具每天好友、群各允许 1 次。
      */
     claimBoosterShare(id) {
       var _a, _b;
@@ -6720,7 +6721,7 @@
       if (channel !== "friend" && channel !== "group") {
         return false;
       }
-      this.applyBoosterRefill(id, id === "shuffle");
+      this.applyBoosterRefill(id);
       this.daily = { ...this.daily, ...markBoosterShare(this.daily, id, channel) };
       void this.persistDaily();
       this.deps.analytics.track("booster_share", {
@@ -6741,7 +6742,7 @@
       return true;
     }
     /**
-     * 库存为 0 且已用完当日好友/群转发后看广告：锤子/重排 +1；加步立刻 +5。
+     * 库存为 0 且已用完当日好友/群转发后看广告：锤子/重排 +1 入包；加步立刻 +5。
      */
     async watchAdForBooster(id) {
       if (this.getBoosterRefillChannel(id) !== "ad") {
@@ -6754,7 +6755,7 @@
       });
       const result = await this.deps.ads.show("rewarded_revive");
       if (result === "completed") {
-        this.applyBoosterRefill(id, true);
+        this.applyBoosterRefill(id);
         this.daily = { ...this.daily, ...bumpBoosterAd(this.daily, id) };
         void this.persistDaily();
         this.deps.analytics.track("ad_complete", {
@@ -6768,7 +6769,8 @@
       }
       return result === "not_ready" ? "unavailable" : "error";
     }
-    applyBoosterRefill(id, consumeShuffle) {
+    /** 补给入包；重排不自动洗牌，需玩家再点道具。 */
+    applyBoosterRefill(id) {
       if (id === "extraMoves") {
         this.movesLeft += this.extraMovesGrant;
         this.playSfx("sfx_extra");
@@ -6783,12 +6785,7 @@
       if (id === "shuffle") {
         this.boosters.add("shuffle", 1);
         this.boosters.loadStock(clampBoosterWallet(this.boosters.getStock()));
-        if (consumeShuffle) {
-          this.useShuffle();
-        } else {
-          void this.persistBoosters();
-          this.playSfx("sfx_shuffle");
-        }
+        void this.persistBoosters();
         return;
       }
       this.boosters.add(id, 1);
@@ -10937,7 +10934,7 @@
     { tag: "\u4F19\u4F34", text: "\u96EA\u4EBA\u3001\u4F01\u9E45\u85CF\u5728\u51B0\u4E0B\uFF0C\u5404\u5360\u591A\u683C\u3002\u5360\u5730\u51B0\u5757\u5168\u788E\u540E\u624D\u9732\u51FA\u5E76\u6536\u83B7\uFF1B\u96EA\u4EBA\u9732\u51FA\u65F6\u4F1A\u9707\u788E\u5468\u56F4\u4E00\u5708\u51B0\u3002" },
     { tag: "\u5927\u62DB", text: "\u56DB\u8FDE\u6216 L/T \u5F62\u51FA\u95EA\u5149\uFF08\u8303\u56F4\u7206\u70B8\uFF09\uFF1B\u4E94\u8FDE\u51FA\u8D85\u7EA7\u732B\u5934\u9E70\uFF08\u6E05\u540C\u8272\uFF09\u3002\u4E24\u679A\u95EA\u5149\u4E92\u6ED1\u53EF\u540C\u65F6\u5F15\u7206\u3002" },
     { tag: "\u7C89\u788E", text: "\u901A\u5173\u540E\u8FDB\u5165\u9650\u65F6\u70B9\u51FB\u7C89\u788E\u52A0\u5206\uFF0C\u53EF\u770B\u5E7F\u544A\u52A0\u65F6\u3002\u603B\u5206\u591F\u9AD8\u65F6\u8FD8\u53EF\u9009\u6E05\u6D01\u5C0F\u6E38\u620F\uFF08\u4E0D\u52A0\u4E3B\u7EBF\u5206\uFF09\u3002" },
-    { tag: "\u9053\u5177", text: "\u9524\u5B50\u7838\u4E00\u683C\u3001\u91CD\u6392\u6D17\u76D8\u3001\u52A0\u6B65 +5\uFF0C\u5F00\u5C40\u4E0D\u9001\u3002\u5E93\u5B58\u7A7A\u65F6\uFF1A\u5148\u8F6C\u53D1\u597D\u53CB \u2192 \u518D\u8F6C\u53D1\u7FA4 \u2192 \u518D\u770B\u5E7F\u544A\u9886\u53D6\u3002" },
+    { tag: "\u9053\u5177", text: "\u9524\u5B50\u7838\u4E00\u683C\u3001\u91CD\u6392\u6D17\u76D8\u3001\u52A0\u6B65 +5\uFF0C\u5F00\u5C40\u4E0D\u9001\u3002\u5E93\u5B58\u7A7A\u65F6\uFF1A\u8F6C\u53D1\u597D\u53CB\u8FD4\u56DE +1 \u2192 \u8F6C\u53D1\u7FA4\u8FD4\u56DE +1 \u2192 \u518D\u770B\u5E7F\u544A\uFF1B\u91CD\u6392\u5165\u5305\u540E\u9700\u518D\u70B9\u4E00\u6B21\u624D\u6D17\u724C\u3002" },
     { tag: "\u5956\u52B1", text: "\u6BCF\u65E5\u767B\u5F55\u9001\u9524\u5B50\uFF1B\u5F53\u65E5\u901A\u5173\u6EE1 3 \u5173\u9886\u91CD\u6392\uFF1B\u67D0\u6B21\u5269 \u22656 \u6B65\u901A\u5173\u9001\u52A0\u6B65\u3002\u9053\u5177\u53EF\u5E26\u5165\u4E0B\u5173\uFF0C\u5404\u6700\u591A 9 \u4E2A\u3002" },
     { tag: "\u9080\u8BF7", text: "\u5206\u4EAB\u7ED9\u6CA1\u73A9\u8FC7\u7684\u597D\u53CB\uFF0C\u5BF9\u65B9\u901A\u5173\u540E\u53CC\u65B9\u5404\u5F97 1 \u9524\u5B50\u3002" }
   ];
@@ -11029,6 +11026,9 @@
       /** 防止 canvas.requestAnimationFrame 同步重入把模拟器卡死 */
       this.frameGuard = false;
       this.onHideBound = () => {
+        if (this.pendingBoosterShare && !this.pendingBoosterShareHiddenAtMs) {
+          this.pendingBoosterShareHiddenAtMs = this.nowMs || Date.now();
+        }
         if (!isWxDesktopIdeHost()) {
           this.foreground.onHide();
         }
@@ -11044,7 +11044,9 @@
         if (inviteToast) {
           this.notifyUser(inviteToast, "\u9524\u5B50\u5230\u8D26");
         }
-        this.settlePendingBoosterShare();
+        if (!isWxDesktopIdeHost()) {
+          this.trySettleBoosterShareAfterReturn();
+        }
       };
       this.onAudioInterruptionBeginBound = () => {
         this.session.suspendForBackground();
@@ -11073,7 +11075,14 @@
       this.lobbySwipeHintDismissed = false;
       /** 空道具转发补给：从分享页返回后发奖 */
       this.pendingBoosterShare = null;
+      /** 墙钟时间，避免 nowMs 暂停/重置导致误判已超时 */
       this.pendingBoosterShareAtMs = 0;
+      /** 有待结算转发时，onHide 记下离开时刻；未离开过不发奖 */
+      this.pendingBoosterShareHiddenAtMs = 0;
+      /** 已从分享返回、等待玩家再点道具领取（防止面板未关就入包） */
+      this.boosterShareClaimReady = null;
+      /** 开发者工具领取弹窗进行中，避免重复弹出 */
+      this.boosterShareModalOpen = false;
       this.boosterShareScene = null;
       this.lobbyDrag = null;
       /** 动画播放期间暂存胜负，播完再弹结算或进入粉碎 */
@@ -12656,6 +12665,7 @@
     handleTouchStart(e) {
       this.markUserActivity();
       this.tryStartBgm();
+      this.trySettleBoosterShareAfterReturn();
       if (this.isInputMuted()) {
         return;
       }
@@ -13936,6 +13946,10 @@
       return "extraMoves";
     }
     async requestBoosterRefill(id) {
+      if (this.boosterShareClaimReady === id) {
+        this.grantBoosterShareClaim(id);
+        return;
+      }
       const channel = this.session.getBoosterRefillChannel(id);
       if (channel === "none") {
         this.notifyUser("\u73B0\u5728\u4E0D\u80FD\u9886\u9053\u5177", "\u6682\u65F6\u4E0D\u80FD\u9886");
@@ -13954,39 +13968,109 @@
       }
       this.boosterShareScene = channel === "friend" ? "booster_friend" : "booster_group";
       this.pendingBoosterShare = id;
-      this.pendingBoosterShareAtMs = this.nowMs || Date.now();
+      this.pendingBoosterShareAtMs = Date.now();
+      this.pendingBoosterShareHiddenAtMs = 0;
+      this.boosterShareClaimReady = null;
       const opened = this.share.shareToFriend();
       this.boosterShareScene = null;
       if (!opened) {
-        this.pendingBoosterShareAtMs = 0;
-        this.settlePendingBoosterShare();
+        this.clearPendingBoosterShare();
+        this.notifyUser("\u8BF7\u8F6C\u53D1\u7ED9\u597D\u53CB\u540E\u518D\u9886\u53D6", "\u8BF7\u5148\u8F6C\u53D1");
         return;
       }
       this.notifyUser(
-        channel === "friend" ? "\u8F6C\u53D1\u7ED9 1 \u4E2A\u597D\u53CB\u5C31\u80FD\u9886" : "\u8F6C\u53D1\u5230\u7FA4\u5C31\u80FD\u518D\u9886 1 \u4E2A",
+        channel === "friend" ? "\u8BF7\u70B9\u300C\u53D1\u9001\u300D\uFF0C\u5173\u95ED\u540E\u518D\u9886\u53D6\u7EA2\u8272 1" : "\u8BF7\u70B9\u300C\u53D1\u9001\u300D\uFF0C\u5173\u95ED\u540E\u518D\u9886\u53D6\u7EA2\u8272 1",
         channel === "friend" ? "\u8F6C\u53D1\u597D\u53CB" : "\u8F6C\u53D1\u5230\u7FA4"
       );
-      setTimeout(() => {
-        this.settlePendingBoosterShare();
-      }, 700);
     }
-    settlePendingBoosterShare() {
+    clearPendingBoosterShare() {
+      this.pendingBoosterShare = null;
+      this.pendingBoosterShareAtMs = 0;
+      this.pendingBoosterShareHiddenAtMs = 0;
+      this.boosterShareClaimReady = null;
+      this.boosterShareModalOpen = false;
+    }
+    /** 开发者工具：分享面板关掉并点到游戏后，才弹出领取确认。 */
+    promptDevtoolsBoosterClaim(id) {
+      return new Promise((resolve) => {
+        if (typeof wx.showModal !== "function") {
+          this.grantBoosterShareClaim(id);
+          resolve();
+          return;
+        }
+        try {
+          wx.showModal({
+            title: id === "shuffle" ? "\u9886\u53D6\u91CD\u6392" : "\u9886\u53D6\u9053\u5177",
+            content: "\u82E5\u5DF2\u70B9\u5206\u4EAB\u9762\u677F\u300C\u53D1\u9001\u300D\uFF0C\u8BF7\u70B9\u300C\u9886\u53D6\u300D\u3002\n\u91CD\u6392\u4F1A\u50CF\u9524\u5B50\u4E00\u6837\u51FA\u73B0\u7EA2\u8272 1\u3002",
+            confirmText: "\u9886\u53D6",
+            cancelText: "\u672A\u8F6C\u53D1",
+            success: (res) => {
+              if (res.confirm && (this.pendingBoosterShare === id || this.boosterShareClaimReady === id)) {
+                this.grantBoosterShareClaim(id);
+              } else {
+                this.clearPendingBoosterShare();
+                this.notifyUser("\u672A\u9886\u53D6\uFF0C\u8F6C\u53D1\u540E\u53EF\u518D\u8BD5", "\u672A\u9886\u53D6");
+              }
+              resolve();
+            },
+            fail: () => {
+              this.grantBoosterShareClaim(id);
+              resolve();
+            }
+          });
+        } catch (e) {
+          this.grantBoosterShareClaim(id);
+          resolve();
+        }
+      });
+    }
+    /**
+     * 从分享返回后的结算入口。
+     * 分享面板开着时点不到画布，因此开发者工具里「点到游戏」= 面板已关。
+     */
+    trySettleBoosterShareAfterReturn() {
       const id = this.pendingBoosterShare;
       if (!id) {
         return;
       }
-      const elapsed = (this.nowMs || Date.now()) - this.pendingBoosterShareAtMs;
-      if (elapsed < 280) {
+      const elapsed = Date.now() - this.pendingBoosterShareAtMs;
+      if (elapsed < 900) {
         return;
       }
-      this.pendingBoosterShare = null;
+      if (isWxDesktopIdeHost()) {
+        if (this.boosterShareModalOpen) {
+          return;
+        }
+        this.boosterShareModalOpen = true;
+        this.boosterShareClaimReady = id;
+        void this.promptDevtoolsBoosterClaim(id).finally(() => {
+          this.boosterShareModalOpen = false;
+        });
+        return;
+      }
+      if (this.boosterShareClaimReady === id) {
+        return;
+      }
+      this.boosterShareClaimReady = id;
+      this.notifyUser(
+        id === "shuffle" ? "\u8F6C\u53D1\u5B8C\u6210\uFF0C\u518D\u70B9\u91CD\u6392\u9886\u53D6\u7EA2\u8272 1" : "\u8F6C\u53D1\u5B8C\u6210\uFF0C\u518D\u70B9\u9053\u5177\u9886\u53D6",
+        "\u518D\u70B9\u9886\u53D6"
+      );
+      this.requestPaint();
+    }
+    grantBoosterShareClaim(id) {
+      if (this.pendingBoosterShare !== id && this.boosterShareClaimReady !== id) {
+        return;
+      }
       const channel = this.session.getBoosterRefillChannel(id);
+      this.clearPendingBoosterShare();
       if (channel !== "friend" && channel !== "group") {
         return;
       }
       if (!this.session.claimBoosterShare(id)) {
         return;
       }
+      this.inputMuteUntilMs = Math.max(this.inputMuteUntilMs, (this.nowMs || Date.now()) + 480);
       this.onBoosterRefillGranted(id, channel);
     }
     onBoosterRefillGranted(id, channel) {
@@ -14000,9 +14084,11 @@
         return;
       }
       if (id === "shuffle") {
-        this.boardView.clearSelection();
-        this.syncBoardView();
-        this.notifyUser("\u5C0F\u52A8\u7269\u91CD\u65B0\u6392\u5217\u5566\uFF01", "\u5DF2\u91CD\u6392");
+        this.notifyUser(
+          `\u91CD\u6392 +1 \xB7 \u5269\u4F59 ${this.session.getBoosterCount("shuffle")}`,
+          "\u91CD\u6392+1"
+        );
+        this.requestPaint();
         return;
       }
       this.notifyUser(`\u6B65\u6570 +${5} \xB7 \u5269\u4F59 ${this.session.getMovesLeft()}`, "\u6B65\u6570+5");

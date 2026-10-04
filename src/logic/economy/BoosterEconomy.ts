@@ -1,6 +1,7 @@
 /**
  * 道具获取：库存跨关保存；空库存按阶梯补给。
  * 每个道具每天：先转发 1 个好友 → 再转发 1 个群 → 之后看广告。
+ * 重排补给只入包（+1），玩家再点道具才洗牌并扣库存。
  */
 import type { BoosterId, BoosterStock } from './BoosterInventory';
 

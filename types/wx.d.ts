@@ -445,6 +445,16 @@ interface Wx {
     duration?: number;
   }) => void;
   hideToast?: () => void;
+  showModal?: (options: {
+    title?: string;
+    content?: string;
+    showCancel?: boolean;
+    confirmText?: string;
+    cancelText?: string;
+    success?: (res: { confirm: boolean; cancel: boolean }) => void;
+    fail?: (err: { errMsg: string }) => void;
+    complete?: () => void;
+  }) => void;
   setPreferredFramesPerSecond?: (fps: number) => void;
   onTouchStart: (cb: (e: WxTouchEvent) => void) => void;
   onTouchMove: (cb: (e: WxTouchEvent) => void) => void;
