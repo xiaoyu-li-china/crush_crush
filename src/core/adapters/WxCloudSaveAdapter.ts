@@ -4,6 +4,7 @@ import type {
   PlayerCloudSnapshot,
 } from '../ports/IPlayerCloudSave';
 import { parseInviteCloudSlice } from '../../logic/economy/InviteLoop';
+import { normalizeMahjongProgress } from '../../logic/mahjong/MahjongProgress';
 import cloudJson from '../../config/cloud.json';
 
 const COLLECTION = cloudJson.collection || 'player_saves';
@@ -64,6 +65,7 @@ export class WxCloudSaveAdapter implements IPlayerCloudSave {
       settings: snapshot.settings,
       daily: snapshot.daily,
       invite,
+      mahjong: snapshot.mahjong ? normalizeMahjongProgress(snapshot.mahjong) : undefined,
     };
     try {
       const db = cloud.database();
@@ -147,6 +149,7 @@ export class WxCloudSaveAdapter implements IPlayerCloudSave {
       settings: PlayerCloudSnapshot['settings'];
       daily: PlayerCloudSnapshot['daily'];
       invite: PlayerCloudSnapshot['invite'];
+      mahjong?: PlayerCloudSnapshot['mahjong'];
     },
   ): Promise<void> {
     const invite = parseInviteCloudSlice(payload.invite);
@@ -167,6 +170,7 @@ export class WxCloudSaveAdapter implements IPlayerCloudSave {
           'invite.creditHammer': command.max
             ? command.max(invite.creditHammer)
             : invite.creditHammer,
+          mahjong: payload.mahjong,
         },
       });
       return;
@@ -211,5 +215,9 @@ function snapshotFromDoc(row: Record<string, unknown>): PlayerCloudSnapshot | nu
             playExtraGranted: false,
           },
     invite: parseInviteCloudSlice(row.invite),
+    mahjong:
+      row.mahjong && typeof row.mahjong === 'object'
+        ? normalizeMahjongProgress(row.mahjong)
+        : undefined,
   };
 }

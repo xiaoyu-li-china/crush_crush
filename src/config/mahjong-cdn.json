@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "manifestUrl": "",
+  "opsConfigUrl": "",
+  "cdnBaseUrl": "",
+  "manifestVersionKey": "crush.mahjong.themes.version",
+  "opsConfigVersionKey": "crush.mahjong.ops.version",
+  "_comment": "enabled=true 时：启动拉 manifestUrl（主题）与 opsConfigUrl（结构与 mahjong-ops.json 相同）。亦可走云函数 getMahjongOps。失败则沿用包内默认。"
+}

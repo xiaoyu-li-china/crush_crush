@@ -9,6 +9,11 @@
     "test": "tsx --test tests/logic/**/*.test.ts tests/presentation/**/*.test.ts tests/core/**/*.test.ts",
     "test:coverage": "c8 --reporter=text --reporter=text-summary --include=src/logic/** --include=src/core/utils/math.ts --include=src/core/pool/ObjectPool.ts --include=src/core/utils/adForeground.ts --include=src/core/utils/perfBudget.ts --include=src/core/utils/wxHost.ts --include=src/core/utils/foregroundGate.ts --include=src/core/adapters/WxAudioAdapter.ts tsx --test tests/logic/**/*.test.ts tests/presentation/**/*.test.ts tests/core/**/*.test.ts",
     "test:coverage:critical": "c8 --check-coverage --lines 100 --functions 100 --branches 100 --include=src/core/utils/adForeground.ts --include=src/core/utils/perfBudget.ts --include=src/core/utils/foregroundGate.ts --include=src/core/utils/lobbyBanner.ts --include=src/logic/economy/AdPlacementPolicy.ts tsx --test tests/core/adForeground.test.ts tests/core/perfBudget.test.ts tests/core/foregroundGate.test.ts tests/logic/LobbyBanner.test.ts tests/logic/AdPlacementPolicy.test.ts",
+    "mahjong:ops-sample": "tsx scripts/mahjong-ops-sample.ts",
+    "mahjong:ops-setup": "tsx scripts/setup-mahjong-ops-cloud.ts",
+    "mahjong:ops-admin": "tsx tools/mahjong-ops-admin/serve.ts",
+    "mahjong:tool-icons": "python3 scripts/generate-mahjong-tool-icons.py",
+    "mahjong:modal-bg": "python3 scripts/generate-mahjong-modal-slot-full-bg.py",
     "build:wechat": "node scripts/build-wechat.mjs",
     "dev:wechat": "node scripts/build-wechat.mjs --watch"
   },

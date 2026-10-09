@@ -86,6 +86,32 @@ describe('大厅 Banner 会话', () => {
     assert.equal(hidden >= 2, true);
   });
 
+  it('麻将馆对局中不展示大厅横幅并会隐藏', async () => {
+    const shown: string[] = [];
+    let hidden = 0;
+    const session = new GameSession(
+      createMemoryDeps({
+        async show(placement) {
+          shown.push(placement);
+          return 'completed';
+        },
+        hide() {
+          hidden += 1;
+        },
+        isReady: () => true,
+      }),
+    );
+    await session.init();
+    assert.equal(await session.showLobbyBanner(), 'completed');
+    assert.deepEqual(shown, ['banner_lobby']);
+
+    session.mahjong.enterFromHall();
+    assert.equal(await session.showLobbyBanner(), 'error');
+    assert.equal(hidden >= 1, true);
+    session.mahjong.leaveTable();
+    assert.equal(await session.showLobbyBanner(), 'completed');
+  });
+
   it('进关途中迟到的横幅 show 会被拦下并隐藏', async () => {
     let hidden = 0;
     let release!: (result: 'completed') => void;

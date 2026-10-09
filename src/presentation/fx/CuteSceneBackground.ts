@@ -6,8 +6,6 @@
 export interface SceneBgImages {
   lobby: WxImage | null;
   level: WxImage | null;
-  /** 云层页资源仍加载；大厅滑动时底图保持不动 */
-  lobbyCloudPages?: Array<WxImage | null>;
 }
 
 interface SparkleSpec {

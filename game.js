@@ -8,6 +8,9 @@
     DailyLoop: "crush.player.daily",
     Boosters: "crush.player.boosters",
     NoticeSeen: "crush.player.noticeSeen",
+    /** 大厅麻将馆入口：用户已点过，不再显示 NEW 角标 */
+    MahjongHallNewDismissed: "crush.player.mahjongHallNewDismissed",
+    MahjongHallProgress: "crush.player.mahjongHall",
     Invite: "crush.player.invite",
     DeviceId: "crush.player.device"
   };
@@ -378,6 +381,66 @@
     return addBoosterToWallet(stock, "hammer", amount);
   }
 
+  // src/logic/mahjong/MahjongProgress.ts
+  var EMPTY_MAHJONG_TOOLS = {
+    move_out: 1,
+    gather: 1,
+    shuffle: 1,
+    reveal: 1
+  };
+  function emptyMahjongProgress() {
+    return {
+      coins: 0,
+      highestUnlocked: 1,
+      starsByLevel: {},
+      tools: { ...EMPTY_MAHJONG_TOOLS },
+      guideSeen: false,
+      savedRun: null
+    };
+  }
+  function normalizeMahjongProgress(raw) {
+    const base = emptyMahjongProgress();
+    if (!raw || typeof raw !== "object") {
+      return base;
+    }
+    const o = raw;
+    if (typeof o.coins === "number" && Number.isFinite(o.coins)) {
+      base.coins = Math.max(0, Math.floor(o.coins));
+    }
+    if (typeof o.highestUnlocked === "number" && Number.isFinite(o.highestUnlocked)) {
+      base.highestUnlocked = Math.max(1, Math.floor(o.highestUnlocked));
+    }
+    if (o.starsByLevel && typeof o.starsByLevel === "object") {
+      base.starsByLevel = { ...o.starsByLevel };
+    }
+    if (o.tools && typeof o.tools === "object") {
+      for (const k of Object.keys(EMPTY_MAHJONG_TOOLS)) {
+        const v = o.tools[k];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          base.tools[k] = Math.max(0, Math.floor(v));
+        }
+      }
+    }
+    base.guideSeen = o.guideSeen === true;
+    if (o.savedRun && typeof o.savedRun === "object") {
+      base.savedRun = o.savedRun;
+    }
+    return base;
+  }
+  function recordMahjongClear(data, level, stars, coinsEarned) {
+    var _a;
+    const key = String(level);
+    const prev = (_a = data.starsByLevel[key]) != null ? _a : 0;
+    const nextStars = Math.max(prev, stars);
+    return {
+      ...data,
+      coins: data.coins + coinsEarned,
+      starsByLevel: { ...data.starsByLevel, [key]: nextStars },
+      highestUnlocked: Math.max(data.highestUnlocked, level + 1),
+      savedRun: null
+    };
+  }
+
   // src/config/cloud.json
   var cloud_default = {
     enabled: true,
@@ -437,7 +500,8 @@
         boosters: snapshot.boosters,
         settings: snapshot.settings,
         daily: snapshot.daily,
-        invite
+        invite,
+        mahjong: snapshot.mahjong ? normalizeMahjongProgress(snapshot.mahjong) : void 0
       };
       try {
         const db = cloud.database();
@@ -520,7 +584,8 @@
             "invite.pendingInviter": invite.pendingInviter,
             "invite.inviteeGiftGranted": invite.inviteeGiftGranted,
             "invite.cloudClaimed": invite.cloudClaimed,
-            "invite.creditHammer": command.max ? command.max(invite.creditHammer) : invite.creditHammer
+            "invite.creditHammer": command.max ? command.max(invite.creditHammer) : invite.creditHammer,
+            mahjong: payload.mahjong
           }
         });
         return;
@@ -557,7 +622,8 @@
         playShuffleGranted: false,
         playExtraGranted: false
       },
-      invite: parseInviteCloudSlice(row.invite)
+      invite: parseInviteCloudSlice(row.invite),
+      mahjong: row.mahjong && typeof row.mahjong === "object" ? normalizeMahjongProgress(row.mahjong) : void 0
     };
   }
 
@@ -2203,6 +2269,67 @@
     }
   };
 
+  // src/logic/save/mergeMahjongCloudSave.ts
+  function mergeStars(a, b) {
+    var _a;
+    const out = { ...a };
+    for (const [key, value] of Object.entries(b)) {
+      out[key] = Math.max((_a = out[key]) != null ? _a : 0, value);
+    }
+    return out;
+  }
+  function mergeTools(a, b) {
+    var _a, _b;
+    const out = { ...EMPTY_MAHJONG_TOOLS, ...a };
+    for (const k of Object.keys(EMPTY_MAHJONG_TOOLS)) {
+      out[k] = Math.max((_a = a[k]) != null ? _a : 0, (_b = b[k]) != null ? _b : 0);
+    }
+    return out;
+  }
+  function tilesRemaining(run) {
+    return run.pile.length + run.slots.length;
+  }
+  function mergeMahjongSavedRun(local, remote) {
+    if (!local) {
+      return remote;
+    }
+    if (!remote) {
+      return local;
+    }
+    const localPlaying = local.phase === "playing";
+    const remotePlaying = remote.phase === "playing";
+    if (localPlaying && !remotePlaying) {
+      return local;
+    }
+    if (remotePlaying && !localPlaying) {
+      return remote;
+    }
+    if (localPlaying && remotePlaying) {
+      const leftLocal = tilesRemaining(local);
+      const leftRemote = tilesRemaining(remote);
+      if (leftLocal !== leftRemote) {
+        return leftLocal < leftRemote ? local : remote;
+      }
+      return local.remainingMs >= remote.remainingMs ? local : remote;
+    }
+    return null;
+  }
+  function mergeMahjongProgress(local, remote) {
+    const a = normalizeMahjongProgress(local);
+    if (!remote) {
+      return a;
+    }
+    const b = normalizeMahjongProgress(remote);
+    return normalizeMahjongProgress({
+      coins: Math.max(a.coins, b.coins),
+      highestUnlocked: Math.max(a.highestUnlocked, b.highestUnlocked),
+      starsByLevel: mergeStars(a.starsByLevel, b.starsByLevel),
+      tools: mergeTools(a.tools, b.tools),
+      guideSeen: a.guideSeen || b.guideSeen,
+      savedRun: mergeMahjongSavedRun(a.savedRun, b.savedRun)
+    });
+  }
+
   // src/logic/save/mergePlayerCloudSave.ts
   function mergeLevelProgress(local, remote) {
     var _a, _b, _c;
@@ -2261,12 +2388,14 @@
     };
   }
   function mergePlayerCloudSnapshots(local, remote) {
+    var _a, _b;
     if (!remote) {
       return {
         ...local,
         progress: normalizeLevelProgressData(local.progress),
         boosters: clampBoosterWallet(local.boosters),
         invite: parseInviteCloudSlice(local.invite),
+        mahjong: mergeMahjongProgress((_a = local.mahjong) != null ? _a : emptyMahjongProgress(), null),
         updatedAt: Math.max(1, local.updatedAt || Date.now())
       };
     }
@@ -2279,6 +2408,10 @@
       invite: mergeInviteCloud(
         parseInviteCloudSlice(local.invite),
         parseInviteCloudSlice(remote.invite)
+      ),
+      mahjong: mergeMahjongProgress(
+        (_b = local.mahjong) != null ? _b : emptyMahjongProgress(),
+        remote.mahjong
       )
     };
   }
@@ -5954,6 +6087,1285 @@
     }
   }
 
+  // src/config/mahjong-ops.json
+  var mahjong_ops_default = {
+    version: 1,
+    economy: {
+      coinCost: 100,
+      coinPerTriple: 1,
+      starPerTriple: 1
+    },
+    session: {
+      timeoutSec: 120
+    },
+    generation: {
+      seedVersion: 1,
+      maxAttempts: 16,
+      level1Tiles: 9,
+      standardTiles: 105,
+      typeCountLevel2: 6,
+      typeCountFromLevel3: { min: 6, maxInclusive: 8 }
+    },
+    theme: {
+      level1ThemeId: "default",
+      level2ThemeId: "default",
+      cycleAfterLevel: 3e3,
+      sequentialFromLevel3: false
+    },
+    levelOverrides: [],
+    sampling: {
+      enabled: true,
+      everyNLevels: 50
+    },
+    ads: {
+      rewardedVideoSlot: true
+    },
+    tools: {
+      freeToUse: true
+    },
+    _comment: "\u8FD0\u7EF4\u53EF\u901A\u8FC7 CDN opsConfigUrl \u6216\u4E91\u5E93 mahjong_ops/config \u70ED\u66F4\u65B0\uFF1B\u5BA2\u6237\u7AEF\u5408\u5E76\u540E\u4EE5 version \u4E3A\u51C6\u3002"
+  };
+
+  // src/config/mahjong-cdn.json
+  var mahjong_cdn_default = {
+    enabled: false,
+    manifestUrl: "",
+    opsConfigUrl: "",
+    cdnBaseUrl: "",
+    manifestVersionKey: "crush.mahjong.themes.version",
+    opsConfigVersionKey: "crush.mahjong.ops.version",
+    _comment: "enabled=true \u65F6\uFF1A\u542F\u52A8\u62C9 manifestUrl\uFF08\u4E3B\u9898\uFF09\u4E0E opsConfigUrl\uFF08\u7ED3\u6784\u4E0E mahjong-ops.json \u76F8\u540C\uFF09\u3002\u4EA6\u53EF\u8D70\u4E91\u51FD\u6570 getMahjongOps\u3002\u5931\u8D25\u5219\u6CBF\u7528\u5305\u5185\u9ED8\u8BA4\u3002"
+  };
+
+  // src/logic/mahjong/MahjongOpsConfig.ts
+  var ops = normalizeMahjongOps(mahjong_ops_default);
+  var remoteSource = "bundled";
+  function clampInt(n, fallback, min, max) {
+    const v = typeof n === "number" && Number.isFinite(n) ? Math.floor(n) : fallback;
+    return Math.min(max, Math.max(min, v));
+  }
+  function normalizeMahjongOps(raw) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p;
+    const gen = (_a = raw.generation) != null ? _a : {};
+    const type3 = (_b = gen.typeCountFromLevel3) != null ? _b : { min: 6, maxInclusive: 8 };
+    const minT = clampInt(type3.min, 6, 3, 20);
+    const maxT = clampInt(type3.maxInclusive, 8, minT, 20);
+    const overrides = Array.isArray(raw.levelOverrides) ? raw.levelOverrides.filter((o) => o && typeof o.level === "number" && o.level >= 1).map((o) => ({
+      level: Math.floor(o.level),
+      themeId: typeof o.themeId === "string" ? o.themeId : void 0,
+      typeCount: typeof o.typeCount === "number" ? clampInt(o.typeCount, 6, 3, 20) : void 0,
+      timeoutSec: typeof o.timeoutSec === "number" ? clampInt(o.timeoutSec, 120, 60, 3600) : void 0,
+      note: typeof o.note === "string" ? o.note : void 0
+    })) : [];
+    return {
+      version: clampInt(raw.version, 1, 1, 1e6),
+      economy: {
+        coinCost: clampInt((_c = raw.economy) == null ? void 0 : _c.coinCost, 100, 1, 1e4),
+        coinPerTriple: clampInt((_d = raw.economy) == null ? void 0 : _d.coinPerTriple, 1, 0, 100),
+        starPerTriple: clampInt((_e = raw.economy) == null ? void 0 : _e.starPerTriple, 1, 0, 100)
+      },
+      session: {
+        timeoutSec: clampInt((_f = raw.session) == null ? void 0 : _f.timeoutSec, 120, 60, 3600)
+      },
+      generation: {
+        seedVersion: clampInt(gen.seedVersion, 1, 1, 1e4),
+        maxAttempts: clampInt(gen.maxAttempts, 16, 1, 64),
+        level1Tiles: clampInt(gen.level1Tiles, 9, 3, 105),
+        standardTiles: clampInt(gen.standardTiles, 105, 9, 105),
+        typeCountLevel2: clampInt(gen.typeCountLevel2, 6, 3, 20),
+        typeCountFromLevel3: { min: minT, maxInclusive: maxT }
+      },
+      theme: {
+        level1ThemeId: (_h = (_g = raw.theme) == null ? void 0 : _g.level1ThemeId) != null ? _h : "default",
+        level2ThemeId: (_j = (_i = raw.theme) == null ? void 0 : _i.level2ThemeId) != null ? _j : "default",
+        cycleAfterLevel: clampInt((_k = raw.theme) == null ? void 0 : _k.cycleAfterLevel, 3e3, 10, 5e4),
+        sequentialFromLevel3: ((_l = raw.theme) == null ? void 0 : _l.sequentialFromLevel3) === true
+      },
+      levelOverrides: overrides,
+      sampling: {
+        enabled: ((_m = raw.sampling) == null ? void 0 : _m.enabled) !== false,
+        everyNLevels: clampInt((_n = raw.sampling) == null ? void 0 : _n.everyNLevels, 50, 1, 500)
+      },
+      ads: {
+        rewardedVideoSlot: ((_o = raw.ads) == null ? void 0 : _o.rewardedVideoSlot) !== false
+      },
+      tools: {
+        freeToUse: ((_p = raw.tools) == null ? void 0 : _p.freeToUse) !== false
+      }
+    };
+  }
+  function getMahjongOps() {
+    return ops;
+  }
+  function getMahjongOpsVersion() {
+    return ops.version;
+  }
+  function applyMahjongOpsConfig(next, source) {
+    ops = normalizeMahjongOps(next);
+    remoteSource = source;
+  }
+  var overrideMap = () => {
+    return new Map(ops.levelOverrides.map((o) => [o.level, o]));
+  };
+  function getMahjongLevelOverride(level) {
+    var _a;
+    return (_a = overrideMap().get(level)) != null ? _a : null;
+  }
+  function mahjongThemePickLevel(level) {
+    const cycle = ops.theme.cycleAfterLevel;
+    if (level <= cycle) {
+      return level;
+    }
+    const span = cycle - 2;
+    if (span <= 0) {
+      return level;
+    }
+    return 3 + (level - 3) % span;
+  }
+  function mahjongTileCountForLevel(level) {
+    return level <= 1 ? ops.generation.level1Tiles : ops.generation.standardTiles;
+  }
+  function mahjongTimeoutMsForLevel(level) {
+    var _a;
+    const override = getMahjongLevelOverride(level);
+    const sec = (_a = override == null ? void 0 : override.timeoutSec) != null ? _a : ops.session.timeoutSec;
+    return sec * 1e3;
+  }
+  function mahjongCoinCost() {
+    return ops.economy.coinCost;
+  }
+  function mahjongCoinPerTriple() {
+    return ops.economy.coinPerTriple;
+  }
+  function mahjongStarPerTriple() {
+    return ops.economy.starPerTriple;
+  }
+  function mahjongSeedVersion() {
+    return ops.generation.seedVersion;
+  }
+  function mahjongGenerationMaxAttempts() {
+    return ops.generation.maxAttempts;
+  }
+  function mahjongStandardTiles() {
+    return ops.generation.standardTiles;
+  }
+  function mahjongLevel1Tiles() {
+    return ops.generation.level1Tiles;
+  }
+  function mahjongTypeCountForGeneration(level, rng) {
+    const override = getMahjongLevelOverride(level);
+    if ((override == null ? void 0 : override.typeCount) != null) {
+      return override.typeCount;
+    }
+    if (level <= 2 || level >= 4) {
+      return ops.generation.typeCountLevel2;
+    }
+    const { min, maxInclusive } = ops.generation.typeCountFromLevel3;
+    const span = maxInclusive - min + 1;
+    return min + Math.floor(rng() * span);
+  }
+  function shouldMahjongOpsSampleLevel(level) {
+    if (!ops.sampling.enabled) {
+      return false;
+    }
+    const n = ops.sampling.everyNLevels;
+    return level === 1 || level % n === 0;
+  }
+  function isMahjongRewardedVideoSlotEnabled() {
+    return ops.ads.rewardedVideoSlot;
+  }
+  async function fetchMahjongOpsFromCdn(fetchJson) {
+    var _a;
+    if (mahjong_cdn_default.enabled !== true) {
+      return false;
+    }
+    const url = ((_a = mahjong_cdn_default.opsConfigUrl) != null ? _a : "").trim();
+    if (url.length === 0) {
+      return false;
+    }
+    try {
+      const data = await fetchJson(url);
+      if (!data || typeof data !== "object") {
+        return false;
+      }
+      applyMahjongOpsConfig(data, "cdn");
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  async function fetchMahjongOpsFromCloud(fetchCloud) {
+    try {
+      const data = await fetchCloud();
+      if (!data || typeof data !== "object") {
+        return false;
+      }
+      applyMahjongOpsConfig(data, "cloud");
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // src/logic/mahjong/MahjongConfig.ts
+  var MAHJONG_BASE_SLOTS = 6;
+  var MAHJONG_SLOT_FULL_AD_MOVE_COUNT = 3;
+  var MAHJONG_REPLAY_COIN_COST = 300;
+  var MAHJONG_INFINITE_LEVEL_CAP = 5e4;
+  var MAHJONG_GLOBAL_COIN_STAR = "\u2B50";
+  function formatMahjongGlobalCoinAmount(amount) {
+    const n = Math.max(0, Math.floor(amount));
+    return `${n}${MAHJONG_GLOBAL_COIN_STAR}`;
+  }
+  function formatMahjongGlobalCoinCostLabel(amount) {
+    const n = Math.max(0, Math.floor(amount));
+    return `${n}\u91D1\u5E01${MAHJONG_GLOBAL_COIN_STAR}`;
+  }
+  var MAHJONG_TOOL_LABELS = {
+    move_out: "\u79FB\u51FA",
+    gather: "\u51D1\u9F50",
+    shuffle: "\u91CD\u6392",
+    reveal: "\u7FFB\u724C"
+  };
+
+  // src/config/mahjong-themes.json
+  var mahjong_themes_default = {
+    version: 1,
+    defaultThemeId: "default",
+    themes: [
+      {
+        themeId: "default",
+        name: "\u840C\u5BA0\u7ECF\u5178",
+        tiles: [
+          "assets/main/tiles/red.png",
+          "assets/main/tiles/blue.png",
+          "assets/main/tiles/green.png",
+          "assets/main/tiles/yellow.png",
+          "assets/main/tiles/purple.png",
+          "assets/main/tiles/owl.png"
+        ],
+        background: "#5eb8b8"
+      },
+      {
+        themeId: "corgi_01",
+        name: "\u67F4\u72AC\u9EBB\u5C06\u9986",
+        tiles: [
+          "themes/corgi_01/tile_0.png",
+          "themes/corgi_01/tile_1.png",
+          "themes/corgi_01/tile_2.png",
+          "themes/corgi_01/tile_3.png",
+          "themes/corgi_01/tile_4.png",
+          "themes/corgi_01/tile_5.png"
+        ],
+        background: "#fff3bf"
+      },
+      {
+        themeId: "cat_01",
+        name: "\u732B\u54AA\u9EBB\u5C06\u9986",
+        tiles: [
+          "themes/cat_01/tile_0.png",
+          "themes/cat_01/tile_1.png",
+          "themes/cat_01/tile_2.png",
+          "themes/cat_01/tile_3.png",
+          "themes/cat_01/tile_4.png",
+          "themes/cat_01/tile_5.png"
+        ],
+        background: "#e5dbff"
+      },
+      {
+        themeId: "bunny_01",
+        name: "\u5154\u5154\u9EBB\u5C06\u9986",
+        tiles: [
+          "themes/bunny_01/tile_0.png",
+          "themes/bunny_01/tile_1.png",
+          "themes/bunny_01/tile_2.png",
+          "themes/bunny_01/tile_3.png",
+          "themes/bunny_01/tile_4.png",
+          "themes/bunny_01/tile_5.png"
+        ],
+        background: "#d3f9d8"
+      },
+      {
+        themeId: "panda_01",
+        name: "\u718A\u732B\u9EBB\u5C06\u9986",
+        tiles: [
+          "themes/panda_01/tile_0.png",
+          "themes/panda_01/tile_1.png",
+          "themes/panda_01/tile_2.png",
+          "themes/panda_01/tile_3.png",
+          "themes/panda_01/tile_4.png",
+          "themes/panda_01/tile_5.png"
+        ],
+        background: "#edf2ff"
+      }
+    ]
+  };
+
+  // src/logic/mahjong/MahjongThemeCatalog.ts
+  var manifest = normalizeManifest(mahjong_themes_default);
+  var remoteLoaded = false;
+  function normalizeManifest(raw) {
+    var _a;
+    const themes = Array.isArray(raw.themes) ? raw.themes : [];
+    return {
+      version: typeof raw.version === "number" ? raw.version : 1,
+      defaultThemeId: (_a = raw.defaultThemeId) != null ? _a : "default",
+      themes: themes.map((t) => {
+        var _a2;
+        return {
+          themeId: t.themeId,
+          name: t.name,
+          tiles: [...(_a2 = t.tiles) != null ? _a2 : []],
+          background: t.background,
+          tileBack: t.tileBack
+        };
+      })
+    };
+  }
+  function byIdMap() {
+    return new Map(manifest.themes.map((t) => [t.themeId, t]));
+  }
+  function getMahjongThemeManifestVersion() {
+    return manifest.version;
+  }
+  function isMahjongCdnEnabled() {
+    var _a, _b;
+    return mahjong_cdn_default.enabled === true && ((_b = (_a = mahjong_cdn_default.cdnBaseUrl) == null ? void 0 : _a.length) != null ? _b : 0) > 0;
+  }
+  function resolveMahjongAssetUrl(pathOrUrl) {
+    var _a;
+    if (/^https?:\/\//i.test(pathOrUrl)) {
+      return pathOrUrl;
+    }
+    if (pathOrUrl.startsWith("assets/")) {
+      return pathOrUrl;
+    }
+    const base = ((_a = mahjong_cdn_default.cdnBaseUrl) != null ? _a : "").replace(/\/+$/, "");
+    if (mahjong_cdn_default.enabled && base.length > 0) {
+      const rel = pathOrUrl.replace(/^\/+/, "");
+      return `${base}/${rel}`;
+    }
+    return pathOrUrl;
+  }
+  function applyMahjongThemeManifest(next) {
+    manifest = normalizeManifest(next);
+    remoteLoaded = true;
+  }
+  async function fetchMahjongThemeManifestFromCdn(fetchJson) {
+    var _a;
+    if (!mahjong_cdn_default.enabled) {
+      return false;
+    }
+    const url = ((_a = mahjong_cdn_default.manifestUrl) != null ? _a : "").trim();
+    if (url.length === 0) {
+      return false;
+    }
+    try {
+      const data = await fetchJson(url);
+      if (!data || typeof data !== "object") {
+        return false;
+      }
+      applyMahjongThemeManifest(data);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  function getMahjongTheme(themeId) {
+    var _a;
+    return (_a = byIdMap().get(themeId)) != null ? _a : null;
+  }
+  function getDefaultMahjongTheme() {
+    var _a, _b;
+    const id = (_a = manifest.defaultThemeId) != null ? _a : "default";
+    return (_b = getMahjongTheme(id)) != null ? _b : manifest.themes[0];
+  }
+  function pickMahjongThemeForLevel(level, seed) {
+    var _a, _b, _c, _d, _e;
+    const override = getMahjongLevelOverride(level);
+    if (override == null ? void 0 : override.themeId) {
+      return (_a = getMahjongTheme(override.themeId)) != null ? _a : getDefaultMahjongTheme();
+    }
+    const ops2 = getMahjongOps();
+    if (level <= 1) {
+      return (_b = getMahjongTheme(ops2.theme.level1ThemeId)) != null ? _b : getDefaultMahjongTheme();
+    }
+    if (level <= 2) {
+      return (_c = getMahjongTheme(ops2.theme.level2ThemeId)) != null ? _c : getDefaultMahjongTheme();
+    }
+    const themeLevel = mahjongThemePickLevel(level);
+    const pool = manifest.themes.length > 0 ? manifest.themes : [getDefaultMahjongTheme()];
+    if (ops2.theme.sequentialFromLevel3) {
+      const idx2 = (themeLevel - 3) % pool.length;
+      return (_d = pool[idx2]) != null ? _d : getDefaultMahjongTheme();
+    }
+    const rng = createSeededRandom(seed ^ 2654435769 ^ themeLevel);
+    const idx = Math.floor(rng() * pool.length);
+    return (_e = pool[idx]) != null ? _e : getDefaultMahjongTheme();
+  }
+  function tileAssetPath(theme, typeIndex) {
+    var _a, _b;
+    if (theme.tiles.length === 0 || typeIndex < 0) {
+      return null;
+    }
+    let raw = theme.tiles[typeIndex % theme.tiles.length];
+    if (!raw) {
+      return null;
+    }
+    if (!isMahjongCdnEnabled() && /^themes\//.test(raw)) {
+      const fallback = getDefaultMahjongTheme();
+      raw = (_b = (_a = fallback.tiles[typeIndex % fallback.tiles.length]) != null ? _a : fallback.tiles[0]) != null ? _b : raw;
+    }
+    return resolveMahjongAssetUrl(raw);
+  }
+
+  // src/logic/mahjong/MahjongFaceDown.ts
+  function buildInitialPileFaceDown(poses, level, seed) {
+    if (level <= 1 || poses.length === 0) {
+      return poses.map(() => false);
+    }
+    const rng = createSeededRandom(seed ^ 4207857837 ^ level);
+    const n = poses.length;
+    const target = Math.max(1, Math.floor(n * 0.3));
+    const order = poses.map((p, i) => ({ i, z: p.z })).sort((a, b) => a.z - b.z);
+    const faceDown = poses.map(() => false);
+    for (let k = 0; k < target; k += 1) {
+      let pick = order[Math.min(order.length - 1, Math.floor(rng() * rng() * n))];
+      if (rng() < 0.72) {
+        const flatPool = order.filter((o) => {
+          var _a, _b;
+          return ((_b = (_a = poses[o.i]) == null ? void 0 : _a.stand) != null ? _b : 1) === 0;
+        });
+        if (flatPool.length > 0) {
+          pick = flatPool[Math.floor(rng() * flatPool.length)];
+        }
+      }
+      faceDown[pick.i] = true;
+    }
+    return faceDown;
+  }
+
+  // src/logic/mahjong/MahjongPilePoses.ts
+  var MAHJONG_STAND_FLAT = 0;
+  var MAHJONG_STAND_UPRIGHT = 1;
+  var MAHJONG_STAND_EDGE_SHORT = 2;
+  var MAHJONG_STAND_EDGE_LONG = 3;
+  var MAHJONG_STAND_TILT = 4;
+  var MAHJONG_PILE_POSE_VERSION = 3;
+  function pickPileStand(rng, level) {
+    const r = rng();
+    if (level <= 1) {
+      if (r < 0.7) {
+        return MAHJONG_STAND_FLAT;
+      }
+      if (r < 0.85) {
+        return MAHJONG_STAND_TILT;
+      }
+      return MAHJONG_STAND_UPRIGHT;
+    }
+    if (r < 0.64) {
+      return MAHJONG_STAND_FLAT;
+    }
+    if (r < 0.72) {
+      return MAHJONG_STAND_TILT;
+    }
+    if (r < 0.86) {
+      return MAHJONG_STAND_EDGE_SHORT;
+    }
+    if (r < 0.94) {
+      return MAHJONG_STAND_EDGE_LONG;
+    }
+    return MAHJONG_STAND_UPRIGHT;
+  }
+  function rotForPileStand(stand, rng, _level) {
+    const t = rng() - 0.5;
+    switch (stand) {
+      case MAHJONG_STAND_FLAT:
+        return t * 0.5;
+      case MAHJONG_STAND_TILT:
+        return t * 0.7;
+      default:
+        return t * 0.24;
+    }
+  }
+  function buildMahjongPilePoses(pileLength, seed, level) {
+    if (pileLength <= 0) {
+      return [];
+    }
+    const rng = createSeededRandom(seed ^ level * 1315423911 ^ pileLength * 2654435761);
+    const compact = pileLength <= 12;
+    const layerCount = compact ? 3 : 5;
+    const perLayer = Math.ceil(pileLength / layerCount);
+    const poses = [];
+    const clusterCount = compact ? 2 : 3;
+    const clusters = Array.from({ length: clusterCount }, () => ({
+      cx: 0.28 + rng() * 0.44,
+      cy: 0.3 + rng() * 0.4
+    }));
+    for (let i = 0; i < pileLength; i += 1) {
+      const layer = Math.min(layerCount - 1, Math.floor(i / perLayer));
+      const spreadX = (compact ? 0.92 : 0.94) - layer * (compact ? 0.035 : 0.028);
+      const spreadY = (compact ? 0.9 : 0.92) - layer * (compact ? 0.035 : 0.028);
+      const cluster = clusters[Math.floor(rng() * clusterCount)];
+      const nx = cluster.cx + (rng() - 0.5) * spreadX;
+      const ny = cluster.cy + (rng() - 0.5) * spreadY;
+      const stand = pickPileStand(rng, level);
+      poses.push({
+        nx: Math.min(0.98, Math.max(0.02, nx)),
+        ny: Math.min(0.98, Math.max(0.02, ny)),
+        scale: (compact ? 0.25 : 0.158) - layer * (compact ? 0.012 : 25e-4) + rng() * 0.018,
+        rot: rotForPileStand(stand, rng, level),
+        z: layer * 1e3 + i + rng() * 0.01,
+        stand
+      });
+    }
+    return poses;
+  }
+  function appendRandomPilePose(poses, seed, level) {
+    const rng = createSeededRandom(seed ^ poses.length ^ 991 ^ level);
+    const scale = level <= 1 ? 0.2 : 0.144 + rng() * 0.02;
+    const stand = pickPileStand(rng, level);
+    return {
+      nx: Math.min(0.98, Math.max(0.02, 0.5 + (rng() - 0.5) * 0.92)),
+      ny: Math.min(0.98, Math.max(0.02, 0.5 + (rng() - 0.5) * 0.9)),
+      scale,
+      rot: rotForPileStand(stand, rng, level),
+      z: 5e3 + poses.length + rng(),
+      stand
+    };
+  }
+
+  // src/logic/mahjong/MahjongGame.ts
+  function mahjongMatchKindCount(typeCount, themeTileCount) {
+    const tiles = Math.max(1, Math.floor(themeTileCount));
+    const kinds = Math.max(1, Math.floor(typeCount));
+    return Math.min(kinds, tiles);
+  }
+  function resolveTriplesByKind(slots, kindOf) {
+    var _a, _b;
+    const counts = /* @__PURE__ */ new Map();
+    for (const t of slots) {
+      const k = kindOf(t);
+      counts.set(k, ((_a = counts.get(k)) != null ? _a : 0) + 1);
+    }
+    const keep = /* @__PURE__ */ new Map();
+    for (const [k, c] of counts) {
+      keep.set(k, c % 3);
+    }
+    const out = [];
+    for (const t of slots) {
+      const k = kindOf(t);
+      const left = (_b = keep.get(k)) != null ? _b : 0;
+      if (left > 0) {
+        keep.set(k, left - 1);
+        out.push(t);
+      }
+    }
+    return out;
+  }
+  var MahjongGame = class _MahjongGame {
+    constructor(generated, themeId, tools, guideShown, remainingMs = mahjongTimeoutMsForLevel(generated.level), themeTileCount = generated.typeCount) {
+      this.slots = [];
+      this.starsThisRun = 0;
+      this.coinsThisRun = 0;
+      this.adSlotUnlocked = false;
+      this.phase = "playing";
+      /** 牌堆布局变更计数（供渲染缓存失效）。 */
+      this.pileLayoutEpoch = 0;
+      this.level = generated.level;
+      this.pile = generated.pile.slice();
+      this.pilePoses = buildMahjongPilePoses(this.pile.length, generated.seed, generated.level);
+      this.pileFaceDown = buildInitialPileFaceDown(this.pilePoses, generated.level, generated.seed);
+      this.remainingMs = remainingMs;
+      this.themeId = themeId;
+      this.typeCount = generated.typeCount;
+      this.matchKindCount = mahjongMatchKindCount(generated.typeCount, themeTileCount);
+      this.seed = generated.seed;
+      this.tools = { ...tools };
+      this.guideShown = guideShown;
+    }
+    maxSlots() {
+      return MAHJONG_BASE_SLOTS + (this.adSlotUnlocked ? 1 : 0);
+    }
+    matchKind(type) {
+      if (this.matchKindCount >= this.typeCount) {
+        return type;
+      }
+      return (type % this.matchKindCount + this.matchKindCount) % this.matchKindCount;
+    }
+    bumpPileLayout() {
+      this.pileLayoutEpoch += 1;
+    }
+    /** 槽内按视觉种类三消并发放本局星/金币。 */
+    compactSlotsTriplesWithReward() {
+      const beforeLen = this.slots.length;
+      this.slots = resolveTriplesByKind(this.slots, (t) => this.matchKind(t));
+      const removed = beforeLen - this.slots.length;
+      if (removed >= 3) {
+        const triples = Math.floor(removed / 3);
+        this.starsThisRun += triples * mahjongStarPerTriple();
+        this.coinsThisRun += triples * mahjongCoinPerTriple();
+      }
+    }
+    tick(dtMs) {
+      if (this.phase !== "playing") {
+        return;
+      }
+      this.remainingMs = Math.max(0, this.remainingMs - dtMs);
+      if (this.remainingMs <= 0 && this.pile.length + this.slots.length > 0) {
+        this.phase = "lost";
+        this.failReason = "timeout";
+      }
+    }
+    canAutoMatch() {
+      var _a;
+      const counts = /* @__PURE__ */ new Map();
+      for (const t of this.slots) {
+        const k = this.matchKind(t);
+        counts.set(k, ((_a = counts.get(k)) != null ? _a : 0) + 1);
+      }
+      for (const c of counts.values()) {
+        if (c >= 3) {
+          return true;
+        }
+      }
+      return false;
+    }
+    /** 入槽后检测是否刚完成三消（用于奖励）。 */
+    applySlotWithReward(tile) {
+      const beforeLen = this.slots.length;
+      this.slots = resolveTriplesByKind([...this.slots, tile], (t) => this.matchKind(t));
+      const removed = beforeLen + 1 - this.slots.length;
+      if (removed >= 3) {
+        const triples = Math.floor(removed / 3);
+        this.starsThisRun += triples * mahjongStarPerTriple();
+        this.coinsThisRun += triples * mahjongCoinPerTriple();
+      }
+    }
+    tapPile(index) {
+      if (this.phase !== "playing" || index < 0 || index >= this.pile.length) {
+        return false;
+      }
+      const tile = this.pile.splice(index, 1)[0];
+      this.pilePoses.splice(index, 1);
+      this.pileFaceDown.splice(index, 1);
+      this.bumpPileLayout();
+      this.applySlotWithReward(tile);
+      if (this.pile.length === 0 && this.slots.length === 0) {
+        this.phase = "won";
+        return true;
+      }
+      if (this.slots.length >= this.maxSlots() && !this.canAutoMatch()) {
+        this.phase = "lost";
+        this.failReason = "slot_full";
+      }
+      return true;
+    }
+    unlockAdSlot() {
+      this.adSlotUnlocked = true;
+    }
+    /** 槽位已满失败且槽内仍有牌时可走广告移出继续。 */
+    canReviveFromSlotFullAd() {
+      return this.phase === "lost" && this.failReason === "slot_full" && this.slots.length > 0;
+    }
+    /** 看广告后移出槽内若干张回牌堆并继续本局。 */
+    reviveMoveOutFromSlots(count = MAHJONG_SLOT_FULL_AD_MOVE_COUNT) {
+      if (!this.canReviveFromSlotFullAd()) {
+        return false;
+      }
+      const n = Math.min(Math.max(1, count), this.slots.length);
+      for (let i = 0; i < n; i += 1) {
+        const tile = this.slots.pop();
+        this.pile.unshift(tile);
+        this.pilePoses.unshift(appendRandomPilePose(this.pilePoses, this.seed, this.level));
+        this.pileFaceDown.unshift(false);
+      }
+      this.phase = "playing";
+      this.failReason = void 0;
+      this.bumpPileLayout();
+      this.compactSlotsTriplesWithReward();
+      this.checkWinOrLose();
+      return true;
+    }
+    useTool(tool) {
+      if (this.phase !== "playing" || this.tools[tool] <= 0) {
+        return false;
+      }
+      let ok = false;
+      switch (tool) {
+        case "move_out":
+          ok = this.toolMoveOut();
+          break;
+        case "gather":
+          ok = this.toolGather();
+          break;
+        case "shuffle":
+          ok = this.toolShuffle();
+          break;
+        case "reveal":
+          ok = this.toolReveal();
+          break;
+        default:
+          ok = false;
+      }
+      if (ok) {
+        this.tools[tool] -= 1;
+      }
+      return ok;
+    }
+    toolMoveOut() {
+      if (this.slots.length === 0) {
+        return false;
+      }
+      const tile = this.slots.pop();
+      this.pile.unshift(tile);
+      this.pilePoses.unshift(appendRandomPilePose(this.pilePoses, this.seed, this.level));
+      this.pileFaceDown.unshift(false);
+      this.bumpPileLayout();
+      return true;
+    }
+    toolGather() {
+      if (this.slots.length === 0) {
+        return false;
+      }
+      const target = this.slots[this.slots.length - 1];
+      const targetKind = this.matchKind(target);
+      let need = 3 - this.slots.filter((t) => this.matchKind(t) === targetKind).length;
+      if (need <= 0) {
+        need = 2;
+      }
+      let moved = 0;
+      for (let i = 0; i < this.pile.length && moved < need; ) {
+        if (this.matchKind(this.pile[i]) === targetKind) {
+          const t = this.pile.splice(i, 1)[0];
+          this.pilePoses.splice(i, 1);
+          this.pileFaceDown.splice(i, 1);
+          this.applySlotWithReward(t);
+          moved += 1;
+        } else {
+          i += 1;
+        }
+      }
+      if (moved === 0) {
+        return false;
+      }
+      this.bumpPileLayout();
+      this.checkWinOrLose();
+      return true;
+    }
+    toolShuffle() {
+      if (this.pile.length < 2) {
+        return false;
+      }
+      for (let i = this.pile.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = this.pile[i];
+        this.pile[i] = this.pile[j];
+        this.pile[j] = tmp;
+        const tmpP = this.pilePoses[i];
+        this.pilePoses[i] = this.pilePoses[j];
+        this.pilePoses[j] = tmpP;
+        const tmpF = this.pileFaceDown[i];
+        this.pileFaceDown[i] = this.pileFaceDown[j];
+        this.pileFaceDown[j] = tmpF;
+      }
+      this.bumpPileLayout();
+      return true;
+    }
+    /** 翻开 z 最高的一张扣牌（最上层未明牌）。 */
+    toolReveal() {
+      var _a, _b;
+      let pick = -1;
+      let bestZ = -Infinity;
+      for (let i = 0; i < this.pileFaceDown.length; i += 1) {
+        if (!this.pileFaceDown[i]) {
+          continue;
+        }
+        const z = (_b = (_a = this.pilePoses[i]) == null ? void 0 : _a.z) != null ? _b : i;
+        if (z > bestZ) {
+          bestZ = z;
+          pick = i;
+        }
+      }
+      if (pick < 0) {
+        return false;
+      }
+      this.pileFaceDown[pick] = false;
+      this.bumpPileLayout();
+      return true;
+    }
+    faceDownCountInPile() {
+      return this.pileFaceDown.filter(Boolean).length;
+    }
+    checkWinOrLose() {
+      if (this.pile.length === 0 && this.slots.length === 0) {
+        this.phase = "won";
+        return;
+      }
+      if (this.slots.length >= this.maxSlots() && !this.canAutoMatch()) {
+        this.phase = "lost";
+        this.failReason = "slot_full";
+      }
+    }
+    toSnapshot() {
+      return {
+        level: this.level,
+        pile: this.pile.slice(),
+        pilePoses: this.pilePoses.map((p) => ({ ...p })),
+        poseVersion: MAHJONG_PILE_POSE_VERSION,
+        pileFaceDown: this.pileFaceDown.slice(),
+        slots: this.slots.slice(),
+        remainingMs: this.remainingMs,
+        starsThisRun: this.starsThisRun,
+        coinsThisRun: this.coinsThisRun,
+        adSlotUnlocked: this.adSlotUnlocked,
+        phase: this.phase,
+        failReason: this.failReason,
+        themeId: this.themeId,
+        typeCount: this.typeCount,
+        seed: this.seed,
+        tools: { ...this.tools },
+        guideShown: this.guideShown
+      };
+    }
+    static fromSnapshot(s) {
+      var _a, _b;
+      const g = {
+        level: s.level,
+        pile: s.pile.slice(),
+        typeCount: s.typeCount,
+        seed: s.seed,
+        themeId: s.themeId
+      };
+      const themeTiles = (_b = (_a = getMahjongTheme(s.themeId)) == null ? void 0 : _a.tiles.length) != null ? _b : s.typeCount;
+      const game = new _MahjongGame(g, s.themeId, s.tools, s.guideShown, s.remainingMs, themeTiles);
+      game.pile = s.pile.slice();
+      const refPoses = buildMahjongPilePoses(s.pile.length, s.seed, s.level);
+      game.pilePoses = s.pilePoses && s.pilePoses.length === s.pile.length && s.poseVersion === MAHJONG_PILE_POSE_VERSION ? s.pilePoses.map((p) => ({ ...p })) : refPoses.map((p) => ({ ...p }));
+      game.pileFaceDown = s.pileFaceDown && s.pileFaceDown.length === s.pile.length ? s.pileFaceDown.slice() : buildInitialPileFaceDown(game.pilePoses, s.level, s.seed);
+      if (s.level <= 1) {
+        game.pileFaceDown.fill(false);
+      }
+      game.starsThisRun = s.starsThisRun;
+      game.coinsThisRun = s.coinsThisRun;
+      game.slots = s.slots.slice();
+      if (game.phase === "playing") {
+        game.compactSlotsTriplesWithReward();
+      }
+      game.adSlotUnlocked = s.adSlotUnlocked;
+      game.phase = s.phase;
+      game.failReason = s.failReason;
+      game.bumpPileLayout();
+      return game;
+    }
+  };
+
+  // src/logic/mahjong/MahjongGenerator.ts
+  function hashSeed(playerKey, level) {
+    const raw = `${playerKey}|${level}|${mahjongSeedVersion()}`;
+    let h = 2166136261;
+    for (let i = 0; i < raw.length; i += 1) {
+      h ^= raw.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+  function buildLevel1TutorialPile(seed) {
+    const rng = createSeededRandom(seed ^ 130129921);
+    const pile = [];
+    for (let row = 0; row < 3; row += 1) {
+      const rowTypes = [0, 1, 2];
+      shuffleInPlace(rowTypes, rng);
+      pile.push(rowTypes[0], rowTypes[1], rowTypes[2]);
+    }
+    return pile;
+  }
+  function shuffleInPlace(arr, rng) {
+    for (let i = arr.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(rng() * (i + 1));
+      const tmp = arr[i];
+      arr[i] = arr[j];
+      arr[j] = tmp;
+    }
+  }
+  function buildSolvablePile(totalTiles, typeCount, rng) {
+    const blockTotal = totalTiles / 3;
+    const blocksPerType = new Array(typeCount).fill(0);
+    for (let i = 0; i < blockTotal; i += 1) {
+      const t = Math.floor(rng() * typeCount);
+      blocksPerType[t] += 1;
+    }
+    const blockTypes = [];
+    for (let t = 0; t < typeCount; t += 1) {
+      for (let b = 0; b < blocksPerType[t]; b += 1) {
+        blockTypes.push(t);
+      }
+    }
+    shuffleInPlace(blockTypes, rng);
+    const pile = [];
+    for (const t of blockTypes) {
+      pile.push(t, t, t);
+    }
+    return pile;
+  }
+  function generateMahjongStandard105Level(level, playerKey, seed, themeId) {
+    const maxAttempts = mahjongGenerationMaxAttempts();
+    const standardTiles = mahjongStandardTiles();
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const rng = createSeededRandom(seed + attempt * 9973);
+      const typeCount2 = mahjongTypeCountForGeneration(level, rng);
+      const pile2 = buildSolvablePile(standardTiles, typeCount2, rng);
+      if (verifySolvablePile(pile2, MAHJONG_BASE_SLOTS)) {
+        return { level, pile: pile2, typeCount: typeCount2, seed: seed + attempt, themeId };
+      }
+    }
+    const fallbackRng = createSeededRandom(seed);
+    const typeCount = mahjongTypeCountForGeneration(level, fallbackRng);
+    const pile = buildSolvablePile(standardTiles, typeCount, fallbackRng);
+    return { level, pile, typeCount, seed, themeId };
+  }
+  function generateMahjongLevel(level, playerKey) {
+    const safeLevel = Math.max(1, Math.floor(level));
+    const seed = hashSeed(playerKey, safeLevel);
+    const theme = pickMahjongThemeForLevel(safeLevel, seed);
+    const total = mahjongTileCountForLevel(safeLevel);
+    if (total === mahjongLevel1Tiles()) {
+      const pile = buildLevel1TutorialPile(seed);
+      return {
+        level: safeLevel,
+        pile,
+        typeCount: 3,
+        seed,
+        /** 第一关固定「萌宠经典」，便于对照五面小兔子样板（红狐/蓝兔/绿蛙） */
+        themeId: "default"
+      };
+    }
+    return generateMahjongStandard105Level(safeLevel, playerKey, seed, theme.themeId);
+  }
+  function verifySolvablePile(pile, maxSlots) {
+    const pileCopy = pile.slice();
+    let slots = [];
+    const resolve = (next) => {
+      var _a, _b;
+      const counts = /* @__PURE__ */ new Map();
+      for (const t of next) {
+        counts.set(t, ((_a = counts.get(t)) != null ? _a : 0) + 1);
+      }
+      const keep = /* @__PURE__ */ new Map();
+      for (const [t, c] of counts) {
+        keep.set(t, c % 3);
+      }
+      const out = [];
+      for (const t of next) {
+        const left = (_b = keep.get(t)) != null ? _b : 0;
+        if (left > 0) {
+          keep.set(t, left - 1);
+          out.push(t);
+        }
+      }
+      return out;
+    };
+    while (pileCopy.length > 0) {
+      const tile = pileCopy.shift();
+      slots = resolve([...slots, tile]);
+      if (slots.length > maxSlots) {
+        return false;
+      }
+    }
+    return slots.length === 0;
+  }
+
+  // src/services/MahjongHallService.ts
+  var MahjongHallService = class {
+    constructor(storage, analytics) {
+      this.storage = storage;
+      this.analytics = analytics;
+      this.data = emptyMahjongProgress();
+      this.active = null;
+      this.playerKey = "local";
+      this.cloudSyncHook = null;
+    }
+    /** 本地麻将进度变更后触发云存档推送（由 GameSession 注入）。 */
+    setCloudSyncHook(hook) {
+      this.cloudSyncHook = hook;
+    }
+    setPlayerKey(key) {
+      this.playerKey = key.length > 0 ? key : "local";
+    }
+    async load() {
+      const saved = await this.storage.get(StorageKeys.MahjongHallProgress);
+      this.data = normalizeMahjongProgress(saved);
+    }
+    async persist() {
+      var _a;
+      await this.storage.set(StorageKeys.MahjongHallProgress, this.data);
+      (_a = this.cloudSyncHook) == null ? void 0 : _a.call(this);
+    }
+    getProgress() {
+      return this.data;
+    }
+    getCloudSlice() {
+      return normalizeMahjongProgress(this.data);
+    }
+    loadProgress(data) {
+      var _a, _b;
+      this.data = normalizeMahjongProgress(data);
+      if (this.active && ((_a = this.data.savedRun) == null ? void 0 : _a.phase) === "playing") {
+        if (this.active.level !== this.data.savedRun.level) {
+          this.active = null;
+        }
+      } else if (((_b = this.active) == null ? void 0 : _b.phase) === "playing") {
+        this.active = null;
+      }
+    }
+    getActiveGame() {
+      return this.active;
+    }
+    isLevelUnlocked(level) {
+      return level >= 1 && level <= this.data.highestUnlocked;
+    }
+    bestStars(level) {
+      var _a;
+      return (_a = this.data.starsByLevel[String(level)]) != null ? _a : 0;
+    }
+    /** 入口直进对局：有未完成局则恢复，否则当前进度关（无限叠加的最高可挑战关）。 */
+    resolveEntryLevel() {
+      var _a;
+      if (((_a = this.data.savedRun) == null ? void 0 : _a.phase) === "playing") {
+        return this.data.savedRun.level;
+      }
+      return this.data.highestUnlocked;
+    }
+    enterFromHall() {
+      var _a;
+      const level = this.resolveEntryLevel();
+      const resume = ((_a = this.data.savedRun) == null ? void 0 : _a.phase) === "playing" && this.data.savedRun.level === level;
+      return this.startLevel(level, resume);
+    }
+    /** 本关重开：清存档并重新生成牌局（不扣金币）。 */
+    async restartLevel(level) {
+      await this.finishActive(false);
+      await this.clearSavedRun();
+      return this.startLevel(level, false);
+    }
+    startLevel(level, resume = true) {
+      var _a, _b, _c, _d;
+      const safeLevel = Math.min(
+        MAHJONG_INFINITE_LEVEL_CAP,
+        Math.max(1, Math.floor(level))
+      );
+      if (resume && this.data.savedRun && this.data.savedRun.level === safeLevel) {
+        this.active = MahjongGame.fromSnapshot(this.data.savedRun);
+        this.analytics.track("mahjong_level_resume", { level: safeLevel });
+        return this.active;
+      }
+      const generated = generateMahjongLevel(safeLevel, this.playerKey);
+      if (shouldMahjongOpsSampleLevel(safeLevel)) {
+        const solvable = verifySolvablePile(generated.pile, MAHJONG_BASE_SLOTS);
+        this.analytics.track("mahjong_ops_level_sample", {
+          level: safeLevel,
+          solvable,
+          seed: generated.seed,
+          typeCount: generated.typeCount,
+          opsVersion: getMahjongOpsVersion()
+        });
+      }
+      const themeId = generated.themeId;
+      const themeTileCount = (_b = (_a = getMahjongTheme(themeId)) == null ? void 0 : _a.tiles.length) != null ? _b : generated.typeCount;
+      this.active = new MahjongGame(
+        generated,
+        themeId,
+        { ...this.data.tools },
+        this.data.guideSeen,
+        mahjongTimeoutMsForLevel(safeLevel),
+        themeTileCount
+      );
+      if (safeLevel === 1 && !this.data.guideSeen) {
+        this.active.guideShown = false;
+      }
+      this.data.savedRun = this.active.toSnapshot();
+      void this.persist();
+      const themeName = (_d = (_c = getMahjongTheme(themeId)) == null ? void 0 : _c.name) != null ? _d : themeId;
+      this.analytics.track("mahjong_level_start", { level: safeLevel, themeId, themeName });
+      this.analytics.track("mahjong_theme_exposure", { level: safeLevel, themeId, themeName });
+      return this.active;
+    }
+    trackTileTap(level) {
+      this.analytics.track("mahjong_tile_tap", { level });
+    }
+    trackTripleClear(level, stars) {
+      this.analytics.track("mahjong_triple_clear", { level, stars });
+    }
+    trackToolUse(tool, level) {
+      this.analytics.track("mahjong_tool_use", { tool, level });
+    }
+    trackHallEnter(level) {
+      this.analytics.track("mahjong_hall_enter", { level });
+    }
+    trackAutoNext(level) {
+      this.analytics.track("mahjong_auto_next", { level });
+    }
+    trackThemeCdnFallback(requestedThemeId) {
+      this.analytics.track("mahjong_theme_cdn_fallback", { requestedThemeId });
+    }
+    async saveActiveRun() {
+      if (!this.active || this.active.phase !== "playing") {
+        return;
+      }
+      this.data.savedRun = this.active.toSnapshot();
+      await this.persist();
+      this.analytics.track("mahjong_progress_save");
+    }
+    async clearSavedRun() {
+      this.data.savedRun = null;
+      await this.persist();
+    }
+    async finishActive(won) {
+      var _a;
+      if (!this.active) {
+        return;
+      }
+      const game = this.active;
+      if (won) {
+        this.data = recordMahjongClear(
+          this.data,
+          game.level,
+          game.starsThisRun,
+          game.coinsThisRun
+        );
+        this.data.tools = { ...game.tools };
+        if (game.level === 1) {
+          this.data.guideSeen = true;
+        }
+        this.analytics.track("mahjong_level_win", {
+          level: game.level,
+          stars: game.starsThisRun,
+          coins: game.coinsThisRun
+        });
+      } else {
+        this.data.tools = { ...game.tools };
+        this.data.coins += game.coinsThisRun;
+        this.data.savedRun = null;
+        this.analytics.track("mahjong_level_fail", {
+          level: game.level,
+          reason: (_a = game.failReason) != null ? _a : "unknown"
+        });
+      }
+      this.active = null;
+      await this.persist();
+    }
+    leaveTable() {
+      var _a;
+      if (((_a = this.active) == null ? void 0 : _a.phase) === "playing") {
+        this.data.savedRun = this.active.toSnapshot();
+        void this.persist();
+      }
+      this.active = null;
+    }
+    spendCoins(amount) {
+      if (this.data.coins < amount) {
+        return false;
+      }
+      this.data.coins -= amount;
+      void this.persist();
+      return true;
+    }
+    buyTool(tool) {
+      if (!this.spendCoins(mahjongCoinCost())) {
+        return false;
+      }
+      this.grantTool(tool, "coin");
+      return true;
+    }
+    /** 看广告等途径发放 1 个道具 */
+    grantTool(tool, source = "ad") {
+      this.data.tools[tool] += 1;
+      if (this.active) {
+        this.active.tools[tool] += 1;
+      }
+      void this.persist();
+      if (source === "coin") {
+        this.analytics.track("mahjong_coin_buy_tool", { tool });
+      }
+    }
+    payReplay(coinCost = MAHJONG_REPLAY_COIN_COST) {
+      if (!this.spendCoins(coinCost)) {
+        return false;
+      }
+      this.analytics.track("mahjong_coin_replay");
+      return true;
+    }
+    async unlockAdSlot() {
+      if (!this.active || this.active.adSlotUnlocked) {
+        return false;
+      }
+      this.active.unlockAdSlot();
+      this.data.savedRun = this.active.toSnapshot();
+      await this.persist();
+      this.analytics.track("mahjong_ad_slot");
+      return true;
+    }
+    async reviveAfterSlotFullAd() {
+      var _a;
+      if (!((_a = this.active) == null ? void 0 : _a.reviveMoveOutFromSlots())) {
+        return false;
+      }
+      this.data.savedRun = this.active.toSnapshot();
+      await this.persist();
+      this.analytics.track("mahjong_slot_full_revive", { level: this.active.level });
+      return true;
+    }
+  };
+
+  // src/core/adapters/MahjongCdnFetch.ts
+  function createWxMahjongManifestFetcher() {
+    return (url) => new Promise((resolve, reject) => {
+      if (typeof wx === "undefined" || typeof wx.request !== "function") {
+        reject(new Error("wx.request unavailable"));
+        return;
+      }
+      wx.request({
+        url,
+        method: "GET",
+        success: (res) => {
+          if (res.statusCode && res.statusCode >= 400) {
+            reject(new Error(`HTTP ${res.statusCode}`));
+            return;
+          }
+          resolve(res.data);
+        },
+        fail: (err) => reject(err)
+      });
+    });
+  }
+
+  // src/core/adapters/WxMahjongOpsCloud.ts
+  function cloudApi2() {
+    try {
+      if (typeof wx === "undefined" || !wx.cloud) {
+        return null;
+      }
+      return wx.cloud;
+    } catch (e) {
+      return null;
+    }
+  }
+  async function fetchMahjongOpsViaCloudFunction() {
+    if (cloud_default.enabled === false) {
+      return null;
+    }
+    const cloud = cloudApi2();
+    if (!cloud || typeof cloud.callFunction !== "function") {
+      return null;
+    }
+    const res = await cloud.callFunction({ name: "getMahjongOps", data: {} });
+    const payload = res.result;
+    if (!(payload == null ? void 0 : payload.ok) || !payload.config) {
+      return null;
+    }
+    return payload.config;
+  }
+
   // src/services/GameSession.ts
   var GameSession = class {
     constructor(deps) {
@@ -5974,6 +7386,8 @@
       this.inviteToast = null;
       this.claimingInvite = false;
       this.seenNoticeIds = /* @__PURE__ */ new Set();
+      /** 大厅麻将馆 NEW 角标：点过入口后不再展示 */
+      this.mahjongHallNewDismissed = false;
       this.extraMovesGrant = items_default.extraMoves.moves;
       this.board = null;
       this.level = null;
@@ -6039,6 +7453,10 @@
       this.fsm = new GameStateMachine("Boot");
       this.events = new GameEventBus();
       this.progress = new LevelProgress();
+      this.mahjong = new MahjongHallService(deps.storage, deps.analytics);
+      this.mahjong.setCloudSyncHook(() => {
+        this.queueCloudPush();
+      });
       const movesGranted = typeof balance_default.reviveMovesGranted === "number" ? balance_default.reviveMovesGranted : 5;
       this.revivePolicy = new RevivePolicy({
         maxRevivesPerLevel: Number.POSITIVE_INFINITY,
@@ -6083,6 +7501,14 @@
       this.seenNoticeIds = new Set(
         Array.isArray(savedNotices) ? savedNotices.filter((id) => typeof id === "string" && id.length > 0) : []
       );
+      const mahjongNewDismissed = await this.deps.storage.get(
+        StorageKeys.MahjongHallNewDismissed
+      );
+      this.mahjongHallNewDismissed = mahjongNewDismissed === true;
+      await this.mahjong.load();
+      this.mahjong.setPlayerKey(this.getInviteCode() || "local");
+      void this.refreshMahjongThemeCatalog();
+      void this.refreshMahjongOpsConfig();
       if (daily.grantedHammer) {
         this.boosters.loadStock(addBoosterToWallet(this.boosters.getStock(), "hammer", 1));
         this.daily = { ...this.daily, bonusHammer: 0 };
@@ -6430,7 +7856,8 @@
         boosters: clampBoosterWallet(this.boosters.getStock()),
         settings: { muted: this.deps.audio.isMuted() },
         daily: { ...this.daily },
-        invite: toInviteCloudSlice(this.invite)
+        invite: toInviteCloudSlice(this.invite),
+        mahjong: this.mahjong.getCloudSlice()
       };
     }
     queueCloudPush() {
@@ -6498,6 +7925,10 @@
         await this.deps.storage.set(StorageKeys.DailyLoop, this.daily);
         await this.deps.storage.set(StorageKeys.Settings, merged.settings);
         await this.deps.storage.set(StorageKeys.Invite, this.invite);
+        if (merged.mahjong) {
+          this.mahjong.loadProgress(merged.mahjong);
+          await this.deps.storage.set(StorageKeys.MahjongHallProgress, this.mahjong.getCloudSlice());
+        }
         this.cloudHydrated = true;
         await this.flushCloudPush();
       } catch (e) {
@@ -6891,6 +8322,196 @@
       const fromScores = scored.length > 0 ? Math.max(...scored) : 0;
       const fromHighest = Math.max(0, data.highestLevelId - 1);
       return Math.max(fromScores, fromHighest);
+    }
+    /** 主线通关第 20 关后解锁萌宠麻将馆；开发版/体验版/开发者工具便于联调。 */
+    isMahjongHallUnlocked() {
+      if (shouldUnlockAllLevelsForPreview()) {
+        return true;
+      }
+      return this.getMaxClearedLevelId() >= 20;
+    }
+    shouldShowMahjongHallNewBadge() {
+      return !this.mahjongHallNewDismissed;
+    }
+    async dismissMahjongHallNewBadge() {
+      if (this.mahjongHallNewDismissed) {
+        return;
+      }
+      this.mahjongHallNewDismissed = true;
+      await this.deps.storage.set(StorageKeys.MahjongHallNewDismissed, true);
+    }
+    /** 从 CDN 拉取麻将主题 manifest（`mahjong-cdn.json` 配置）。 */
+    async refreshMahjongThemeCatalog() {
+      try {
+        const ok = await fetchMahjongThemeManifestFromCdn(createWxMahjongManifestFetcher());
+        if (ok) {
+          this.deps.analytics.track("mahjong_cdn_manifest_ok", {
+            version: getMahjongThemeManifestVersion()
+          });
+        }
+        return ok;
+      } catch (e) {
+        this.deps.analytics.track("mahjong_cdn_manifest_fail", {});
+        return false;
+      }
+    }
+    /** 运营配置：CDN opsConfigUrl 优先，否则云函数 getMahjongOps。 */
+    async refreshMahjongOpsConfig() {
+      try {
+        const fetchJson = createWxMahjongManifestFetcher();
+        const cdnOk = await fetchMahjongOpsFromCdn(fetchJson);
+        if (cdnOk) {
+          this.deps.analytics.track("mahjong_ops_config_ok", {
+            source: "cdn",
+            version: getMahjongOpsVersion()
+          });
+          return true;
+        }
+        const cloudOk = await fetchMahjongOpsFromCloud(() => fetchMahjongOpsViaCloudFunction());
+        if (cloudOk) {
+          this.deps.analytics.track("mahjong_ops_config_ok", {
+            source: "cloud",
+            version: getMahjongOpsVersion()
+          });
+          return true;
+        }
+        return false;
+      } catch (e) {
+        this.deps.analytics.track("mahjong_ops_config_fail", {});
+        return false;
+      }
+    }
+    /** 激励视频解锁麻将馆本局第 7 槽。 */
+    async showMahjongAdSlot() {
+      const game = this.mahjong.getActiveGame();
+      if (!game || game.adSlotUnlocked) {
+        return "unavailable";
+      }
+      if (!isMahjongRewardedVideoSlotEnabled()) {
+        return "disabled";
+      }
+      this.deps.analytics.track("ad_show", {
+        placement: "rewarded_revive",
+        reason: "mahjong_ad_slot",
+        levelId: game.level
+      });
+      if (!canCreateWxFullscreenAds()) {
+        if (!shouldUnlockAllLevelsForPreview()) {
+          return "unavailable";
+        }
+        const ok = await this.mahjong.unlockAdSlot();
+        if (ok) {
+          this.deps.analytics.track("ad_complete", {
+            placement: "rewarded_revive",
+            reason: "mahjong_ad_slot_dev"
+          });
+        }
+        return ok ? "unlocked" : "error";
+      }
+      void this.deps.ads.load("rewarded_revive");
+      const result = await this.deps.ads.show("rewarded_revive");
+      if (result === "completed") {
+        this.deps.analytics.track("ad_complete", {
+          placement: "rewarded_revive",
+          reason: "mahjong_ad_slot"
+        });
+        const ok = await this.mahjong.unlockAdSlot();
+        return ok ? "unlocked" : "error";
+      }
+      if (result === "skipped") {
+        return "skipped";
+      }
+      this.deps.analytics.track("ad_error", {
+        placement: "rewarded_revive",
+        reason: "mahjong_ad_slot",
+        result
+      });
+      return result === "not_ready" ? "unavailable" : "error";
+    }
+    /** 槽位已满：看激励视频移出 3 张后继续本局。 */
+    async showMahjongSlotFullReviveAd() {
+      const game = this.mahjong.getActiveGame();
+      if (!(game == null ? void 0 : game.canReviveFromSlotFullAd())) {
+        return "unavailable";
+      }
+      this.deps.analytics.track("ad_show", {
+        placement: "rewarded_revive",
+        reason: "mahjong_slot_full",
+        levelId: game.level
+      });
+      if (!canCreateWxFullscreenAds()) {
+        if (!shouldUnlockAllLevelsForPreview()) {
+          return "unavailable";
+        }
+        const ok = await this.mahjong.reviveAfterSlotFullAd();
+        if (ok) {
+          this.deps.analytics.track("ad_complete", {
+            placement: "rewarded_revive",
+            reason: "mahjong_slot_full_dev"
+          });
+        }
+        return ok ? "revived" : "error";
+      }
+      void this.deps.ads.load("rewarded_revive");
+      const result = await this.deps.ads.show("rewarded_revive");
+      if (result === "completed") {
+        this.deps.analytics.track("ad_complete", {
+          placement: "rewarded_revive",
+          reason: "mahjong_slot_full"
+        });
+        const ok = await this.mahjong.reviveAfterSlotFullAd();
+        return ok ? "revived" : "error";
+      }
+      if (result === "skipped") {
+        return "skipped";
+      }
+      this.deps.analytics.track("ad_error", {
+        placement: "rewarded_revive",
+        reason: "mahjong_slot_full",
+        result
+      });
+      return result === "not_ready" ? "unavailable" : "error";
+    }
+    /** 道具数量为 0：看激励视频获得 1 个。 */
+    async showMahjongToolGrantAd(tool) {
+      this.deps.analytics.track("ad_show", {
+        placement: "rewarded_revive",
+        reason: "mahjong_tool",
+        tool
+      });
+      if (!canCreateWxFullscreenAds()) {
+        if (!shouldUnlockAllLevelsForPreview()) {
+          return "unavailable";
+        }
+        this.mahjong.grantTool(tool, "ad");
+        this.deps.analytics.track("ad_complete", {
+          placement: "rewarded_revive",
+          reason: "mahjong_tool_dev",
+          tool
+        });
+        return "granted";
+      }
+      void this.deps.ads.load("rewarded_revive");
+      const result = await this.deps.ads.show("rewarded_revive");
+      if (result === "completed") {
+        this.deps.analytics.track("ad_complete", {
+          placement: "rewarded_revive",
+          reason: "mahjong_tool",
+          tool
+        });
+        this.mahjong.grantTool(tool, "ad");
+        return "granted";
+      }
+      if (result === "skipped") {
+        return "skipped";
+      }
+      this.deps.analytics.track("ad_error", {
+        placement: "rewarded_revive",
+        reason: "mahjong_tool",
+        tool,
+        result
+      });
+      return result === "not_ready" ? "unavailable" : "error";
     }
     /** 大厅藤蔓：当前节点的 5 关（兼容旧逻辑） */
     getVineNode() {
@@ -7456,7 +9077,7 @@
       );
     }
     /**
-     * 在大厅展示底部横幅。进关或弹层时不要调。
+     * 在大厅展示底部横幅。进关、麻将馆对局或弹层时不要调。
      */
     async showLobbyBanner() {
       if (!this.isLobbyBannerEnabled()) {
@@ -7467,8 +9088,12 @@
         this.hideLobbyBanner();
         return "error";
       }
+      if (this.mahjong.getActiveGame()) {
+        this.hideLobbyBanner();
+        return "error";
+      }
       const result = await this.deps.ads.show("banner_lobby");
-      if (this.fsm.getCurrent() !== "Lobby") {
+      if (this.fsm.getCurrent() !== "Lobby" || this.mahjong.getActiveGame()) {
         this.hideLobbyBanner();
         return "error";
       }
@@ -8100,7 +9725,7 @@
   };
 
   // src/core/adapters/WxCloudChallengeApi.ts
-  function cloudApi2() {
+  function cloudApi3() {
     try {
       if (typeof wx === "undefined" || !wx.cloud) {
         return null;
@@ -8116,7 +9741,7 @@
       return cloudReady;
     }
     cloudReady = (async () => {
-      const cloud = cloudApi2();
+      const cloud = cloudApi3();
       if (!cloud || typeof cloud.callFunction !== "function") {
         return false;
       }
@@ -8155,7 +9780,7 @@
       if (!await ensureCloud()) {
         return { ok: false, reason: "cloud_unavailable" };
       }
-      const cloud = cloudApi2();
+      const cloud = cloudApi3();
       if (!(cloud == null ? void 0 : cloud.callFunction)) {
         return { ok: false, reason: "cloud_unavailable" };
       }
@@ -9680,6 +11305,10 @@
     sparkle: {
       imageUrlId: "",
       imageUrl: "assets/main/share/sparkle-500x400.jpg"
+    },
+    mahjong_button: {
+      imageUrlId: "",
+      imageUrl: "assets/main/mahjong/mahjong_button_test.png"
     }
   };
 
@@ -10852,7 +12481,2252 @@
     ctx.closePath();
   }
 
+  // src/presentation/mahjong/MahjongPlayLayoutMetrics.ts
+  var MAHJONG_TOOL_LEFT_RESERVE_RATIO = 0.3;
+  var MAHJONG_TOOL_AFTER_PET_GAP = 14;
+  function mahjongPlayMetrics(width, height) {
+    const pad = 10;
+    const safeTop = Math.max(44, height * 0.055);
+    const headerBottom = safeTop + 48;
+    const slotH = Math.min(52, width * 0.124);
+    const slotW = (width - pad * 2 - 6 * 5) / 7;
+    const toolD = Math.min(50, width * 0.118);
+    const toolLabelSpace = 11;
+    const toolY = height - toolD - toolLabelSpace - Math.max(12, height * 0.02);
+    const slotY = toolY - slotH - 38;
+    const pileTop = headerBottom + 6;
+    const pileBottom = slotY - 10;
+    return {
+      pad,
+      safeTop,
+      headerBottom,
+      pileTop,
+      pileBottom,
+      slotY,
+      slotW,
+      slotH,
+      toolY,
+      toolD
+    };
+  }
+  function mahjongSlotTileRect(width, height, slotIndex) {
+    const m = mahjongPlayMetrics(width, height);
+    const x = m.pad + slotIndex * (m.slotW + 5) + 3;
+    const y = m.slotY + 3;
+    return { x, y, w: m.slotW - 6, h: m.slotH - 6 };
+  }
+  var TOOL_IDS = ["move_out", "gather", "shuffle", "reveal"];
+  function mahjongToolButtonLayout(width, height) {
+    const m = mahjongPlayMetrics(width, height);
+    const gap = 4;
+    const d = m.toolD;
+    const clusterW = TOOL_IDS.length * d + (TOOL_IDS.length - 1) * gap;
+    const leftLimit = Math.floor(width * MAHJONG_TOOL_LEFT_RESERVE_RATIO);
+    let startX = leftLimit + MAHJONG_TOOL_AFTER_PET_GAP;
+    const maxStart = width - m.pad - clusterW;
+    if (startX > maxStart) {
+      startX = maxStart;
+    }
+    return TOOL_IDS.map((tool, idx) => ({
+      tool,
+      x: startX + idx * (d + gap),
+      y: m.toolY,
+      w: d,
+      h: d
+    }));
+  }
+
+  // src/presentation/mahjong/MahjongPileLayout.ts
+  var MAHJONG_PILE_REF_POSE_SCALE = 0.16;
+  var MAHJONG_PILE_TILE_SIZE_FACTOR = 0.66;
+  var MAHJONG_PILE_TILE_WIDTH_RATIO = 0.21;
+  var MAHJONG_TILE_FACE_ASPECT = 120 / 88;
+  function mahjongBlockShape(stand) {
+    switch (stand) {
+      case MAHJONG_STAND_EDGE_SHORT:
+        return { topW: 0.86, topH: MAHJONG_TILE_FACE_ASPECT, ext: 0.16 };
+      case MAHJONG_STAND_EDGE_LONG:
+        return { topW: 1, topH: 0.3, ext: 0.88 };
+      case MAHJONG_STAND_TILT:
+        return { topW: 1, topH: MAHJONG_TILE_FACE_ASPECT, ext: 0.22 };
+      case MAHJONG_STAND_UPRIGHT:
+        return { topW: 1, topH: MAHJONG_TILE_FACE_ASPECT, ext: 0.26 };
+      default:
+        return { topW: 1, topH: MAHJONG_TILE_FACE_ASPECT, ext: 0.16 };
+    }
+  }
+  function mahjongPileNormToCenter(n, halfSizeRatio) {
+    const inset = Math.min(0.48, Math.max(0.04, halfSizeRatio));
+    return inset + n * (1 - 2 * inset);
+  }
+  function mahjongPileTileWidth(screenWidth, poseScale) {
+    const scale = poseScale / MAHJONG_PILE_REF_POSE_SCALE;
+    return screenWidth * MAHJONG_PILE_TILE_WIDTH_RATIO * MAHJONG_PILE_TILE_SIZE_FACTOR * scale;
+  }
+  function pilePosesToHits(poses, width, height) {
+    const m = mahjongPlayMetrics(width, height);
+    const pad = 10;
+    const pileTop = m.pileTop;
+    const pileBottom = m.pileBottom;
+    const areaW = width - pad * 2;
+    const areaH = Math.max(80, pileBottom - pileTop);
+    const hits = [];
+    for (let index = 0; index < poses.length; index += 1) {
+      const p = poses[index];
+      const faceW = mahjongPileTileWidth(width, p.scale);
+      const shape = mahjongBlockShape(p.stand);
+      const w = faceW * shape.topW;
+      const h = faceW * (shape.topH + shape.ext);
+      const cos = Math.abs(Math.cos(p.rot));
+      const sin = Math.abs(Math.sin(p.rot));
+      const boundW = w * cos + h * sin;
+      const boundH = w * sin + h * cos;
+      const cx = pad + mahjongPileNormToCenter(p.nx, boundW / 2 / Math.max(1, areaW)) * areaW;
+      const cy = pileTop + mahjongPileNormToCenter(p.ny, boundH / 2 / Math.max(1, areaH)) * areaH;
+      hits.push({
+        index,
+        x: cx - w / 2,
+        y: cy - h / 2,
+        w,
+        h,
+        rot: p.rot
+      });
+    }
+    hits.sort((a, b) => {
+      var _a, _b, _c, _d;
+      const za = (_b = (_a = poses[a.index]) == null ? void 0 : _a.z) != null ? _b : a.index;
+      const zb = (_d = (_c = poses[b.index]) == null ? void 0 : _c.z) != null ? _d : b.index;
+      return za - zb;
+    });
+    return hits;
+  }
+  var pileLayoutCache = null;
+  function clearMahjongPileLayoutCache() {
+    pileLayoutCache = null;
+  }
+  function pilePosesToHitsCached(poses, width, height, layoutEpoch) {
+    const key = `${width}x${height}:${layoutEpoch}:${poses.length}`;
+    if ((pileLayoutCache == null ? void 0 : pileLayoutCache.key) === key) {
+      return { hits: pileLayoutCache.hits, zMax: pileLayoutCache.zMax };
+    }
+    const hits = pilePosesToHits(poses, width, height);
+    let zMax = 1;
+    for (const p of poses) {
+      zMax = Math.max(zMax, p.z);
+    }
+    pileLayoutCache = { key, hits, zMax };
+    return pileLayoutCache;
+  }
+
+  // src/presentation/mahjong/MahjongTileRasterCache.ts
+  var MAX_ENTRIES = 160;
+  var cache = /* @__PURE__ */ new Map();
+  var touchOrder = [];
+  var rasterScaleMemo = 0;
+  function clearMahjongTileRasterCache() {
+    cache.clear();
+    touchOrder.length = 0;
+    rasterScaleMemo = 0;
+  }
+  function createOffscreenCanvas(width, height) {
+    try {
+      const wxApi2 = globalThis.wx;
+      if (!(wxApi2 == null ? void 0 : wxApi2.createCanvas)) {
+        return null;
+      }
+      const canvas = wxApi2.createCanvas();
+      canvas.width = Math.max(1, Math.ceil(width));
+      canvas.height = Math.max(1, Math.ceil(height));
+      return canvas;
+    } catch (e) {
+      return null;
+    }
+  }
+  function resolveRasterScale() {
+    var _a, _b, _c;
+    if (rasterScaleMemo > 0) {
+      return rasterScaleMemo;
+    }
+    let scale = 1;
+    try {
+      const wxApi2 = globalThis.wx;
+      const pr = (_c = (_b = (_a = wxApi2 == null ? void 0 : wxApi2.getSystemInfoSync) == null ? void 0 : _a.call(wxApi2)) == null ? void 0 : _b.pixelRatio) != null ? _c : 1;
+      scale = pr >= 2 ? 2 : 1;
+    } catch (e) {
+      scale = 1;
+    }
+    rasterScaleMemo = scale;
+    return scale;
+  }
+  function quantizeMahjongTileFaceW(faceW) {
+    return Math.max(6, Math.round(faceW * 4) / 4);
+  }
+  function cacheKey(themeKey, type, stand, faceDown, faceW, scale) {
+    return `${themeKey}|${type}|${stand}|${faceDown ? 1 : 0}|${faceW}|s${scale}`;
+  }
+  function touchKey(key) {
+    const idx = touchOrder.indexOf(key);
+    if (idx >= 0) {
+      touchOrder.splice(idx, 1);
+    }
+    touchOrder.push(key);
+    while (touchOrder.length > MAX_ENTRIES) {
+      const evict = touchOrder.shift();
+      if (evict) {
+        cache.delete(evict);
+      }
+    }
+  }
+  function getMahjongTileRasterBlit(themeKey, type, stand, faceDown, faceW, lookup, rasterize) {
+    const scale = resolveRasterScale();
+    const qFaceW = quantizeMahjongTileFaceW(faceW);
+    const key = cacheKey(themeKey, type, stand, faceDown, qFaceW, scale);
+    const hit = cache.get(key);
+    if (hit) {
+      touchKey(key);
+      return hit;
+    }
+    const pad = 3;
+    const shape = mahjongBlockShape(stand);
+    const boundsW = qFaceW * shape.topW;
+    const boundsH = qFaceW * (shape.topH + shape.ext);
+    const logicalW = boundsW + pad * 2;
+    const logicalH = boundsH + pad * 2;
+    const canvas = createOffscreenCanvas(logicalW * scale, logicalH * scale);
+    if (!canvas) {
+      return null;
+    }
+    const off = canvas.getContext("2d");
+    if (!off) {
+      return null;
+    }
+    off.clearRect(0, 0, canvas.width, canvas.height);
+    off.save();
+    off.scale(scale, scale);
+    off.translate(logicalW / 2, logicalH / 2);
+    rasterize(off, type, stand, faceDown, qFaceW, lookup);
+    off.restore();
+    const entry = {
+      themeKey,
+      canvas,
+      w: logicalW,
+      h: logicalH
+    };
+    cache.set(key, entry);
+    touchKey(key);
+    return entry;
+  }
+  function mahjongTileRasterEligible(opts) {
+    var _a, _b;
+    if (((_a = opts.alpha) != null ? _a : 1) !== 1) {
+      return false;
+    }
+    if (((_b = opts.lift) != null ? _b : 0) !== 0) {
+      return false;
+    }
+    if (!opts.rasterThemeKey) {
+      return false;
+    }
+    return true;
+  }
+  function warmMahjongTileRasterCache(themeKey, typeCount, lookup, rasterize, screenWidth = 390) {
+    if (!lookup || !themeKey) {
+      return;
+    }
+    const faceW = mahjongPileTileWidth(screenWidth, MAHJONG_PILE_REF_POSE_SCALE);
+    const types = Math.min(Math.max(1, typeCount), 10);
+    const stands = [
+      MAHJONG_STAND_FLAT,
+      MAHJONG_STAND_TILT,
+      MAHJONG_STAND_EDGE_SHORT,
+      MAHJONG_STAND_EDGE_LONG
+    ];
+    for (let type = 0; type < types; type += 1) {
+      for (const stand of stands) {
+        getMahjongTileRasterBlit(themeKey, type, stand, false, faceW, lookup, rasterize);
+        getMahjongTileRasterBlit(themeKey, type, stand, true, faceW, lookup, rasterize);
+      }
+    }
+  }
+
+  // src/presentation/mahjong/MahjongTileShellAssets.ts
+  var MAHJONG_SHELL_ASSET_VER = 3;
+  var MAHJONG_SHELL_SRC = {
+    front: "assets/main/mahjong/shell_front_88x120.png",
+    frontWhite: "assets/main/mahjong/shell_front_white_88x120.png",
+    /** 主线萌宠「蓝兔」，与三消 TileKind.Blue 同款 */
+    frontPetRabbit: "assets/main/tiles/blue.png",
+    top: "assets/main/mahjong/shell_top_88x40.png",
+    bottom: "assets/main/mahjong/shell_bottom_88x40.png",
+    left: "assets/main/mahjong/shell_left_40x120.png",
+    right: "assets/main/mahjong/shell_right_40x120.png",
+    back: "assets/main/mahjong/shell_back_88x120.png"
+  };
+  var shellPack;
+  var shellMissingKeys = [];
+  function setMahjongTileShellPack(pack) {
+    shellPack = pack;
+    if (pack) {
+      shellMissingKeys = [];
+    }
+  }
+  function getMahjongShellMissingKeys() {
+    return shellMissingKeys;
+  }
+  function isMahjongTileShellReady() {
+    return shellPack !== void 0;
+  }
+  function applyMahjongShellImages(parts) {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
+    const frontWhite = (_a = parts.frontWhite) != null ? _a : void 0;
+    const frontPetRabbit = (_b = parts.frontPetRabbit) != null ? _b : void 0;
+    const top = (_c = parts.top) != null ? _c : void 0;
+    const bottom = (_d = parts.bottom) != null ? _d : void 0;
+    const left = (_e = parts.left) != null ? _e : void 0;
+    const right = (_f = parts.right) != null ? _f : void 0;
+    const back = (_g = parts.back) != null ? _g : void 0;
+    const missing = [];
+    if (!frontWhite) {
+      missing.push("frontWhite");
+    }
+    if (!frontPetRabbit) {
+      missing.push("frontPetRabbit");
+    }
+    if (!top) {
+      missing.push("top");
+    }
+    if (!bottom) {
+      missing.push("bottom");
+    }
+    if (!left) {
+      missing.push("left");
+    }
+    if (!right) {
+      missing.push("right");
+    }
+    if (!back) {
+      missing.push("back");
+    }
+    if (missing.length > 0) {
+      shellMissingKeys = missing;
+      if (back) {
+        setMahjongTileBackPattern(back);
+      }
+      return false;
+    }
+    setMahjongTileShellPack({
+      front: (_h = parts.front) != null ? _h : frontWhite,
+      frontWhite,
+      frontPetRabbit,
+      top,
+      bottom,
+      left,
+      right,
+      back
+    });
+    setMahjongTileBackPattern(back);
+    return true;
+  }
+  function getMahjongTileShellPack() {
+    return shellPack;
+  }
+  var MAHJONG_TILE_BACK_SRC = MAHJONG_SHELL_SRC.back;
+  var backFacePattern;
+  function setMahjongTileBackPattern(img) {
+    backFacePattern = img;
+  }
+
+  // src/presentation/mahjong/MahjongTileRender.ts
+  var TILE_COLORS = ["#ff6b6b", "#4dabf7", "#51cf66", "#ffd43b", "#cc5de8", "#ff922b", "#20c997", "#868e96"];
+  var C = {
+    faceTop: "#ffffff",
+    faceBottom: "#faf6ee",
+    sideLight: "#f3efe6",
+    sideDeep: "#e6e0d4",
+    green: "#62d48a",
+    greenLight: "#9aebb8",
+    greenDeep: "#42c06e",
+    edgeLine: "rgba(120, 110, 90, 0.16)"
+  };
+  function roundRect2(ctx, x, y, w, h, r) {
+    const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.arcTo(x + w, y, x + w, y + h, radius);
+    ctx.arcTo(x + w, y + h, x, y + h, radius);
+    ctx.arcTo(x, y + h, x, y, radius);
+    ctx.arcTo(x, y, x + w, y, radius);
+    ctx.closePath();
+  }
+  function fillEllipse(ctx, cx, cy, rx, ry, rot) {
+    ctx.beginPath();
+    if (ctx.ellipse) {
+      ctx.ellipse(cx, cy, rx, ry, rot, 0, Math.PI * 2);
+    } else {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(rot);
+      ctx.scale(rx, ry);
+      ctx.arc(0, 0, 1, 0, Math.PI * 2);
+      ctx.restore();
+    }
+    ctx.fill();
+  }
+  function drawImageContain(ctx, img, x, y, w, h) {
+    var _a, _b;
+    const src = img;
+    const iw = (_a = src.width) != null ? _a : w;
+    const ih = (_b = src.height) != null ? _b : h;
+    if (iw <= 0 || ih <= 0) {
+      ctx.drawImage(img, x, y, w, h);
+      return;
+    }
+    const scale = Math.min(w / iw, h / ih);
+    const dw = iw * scale;
+    const dh = ih * scale;
+    ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  }
+  function petImage(lookup, type) {
+    var _a, _b;
+    return (_b = lookup == null ? void 0 : lookup(type)) != null ? _b : (_a = getMahjongTileShellPack()) == null ? void 0 : _a.frontPetRabbit;
+  }
+  function drawPetOrSwatch(ctx, lookup, type, x, y, w, h) {
+    var _a;
+    const img = petImage(lookup, type);
+    if (img) {
+      drawImageContain(ctx, img, x, y, w, h);
+      return;
+    }
+    ctx.fillStyle = (_a = TILE_COLORS[type % TILE_COLORS.length]) != null ? _a : "#adb5bd";
+    ctx.beginPath();
+    ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) * 0.34, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  function drawBlockBody(ctx, x, y, w, topH, ext, r, greenFrom, greenTo) {
+    const h = topH + ext;
+    const side = ctx.createLinearGradient(0, y + topH - r, 0, y + h);
+    side.addColorStop(0, C.sideLight);
+    side.addColorStop(1, C.sideDeep);
+    ctx.fillStyle = side;
+    roundRect2(ctx, x, y, w, h, r);
+    ctx.fill();
+    if (greenTo > greenFrom) {
+      ctx.save();
+      roundRect2(ctx, x, y, w, h, r);
+      ctx.clip();
+      const gy0 = y + topH + ext * greenFrom - (greenFrom <= 0 ? r : 0);
+      const gy1 = y + topH + ext * greenTo;
+      const g = ctx.createLinearGradient(0, gy0, 0, gy1);
+      g.addColorStop(0, C.greenLight);
+      g.addColorStop(1, C.greenDeep);
+      ctx.fillStyle = g;
+      ctx.fillRect(x, gy0, w, gy1 - gy0);
+      ctx.restore();
+    }
+    ctx.strokeStyle = C.edgeLine;
+    ctx.lineWidth = Math.max(0.6, w * 0.012);
+    roundRect2(ctx, x, y, w, h, r);
+    ctx.stroke();
+  }
+  function drawWhiteTopFace(ctx, x, y, w, h, r) {
+    const face = ctx.createLinearGradient(x, y, x + w * 0.3, y + h);
+    face.addColorStop(0, C.faceTop);
+    face.addColorStop(1, C.faceBottom);
+    ctx.fillStyle = face;
+    roundRect2(ctx, x, y, w, h, r);
+    ctx.fill();
+    const gloss = ctx.createLinearGradient(x, y, x + w * 0.55, y + h * 0.55);
+    gloss.addColorStop(0, "rgba(255,255,255,0.88)");
+    gloss.addColorStop(0.5, "rgba(255,255,255,0.12)");
+    gloss.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = gloss;
+    roundRect2(ctx, x, y, w, h, r);
+    ctx.fill();
+  }
+  function drawTopFaceBevel(ctx, x, y, w, h, r, alpha) {
+    const lw = Math.max(0.6, w * 0.02);
+    ctx.globalAlpha = alpha * 0.9;
+    ctx.strokeStyle = "rgba(255,255,255,0.95)";
+    ctx.lineWidth = lw;
+    roundRect2(ctx, x + lw, y + lw, w - lw * 2, h - lw * 2, r - lw);
+    ctx.stroke();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = "rgba(150, 140, 115, 0.18)";
+    ctx.lineWidth = Math.max(0.5, w * 0.012);
+    roundRect2(ctx, x, y, w, h, r);
+    ctx.stroke();
+  }
+  function drawGreenBackTop(ctx, x, y, w, h, r) {
+    ctx.save();
+    roundRect2(ctx, x, y, w, h, r);
+    ctx.clip();
+    const g = ctx.createLinearGradient(x, y, x + w * 0.4, y + h);
+    g.addColorStop(0, C.greenLight);
+    g.addColorStop(0.55, C.green);
+    g.addColorStop(1, C.greenDeep);
+    ctx.fillStyle = g;
+    ctx.fillRect(x, y, w, h);
+    const u = Math.min(w, h);
+    if (h > w * 0.8) {
+      drawPawEmblem(ctx, x + w / 2, y + h * 0.53, u * 0.2);
+    }
+    const gloss = ctx.createLinearGradient(x, y, x + w * 0.5, y + h * 0.45);
+    gloss.addColorStop(0, "rgba(255,255,255,0.52)");
+    gloss.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = gloss;
+    ctx.fillRect(x, y, w, h * 0.5);
+    ctx.restore();
+  }
+  function drawPawEmblem(ctx, cx, cy, s) {
+    const pads = [
+      [-0.62, -0.62, 0.24],
+      [-0.22, -0.92, 0.26],
+      [0.22, -0.92, 0.26],
+      [0.62, -0.62, 0.24]
+    ];
+    ctx.fillStyle = "rgba(120, 210, 155, 0.92)";
+    fillEllipse(ctx, cx, cy + s * 0.15, s * 0.5, s * 0.4, 0);
+    for (const [px, py, pr] of pads) {
+      ctx.beginPath();
+      ctx.arc(cx + px * s, cy + py * s, pr * s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  function drawFaceUpBlock(ctx, type, lookup, w, topH, ext, faceDown, alpha) {
+    const x = -w / 2;
+    const y = -(topH + ext) / 2;
+    const r = w * 0.13;
+    ctx.globalAlpha = alpha;
+    if (faceDown) {
+      drawBlockBody(ctx, x, y, w, topH, ext, r, 0, 0.45);
+      drawGreenBackTop(ctx, x, y, w, topH, r);
+    } else {
+      drawBlockBody(ctx, x, y, w, topH, ext, r, 0.7, 1);
+      drawWhiteTopFace(ctx, x, y, w, topH, r);
+      const pad = w * 0.12;
+      drawPetOrSwatch(ctx, lookup, type, x + pad, y + pad, w - pad * 2, topH - pad * 2);
+    }
+    drawTopFaceBevel(ctx, x, y, w, topH, r, alpha);
+  }
+  function drawEdgeShortBlock(ctx, type, lookup, faceW, faceDown, alpha) {
+    const shape = mahjongBlockShape(MAHJONG_STAND_EDGE_SHORT);
+    const w = faceW * shape.topW;
+    const topH = faceW * shape.topH;
+    const ext = faceW * shape.ext;
+    const x = -w / 2;
+    const y = -(topH + ext) / 2;
+    const r = w * 0.14;
+    ctx.globalAlpha = alpha;
+    drawBlockBody(ctx, x, y, w, topH, ext, r, 0, 0);
+    const faceStripW = w * 0.66;
+    const sideX = x + faceStripW;
+    const sideW = w - faceStripW;
+    const greenW = sideW * 0.42;
+    ctx.save();
+    roundRect2(ctx, x, y, w, topH, r);
+    ctx.clip();
+    const side = ctx.createLinearGradient(sideX, 0, x + w, 0);
+    side.addColorStop(0, C.faceTop);
+    side.addColorStop(1, C.sideLight);
+    ctx.fillStyle = side;
+    ctx.fillRect(sideX, y, sideW, topH);
+    const gx = faceDown ? sideX : x + w - greenW;
+    const g = ctx.createLinearGradient(gx, 0, gx + greenW, 0);
+    g.addColorStop(0, faceDown ? C.greenDeep : C.greenLight);
+    g.addColorStop(1, faceDown ? C.greenLight : C.greenDeep);
+    ctx.fillStyle = g;
+    ctx.fillRect(gx, y, greenW, topH);
+    ctx.restore();
+    if (faceDown) {
+      drawGreenBackTop(ctx, x, y, faceStripW, topH, r);
+    } else {
+      ctx.save();
+      roundRect2(ctx, x, y, faceStripW + r, topH, r);
+      ctx.clip();
+      drawWhiteTopFace(ctx, x, y, faceStripW + r, topH, r);
+      ctx.restore();
+      const img = petImage(lookup, type);
+      if (img) {
+        ctx.save();
+        ctx.translate(x + faceStripW / 2, y + topH / 2);
+        ctx.scale(0.72, 1);
+        const s = faceW * 0.74;
+        drawImageContain(ctx, img, -s / 2, -s / 2, s, s);
+        ctx.restore();
+      }
+    }
+    ctx.strokeStyle = "rgba(150, 140, 115, 0.35)";
+    ctx.lineWidth = Math.max(0.5, w * 0.016);
+    ctx.beginPath();
+    ctx.moveTo(sideX, y + r * 0.3);
+    ctx.lineTo(sideX, y + topH + ext - r * 0.3);
+    ctx.stroke();
+    drawTopFaceBevel(ctx, x, y, w, topH, r, alpha);
+  }
+  function drawEdgeLongBlock(ctx, type, lookup, faceW, faceDown, alpha) {
+    const shape = mahjongBlockShape(MAHJONG_STAND_EDGE_LONG);
+    const w = faceW * shape.topW;
+    const topH = faceW * shape.topH;
+    const ext = faceW * shape.ext;
+    const x = -w / 2;
+    const y = -(topH + ext) / 2;
+    const r = w * 0.12;
+    const h = topH + ext;
+    ctx.globalAlpha = alpha;
+    ctx.save();
+    roundRect2(ctx, x, y, w, h, r);
+    ctx.clip();
+    if (faceDown) {
+      drawGreenBackTop(ctx, x, y + topH, w, ext, 0);
+    } else {
+      const front = ctx.createLinearGradient(0, y + topH, 0, y + h);
+      front.addColorStop(0, "#fcfaf4");
+      front.addColorStop(1, "#f0ebe2");
+      ctx.fillStyle = front;
+      ctx.fillRect(x, y + topH, w, ext);
+      const img = petImage(lookup, type);
+      if (img) {
+        ctx.save();
+        ctx.translate(0, y + topH + ext * 0.5);
+        ctx.scale(1, 0.7);
+        const s = faceW * 0.72;
+        drawImageContain(ctx, img, -s / 2, -s / 2, s, s);
+        ctx.restore();
+      }
+    }
+    const edge = ctx.createLinearGradient(0, y, 0, y + topH);
+    edge.addColorStop(0, C.faceTop);
+    edge.addColorStop(1, C.sideLight);
+    ctx.fillStyle = edge;
+    ctx.fillRect(x, y, w, topH);
+    const stripH = topH * 0.42;
+    const gy = faceDown ? y + topH - stripH : y;
+    const g = ctx.createLinearGradient(0, gy, 0, gy + stripH);
+    g.addColorStop(0, faceDown ? C.green : C.greenLight);
+    g.addColorStop(1, faceDown ? C.greenDeep : C.green);
+    ctx.fillStyle = g;
+    ctx.fillRect(x, gy, w, stripH);
+    ctx.restore();
+    ctx.strokeStyle = "rgba(150, 140, 115, 0.35)";
+    ctx.lineWidth = Math.max(0.5, w * 0.012);
+    ctx.beginPath();
+    ctx.moveTo(x + r * 0.3, y + topH);
+    ctx.lineTo(x + w - r * 0.3, y + topH);
+    ctx.stroke();
+    drawTopFaceBevel(ctx, x, y, w, h, r, alpha);
+  }
+  function drawStandingMahjongTileBlocks(ctx, type, lookup, stand, faceW, faceDown, alpha) {
+    const shape = mahjongBlockShape(stand);
+    if (stand === MAHJONG_STAND_EDGE_SHORT) {
+      drawEdgeShortBlock(ctx, type, lookup, faceW, faceDown, alpha);
+      return { w: faceW * shape.topW, h: faceW * (shape.topH + shape.ext) };
+    }
+    if (stand === MAHJONG_STAND_EDGE_LONG) {
+      drawEdgeLongBlock(ctx, type, lookup, faceW, faceDown, alpha);
+      return { w: faceW * shape.topW, h: faceW * (shape.topH + shape.ext) };
+    }
+    drawFaceUpBlock(
+      ctx,
+      type,
+      lookup,
+      faceW,
+      faceW * shape.topH,
+      faceW * shape.ext,
+      faceDown,
+      alpha
+    );
+    return { w: faceW * shape.topW, h: faceW * (shape.topH + shape.ext) };
+  }
+  function drawStandingMahjongTile(ctx, x, y, w, h, rot, type, lookup, opts = {}) {
+    var _a, _b, _c, _d;
+    const stand = (_a = opts.stand) != null ? _a : MAHJONG_STAND_FLAT;
+    const shape = mahjongBlockShape(stand);
+    const faceW = Math.min(w / shape.topW, h / (shape.topH + shape.ext));
+    if (!(faceW > 0)) {
+      return;
+    }
+    const alpha = (_b = opts.alpha) != null ? _b : 1;
+    const faceDown = opts.faceDown === true;
+    if (mahjongTileRasterEligible(opts)) {
+      const blit = getMahjongTileRasterBlit(
+        opts.rasterThemeKey,
+        type,
+        stand,
+        faceDown,
+        faceW,
+        lookup,
+        (offCtx, t, st, fd, fw, lu) => drawStandingMahjongTileBlocks(offCtx, t, lu, st, fw, fd, 1)
+      );
+      if (blit) {
+        ctx.save();
+        ctx.translate(x + w / 2, y + h / 2 + ((_c = opts.lift) != null ? _c : 0));
+        ctx.rotate(rot);
+        const smooth = ctx.imageSmoothingEnabled;
+        ctx.imageSmoothingEnabled = true;
+        const quality = ctx.imageSmoothingQuality;
+        if (quality !== void 0) {
+          ctx.imageSmoothingQuality = "high";
+        }
+        try {
+          ctx.drawImage(blit.canvas, -blit.w / 2, -blit.h / 2, blit.w, blit.h);
+        } catch (e) {
+          drawStandingMahjongTileBlocks(ctx, type, lookup, stand, faceW, faceDown, alpha);
+        }
+        ctx.imageSmoothingEnabled = smooth;
+        if (quality !== void 0) {
+          ctx.imageSmoothingQuality = quality;
+        }
+        ctx.restore();
+        return;
+      }
+    }
+    ctx.save();
+    ctx.translate(x + w / 2, y + h / 2 + ((_d = opts.lift) != null ? _d : 0));
+    ctx.rotate(rot);
+    drawStandingMahjongTileBlocks(ctx, type, lookup, stand, faceW, faceDown, alpha);
+    ctx.restore();
+  }
+
+  // src/presentation/mahjong/MahjongCutePanel.ts
+  var MJ_CARD_DEFAULT = {
+    radius: 22,
+    fillTop: "rgba(255,255,255,0.98)",
+    fillBottom: "rgba(224, 248, 245, 0.97)",
+    border: "rgba(56, 178, 172, 0.92)",
+    borderWidth: 3,
+    shadow: false,
+    sparkle: true
+  };
+  function roundRectPath(ctx, x, y, w, h, r) {
+    const radius = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.arcTo(x + w, y, x + w, y + h, radius);
+    ctx.arcTo(x + w, y + h, x, y + h, radius);
+    ctx.arcTo(x, y + h, x, y, radius);
+    ctx.arcTo(x, y, x + w, y, radius);
+    ctx.closePath();
+  }
+  function mahjongCoverLayout(img, width, height, vBias = 0.52) {
+    const iw = Math.max(1, img.width || width);
+    const ih = Math.max(1, img.height || height);
+    const cover = Math.max(width / iw, height / ih);
+    const dw = iw * cover;
+    const dh = ih * cover;
+    const dx = (width - dw) * 0.5;
+    const bias = Math.max(0, Math.min(1, vBias));
+    const dy = (height - dh) * bias;
+    return { dx, dy, dw, dh };
+  }
+  var MAHJONG_PLAY_LOBBY_SRC_TOP_RATIO = 0.14;
+  function mahjongPlayLobbyCoverLayout(img, width, height, pileTop, pileBottom) {
+    const iw = Math.max(1, img.width || width);
+    const ih = Math.max(1, img.height || height);
+    const sy = Math.floor(ih * MAHJONG_PLAY_LOBBY_SRC_TOP_RATIO);
+    const sh = Math.max(1, ih - sy);
+    const pileMidNorm = pileBottom > pileTop ? (pileTop + pileBottom) * 0.5 / Math.max(1, height) : 0.55;
+    const vBias = Math.max(0.48, Math.min(0.74, 0.5 + pileMidNorm * 0.32));
+    const cover = Math.max(width / iw, height / sh);
+    const dw = iw * cover;
+    const dh = sh * cover;
+    const dx = (width - dw) * 0.5;
+    const dy = (height - dh) * vBias;
+    return { sx: 0, sy, sw: iw, sh, dx, dy, dw, dh };
+  }
+  function drawMahjongPlaySceneBackground(ctx, width, height, pileTop, pileBottom, bgImage, _slotY, bgShift = { dx: 0, dy: 0 }) {
+    ctx.save();
+    const bleed = 28;
+    ctx.translate(bgShift.dx, bgShift.dy);
+    ctx.fillStyle = "#b8ddd8";
+    ctx.fillRect(-bleed, -bleed, width + bleed * 2, height + bleed * 2);
+    if (bgImage) {
+      try {
+        const layout = mahjongPlayLobbyCoverLayout(bgImage, width, height, pileTop, pileBottom);
+        ctx.drawImage(
+          bgImage,
+          layout.sx,
+          layout.sy,
+          layout.sw,
+          layout.sh,
+          layout.dx - bleed,
+          layout.dy - bleed,
+          layout.dw + bleed * 2,
+          layout.dh + bleed * 2
+        );
+      } catch (e) {
+      }
+    }
+    ctx.restore();
+  }
+  function drawMahjongModalVeil(ctx, width, height, strength = 0.48) {
+    ctx.fillStyle = `rgba(28, 64, 58, ${strength})`;
+    ctx.fillRect(0, 0, width, height);
+  }
+  function drawMahjongCuteCard(ctx, x, y, w, h, style = {}) {
+    var _a;
+    const s = { ...MJ_CARD_DEFAULT, ...style };
+    const r = s.radius;
+    if (s.shadow) {
+      ctx.save();
+      ctx.globalAlpha = 0.16;
+      ctx.fillStyle = "#1a4a44";
+      roundRectPath(ctx, x + 3, y + 7, w, h, r);
+      ctx.fill();
+      ctx.restore();
+    }
+    const grad = ctx.createLinearGradient(x, y, x, y + h);
+    grad.addColorStop(0, s.fillTop);
+    grad.addColorStop(1, s.fillBottom);
+    ctx.fillStyle = grad;
+    roundRectPath(ctx, x, y, w, h, r);
+    ctx.fill();
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    const gloss = ctx.createLinearGradient(x, y, x, y + h * 0.45);
+    gloss.addColorStop(0, "rgba(255,255,255,0.92)");
+    gloss.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = gloss;
+    roundRectPath(ctx, x + 4, y + 3, w - 8, h * 0.4, Math.max(8, r - 6));
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = s.border;
+    ctx.lineWidth = s.borderWidth;
+    roundRectPath(ctx, x + 1, y + 1, w - 2, h - 2, Math.max(4, r - 1));
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.78)";
+    ctx.lineWidth = 1.5;
+    roundRectPath(ctx, x + 5, y + 5, w - 10, h - 10, Math.max(4, r - 6));
+    ctx.stroke();
+    if (s.sparkle) {
+      const t = ((_a = s.nowMs) != null ? _a : 0) * 6e-3;
+      const dots = [
+        { dx: 18, dy: 16 },
+        { dx: w - 20, dy: 18 },
+        { dx: 22, dy: h - 18 },
+        { dx: w - 24, dy: h - 20 }
+      ];
+      for (let i = 0; i < dots.length; i += 1) {
+        const d = dots[i];
+        const twinkle = 0.4 + 0.6 * Math.abs(Math.sin(t + i));
+        ctx.save();
+        ctx.globalAlpha = twinkle;
+        ctx.fillStyle = "#96f2d7";
+        ctx.beginPath();
+        ctx.arc(x + d.dx, y + d.dy, 2.1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+  function layoutMahjongModalCard(width, height, cardW, cardH, footerH) {
+    const x = (width - cardW) / 2;
+    const y = (height - cardH) / 2;
+    return {
+      x,
+      y,
+      w: cardW,
+      h: cardH,
+      cx: x + cardW / 2,
+      cy: y + cardH / 2,
+      heroH: Math.max(120, cardH - footerH),
+      footerH
+    };
+  }
+  function drawMahjongToolNameLabel(ctx, text, anchorX, cy, align = "center") {
+    ctx.save();
+    ctx.font = "bold 9px sans-serif";
+    const padX = 5;
+    const w = Math.ceil(ctx.measureText(text).width) + padX * 2;
+    const h = 14;
+    const x = align === "right" ? anchorX - w : anchorX - w / 2;
+    const y = cy - h / 2;
+    const r = h / 2;
+    const body = ctx.createLinearGradient(x, y, x, y + h);
+    body.addColorStop(0, "rgba(255,255,255,0.98)");
+    body.addColorStop(0.42, "rgba(245,252,250,0.96)");
+    body.addColorStop(1, "rgba(196, 228, 220, 0.94)");
+    ctx.fillStyle = body;
+    roundRectPath(ctx, x, y, w, h, r);
+    ctx.fill();
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = "#ffffff";
+    roundRectPath(ctx, x + 2, y + 1.5, w - 4, h * 0.38, Math.max(2, r - 3));
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = "rgba(255,255,255,0.98)";
+    ctx.lineWidth = 2;
+    roundRectPath(ctx, x, y, w, h, r);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(46, 138, 128, 0.45)";
+    ctx.lineWidth = 1;
+    roundRectPath(ctx, x + 1, y + 1, w - 2, h - 2, r - 1);
+    ctx.stroke();
+    const tx = align === "right" ? anchorX - padX : anchorX;
+    ctx.textAlign = align === "right" ? "right" : "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "bold 9px sans-serif";
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 2;
+    ctx.strokeText(text, tx, cy);
+    ctx.fillStyle = "#15524a";
+    ctx.fillText(text, tx, cy);
+    ctx.restore();
+  }
+  function drawMahjongToolCountBadge(ctx, count, bx, by) {
+    const r = 11;
+    ctx.save();
+    const g = ctx.createRadialGradient(bx - 3, by - 4, 1, bx, by, r);
+    g.addColorStop(0, "#ff8787");
+    g.addColorStop(1, "#e03131");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(bx, by, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    drawMahjongCenterText(ctx, String(count), bx, by, "bold 11px sans-serif", "#ffffff");
+    ctx.restore();
+  }
+  function drawMahjongCenterText(ctx, text, cx, cy, font, fill2) {
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = font;
+    ctx.fillStyle = fill2;
+    ctx.fillText(text, cx, cy);
+    ctx.restore();
+  }
+  var MJ_CELEBRATE_CROP_TOP = 0.36;
+  function drawMahjongCelebrateHeroImage(ctx, img, cardX, cardY, cardW, heroH, radius, cropTopRatio = MJ_CELEBRATE_CROP_TOP, cropBottomRatio = 0) {
+    const iw = Math.max(1, img.width || 576);
+    const ih = Math.max(1, img.height || 604);
+    const sy = Math.floor(ih * Math.max(0, Math.min(0.55, cropTopRatio)));
+    const bottomCut = Math.floor(ih * Math.max(0, Math.min(0.45, cropBottomRatio)));
+    const sh = Math.max(1, ih - sy - bottomCut);
+    const pad = 8;
+    const drawW = cardW - pad * 2;
+    const drawH = heroH - pad - 6;
+    const drawX = cardX + pad;
+    const drawY = cardY + 6;
+    ctx.save();
+    roundRectPath(ctx, drawX, drawY, drawW, drawH, radius - 4);
+    ctx.clip();
+    ctx.drawImage(img, 0, sy, iw, sh, drawX, drawY, drawW, drawH);
+    ctx.restore();
+  }
+  function drawMahjongModalPlayBackgroundPanel(ctx, img, x, y, w, h, radius) {
+    ctx.save();
+    roundRectPath(ctx, x, y, w, h, radius);
+    ctx.clip();
+    try {
+      const layout = mahjongCoverLayout(img, w, h, 0.5);
+      ctx.drawImage(img, x + layout.dx, y + layout.dy, layout.dw, layout.dh);
+    } catch (e) {
+      ctx.fillStyle = "#e8f8f5";
+      ctx.fillRect(x, y, w, h);
+    }
+    const wash = ctx.createLinearGradient(x, y, x, y + h);
+    wash.addColorStop(0, "rgba(255,255,255,0.38)");
+    wash.addColorStop(0.45, "rgba(255,255,255,0.12)");
+    wash.addColorStop(1, "rgba(255,255,255,0.36)");
+    ctx.fillStyle = wash;
+    ctx.fillRect(x, y, w, h);
+    ctx.restore();
+  }
+  function drawMahjongModalFooterReadableBand(ctx, cardX, cardY, cardW, cardH, footerH) {
+    const footY = cardY + cardH - footerH;
+    ctx.save();
+    roundRectPath(ctx, cardX, cardY, cardW, cardH, 22);
+    ctx.clip();
+    const g = ctx.createLinearGradient(0, footY - 24, 0, cardY + cardH);
+    g.addColorStop(0, "rgba(255,255,255,0)");
+    g.addColorStop(0.35, "rgba(255,255,255,0.55)");
+    g.addColorStop(1, "rgba(255,255,255,0.72)");
+    ctx.fillStyle = g;
+    ctx.fillRect(cardX, footY - 24, cardW, footerH + 24);
+    ctx.restore();
+  }
+  function drawMahjongModalPanelImage(ctx, img, x, y, w, h, radius) {
+    ctx.save();
+    roundRectPath(ctx, x, y, w, h, radius);
+    ctx.clip();
+    try {
+      ctx.drawImage(img, x, y, w, h);
+    } catch (e) {
+    }
+    ctx.restore();
+  }
+  function drawMahjongModalCardFace(ctx, x, y, w, h, radius, chrome, nowMs) {
+    if (chrome.playBgImage) {
+      drawMahjongModalPlayBackgroundPanel(ctx, chrome.playBgImage, x, y, w, h, radius);
+      return;
+    }
+    if (chrome.slotFullModalBg) {
+      drawMahjongModalPanelImage(ctx, chrome.slotFullModalBg, x, y, w, h, radius);
+      return;
+    }
+    drawMahjongCuteCard(ctx, x, y, w, h, {
+      nowMs,
+      radius,
+      borderWidth: 0,
+      border: "transparent",
+      shadow: false,
+      sparkle: false
+    });
+  }
+  function drawMahjongModalFooterBand(ctx, cardX, cardY, cardW, cardH, footerH) {
+    const footY = cardY + cardH - footerH;
+    const g = ctx.createLinearGradient(0, footY, 0, cardY + cardH);
+    g.addColorStop(0, "rgba(255,255,255,0.12)");
+    g.addColorStop(1, "rgba(224, 248, 245, 0.65)");
+    ctx.fillStyle = g;
+    roundRectPath(ctx, cardX + 8, footY, cardW - 16, footerH - 6, 14);
+    ctx.fill();
+  }
+  function drawMahjongPrimaryCapsuleButton(ctx, x, y, w, h, label, top = "#ffe066", bottom = "#fab005", textColor = "#5c3d00") {
+    const g = ctx.createLinearGradient(x, y, x, y + h);
+    g.addColorStop(0, top);
+    g.addColorStop(1, bottom);
+    ctx.fillStyle = g;
+    roundRectPath(ctx, x, y, w, h, h / 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 2;
+    roundRectPath(ctx, x + 1, y + 1, w - 2, h - 2, h / 2 - 1);
+    ctx.stroke();
+    drawMahjongCenterText(ctx, label, x + w / 2, y + h / 2, "bold 16px sans-serif", textColor);
+  }
+  function drawMahjongPanelCloseOrb(ctx, cx, cy, r) {
+    ctx.save();
+    ctx.fillStyle = "#ffd43b";
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(92, 61, 0, 0.35)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    drawMahjongCenterText(
+      ctx,
+      "\xD7",
+      cx,
+      cy + 1,
+      `${Math.floor(r * 1.05)}px sans-serif`,
+      "#5c3d00"
+    );
+    ctx.restore();
+  }
+
+  // src/presentation/mahjong/MahjongPlayPalette.ts
+  var MJ_PALETTE = {
+    bgTop: "#5eb8b8",
+    bgMid: "#52adad",
+    bgDeep: "#489e9e",
+    matGlow: "rgba(255,255,255,0.1)",
+    matShade: "rgba(28,92,92,0.12)",
+    /** 牌侧白塑壳（参考实物侧面） */
+    mahjongSideLight: "#ffffff",
+    mahjongSide: "#f3f3f3",
+    mahjongSideDeep: "#dcdcdc",
+    /** 牌面白塑 + 内凹萌宠填色绿 */
+    mahjongFaceTop: "#ffffff",
+    mahjongFaceMid: "#fafafa",
+    mahjongFaceBottom: "#ececec",
+    mahjongFaceSheen: "rgba(255,255,255,0.55)",
+    mahjongEngraveShadow: "#1a4d38",
+    mahjongEngraveFill: "#2d8a58",
+    mahjongEngraveHighlight: "#45b872",
+    /** 牌背亮绿（与 ref 抠图一致） */
+    mahjongBackGreen: "#8ecf8a",
+    mahjongBackGreenDeep: "#6fb86c",
+    /** @deprecated 旧玉牌侧色，保留避免 bundle 外引用断裂 */
+    jadeSideLight: "rgba(196, 232, 224, 0.92)",
+    jadeSide: "rgba(142, 196, 186, 0.88)",
+    jadeSideDeep: "rgba(98, 158, 148, 0.86)",
+    jadeFaceTop: "rgba(255, 255, 255, 0.94)",
+    jadeFaceMid: "rgba(228, 246, 242, 0.88)",
+    jadeFaceBottom: "rgba(205, 232, 224, 0.82)",
+    jadeInnerGlow: "rgba(210, 248, 238, 0.35)",
+    tileShadow: "rgba(8, 48, 44, 0.28)",
+    tileShadowSoft: "rgba(12, 58, 52, 0.14)",
+    tileShadowContact: "rgba(6, 36, 34, 0.36)",
+    glass: "rgba(255,255,255,0.24)",
+    glassDeep: "rgba(45,120,118,0.42)",
+    glassStroke: "rgba(255,255,255,0.38)",
+    slotWell: "rgba(32,96,94,0.28)",
+    textPrimary: "#ffffff",
+    textSoft: "rgba(255,255,255,0.88)",
+    accentWarm: "#e8b070",
+    accentWarmDeep: "#c8925a"
+  };
+
+  // src/presentation/mahjong/MahjongPileSway.ts
+  var SWAY_CLAMP = 36;
+  function createMahjongPileSway() {
+    return { ox: 0, oy: 0, rot: 0, vx: 0, vy: 0, vr: 0 };
+  }
+  function clampSway(s) {
+    s.ox = Math.max(-SWAY_CLAMP, Math.min(SWAY_CLAMP, s.ox));
+    s.oy = Math.max(-SWAY_CLAMP, Math.min(SWAY_CLAMP, s.oy));
+    s.rot = Math.max(-0.08, Math.min(0.08, s.rot));
+  }
+  function updateMahjongPileSway(s, dtMs) {
+    const dt = Math.min(48, Math.max(1, dtMs));
+    const damp = Math.exp(-dt / 420);
+    const spring = 4e-3 * dt;
+    s.ox += s.vx * (dt / 16.67);
+    s.oy += s.vy * (dt / 16.67);
+    s.rot += s.vr * (dt / 16.67);
+    clampSway(s);
+    s.vx = (s.vx - s.ox * spring) * damp;
+    s.vy = (s.vy - s.oy * spring) * damp;
+    s.vr = (s.vr - s.rot * spring * 1.1) * damp;
+    const still = Math.abs(s.vx) > 0.03 || Math.abs(s.vy) > 0.03 || Math.abs(s.vr) > 3e-5 || Math.abs(s.ox) > 0.2 || Math.abs(s.oy) > 0.2 || Math.abs(s.rot) > 2e-4;
+    return still;
+  }
+  function tileMahjongPileSwayOffset(s, nx, ny, layerDepth) {
+    const depth = 0.78 + layerDepth * 0.42;
+    const px = (nx - 0.5) * 0.55;
+    const py = (ny - 0.5) * 0.55;
+    return {
+      dx: s.ox * depth + s.ox * px * 0.35,
+      dy: s.oy * depth + s.oy * py * 0.35,
+      drot: s.rot * depth * 1.35
+    };
+  }
+  function mahjongPileSwayBackgroundShift(s) {
+    return { dx: s.ox * 0.22, dy: s.oy * 0.22 };
+  }
+  function applyMahjongPileSwayToHits(hits, poses, zMax, sway) {
+    var _a, _b, _c;
+    for (const hit of hits) {
+      const pose = poses[hit.index];
+      const layerDepth = ((_a = pose == null ? void 0 : pose.z) != null ? _a : hit.index) / Math.max(1, zMax);
+      const { dx, dy, drot } = tileMahjongPileSwayOffset(
+        sway,
+        (_b = pose == null ? void 0 : pose.nx) != null ? _b : 0.5,
+        (_c = pose == null ? void 0 : pose.ny) != null ? _c : 0.5,
+        layerDepth
+      );
+      hit.x += dx;
+      hit.y += dy;
+      hit.rot += drot;
+    }
+  }
+  var TILE_JITTER_CLAMP = 22;
+  function createMahjongTileJitter() {
+    return createMahjongPileSway();
+  }
+  function syncMahjongTileJitters(jitters, pileLength) {
+    while (jitters.length < pileLength) {
+      jitters.push(createMahjongTileJitter());
+    }
+    if (jitters.length > pileLength) {
+      jitters.length = pileLength;
+    }
+  }
+  function clampTileJitter(j) {
+    j.ox = Math.max(-TILE_JITTER_CLAMP, Math.min(TILE_JITTER_CLAMP, j.ox));
+    j.oy = Math.max(-TILE_JITTER_CLAMP, Math.min(TILE_JITTER_CLAMP, j.oy));
+    j.rot = Math.max(-0.12, Math.min(0.12, j.rot));
+  }
+  function pokeMahjongTileJitter(j, dx, dy) {
+    if (dx === 0 && dy === 0) {
+      return;
+    }
+    j.ox += dx * 0.42;
+    j.oy += dy * 0.42;
+    j.vx += dx * 0.68;
+    j.vy += dy * 0.68;
+    j.vr += (dx - dy) * 32e-4;
+    clampTileJitter(j);
+  }
+  function updateMahjongTileJitters(jitters, dtMs) {
+    let any = false;
+    for (const j of jitters) {
+      const dt = Math.min(48, Math.max(1, dtMs));
+      const damp = Math.exp(-dt / 320);
+      const spring = 55e-4 * dt;
+      j.ox += j.vx * (dt / 16.67);
+      j.oy += j.vy * (dt / 16.67);
+      j.rot += j.vr * (dt / 16.67);
+      clampTileJitter(j);
+      j.vx = (j.vx - j.ox * spring) * damp;
+      j.vy = (j.vy - j.oy * spring) * damp;
+      j.vr = (j.vr - j.rot * spring * 1.15) * damp;
+      if (Math.abs(j.vx) > 0.04 || Math.abs(j.vy) > 0.04 || Math.abs(j.vr) > 4e-5 || Math.abs(j.ox) > 0.15 || Math.abs(j.oy) > 0.15 || Math.abs(j.rot) > 15e-5) {
+        any = true;
+      }
+    }
+    return any;
+  }
+  function pointInMahjongTileHit(x, y, hit, pad) {
+    return x >= hit.x - pad && x <= hit.x + hit.w + pad && y >= hit.y - pad && y <= hit.y + hit.h + pad;
+  }
+  function pokeMahjongTilesOnPointerMove(hits, jitters, prevX, prevY, x, y, dx, dy) {
+    var _a;
+    if (hits.length === 0 || dx === 0 && dy === 0) {
+      return;
+    }
+    let maxIndex = 0;
+    for (const hit of hits) {
+      maxIndex = Math.max(maxIndex, hit.index);
+    }
+    syncMahjongTileJitters(jitters, maxIndex + 1);
+    const dist = Math.hypot(x - prevX, y - prevY);
+    const steps = Math.max(1, Math.ceil(dist / 10));
+    const pad = Math.max(8, ((_a = hits[0]) == null ? void 0 : _a.w) ? hits[0].w * 0.08 : 8);
+    for (let step = 0; step <= steps; step += 1) {
+      const t = step / steps;
+      const px = prevX + (x - prevX) * t;
+      const py = prevY + (y - prevY) * t;
+      const sdx = dx / steps;
+      const sdy = dy / steps;
+      for (const hit of hits) {
+        if (!pointInMahjongTileHit(px, py, hit, pad)) {
+          continue;
+        }
+        const j = jitters[hit.index];
+        if (j) {
+          pokeMahjongTileJitter(j, sdx, sdy);
+        }
+      }
+    }
+  }
+  function applyMahjongTileJitterToHits(hits, jitters) {
+    for (const hit of hits) {
+      const j = jitters[hit.index];
+      if (!j) {
+        continue;
+      }
+      hit.x += j.ox;
+      hit.y += j.oy;
+      hit.rot += j.rot;
+    }
+  }
+
+  // src/presentation/mahjong/MahjongTileFlyAnim.ts
+  function easeOutCubic3(t) {
+    return 1 - (1 - t) ** 3;
+  }
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+  function createMahjongFlyAnim(params) {
+    var _a;
+    return {
+      ...params,
+      durationMs: (_a = params.durationMs) != null ? _a : 320
+    };
+  }
+  function sampleMahjongFlyAnim(anim, nowMs) {
+    const elapsed = nowMs - anim.startMs;
+    const t = Math.min(1, Math.max(0, elapsed / anim.durationMs));
+    const e = easeOutCubic3(t);
+    const arc = Math.sin(t * Math.PI) * Math.max(12, anim.fromH * 0.35);
+    const pop = 1 + Math.sin(t * Math.PI) * 0.08;
+    return {
+      x: lerp(anim.fromX, anim.toX, e),
+      y: lerp(anim.fromY, anim.toY, e) - arc,
+      w: lerp(anim.fromW, anim.toW, e) * pop,
+      h: lerp(anim.fromH, anim.toH, e) * pop,
+      rot: lerp(anim.fromRot, 0, e),
+      alpha: t < 0.08 ? t / 0.08 : 1,
+      lift: -arc * 0.15,
+      done: t >= 1
+    };
+  }
+  function pruneMahjongFlyAnims(anims, nowMs) {
+    let anyActive = false;
+    for (let i = anims.length - 1; i >= 0; i -= 1) {
+      if (sampleMahjongFlyAnim(anims[i], nowMs).done) {
+        anims.splice(i, 1);
+      } else {
+        anyActive = true;
+      }
+    }
+    return anyActive;
+  }
+
+  // src/presentation/mahjong/MahjongPlaySceneBgCache.ts
+  var sceneBgCache = null;
+  function createOffscreenCanvas2(width, height) {
+    try {
+      const wxApi2 = globalThis.wx;
+      if (!(wxApi2 == null ? void 0 : wxApi2.createCanvas)) {
+        return null;
+      }
+      const canvas = wxApi2.createCanvas();
+      canvas.width = Math.max(1, Math.ceil(width));
+      canvas.height = Math.max(1, Math.ceil(height));
+      return canvas;
+    } catch (e) {
+      return null;
+    }
+  }
+  function sceneBgCacheKey(width, height, pileTop, pileBottom, bgImage) {
+    var _a, _b;
+    const iw = (_a = bgImage == null ? void 0 : bgImage.width) != null ? _a : 0;
+    const ih = (_b = bgImage == null ? void 0 : bgImage.height) != null ? _b : 0;
+    return `${width}x${height}:${pileTop}:${pileBottom}:${iw}x${ih}`;
+  }
+  function clearMahjongPlaySceneBackgroundCache() {
+    sceneBgCache = null;
+  }
+  function drawMahjongPlaySceneBackgroundCached(ctx, width, height, pileTop, pileBottom, bgImage, bgShift = { dx: 0, dy: 0 }) {
+    const key = sceneBgCacheKey(width, height, pileTop, pileBottom, bgImage);
+    if (!sceneBgCache || sceneBgCache.key !== key) {
+      const canvas = createOffscreenCanvas2(width, height);
+      if (!canvas) {
+        drawMahjongPlaySceneBackground(
+          ctx,
+          width,
+          height,
+          pileTop,
+          pileBottom,
+          bgImage,
+          void 0,
+          bgShift
+        );
+        return;
+      }
+      const off = canvas.getContext("2d");
+      if (!off) {
+        drawMahjongPlaySceneBackground(
+          ctx,
+          width,
+          height,
+          pileTop,
+          pileBottom,
+          bgImage,
+          void 0,
+          bgShift
+        );
+        return;
+      }
+      drawMahjongPlaySceneBackground(
+        off,
+        width,
+        height,
+        pileTop,
+        pileBottom,
+        bgImage,
+        void 0,
+        { dx: 0, dy: 0 }
+      );
+      sceneBgCache = { key, canvas };
+    }
+    ctx.save();
+    ctx.translate(bgShift.dx, bgShift.dy);
+    try {
+      ctx.drawImage(sceneBgCache.canvas, 0, 0, width, height);
+    } catch (e) {
+      drawMahjongPlaySceneBackground(
+        ctx,
+        width,
+        height,
+        pileTop,
+        pileBottom,
+        bgImage,
+        void 0,
+        bgShift
+      );
+    }
+    ctx.restore();
+  }
+
+  // src/presentation/mahjong/MahjongHallUi.ts
+  function formatTime(ms) {
+    const sec = Math.max(0, Math.ceil(ms / 1e3));
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  }
+  function pushBtn(buttons, btn) {
+    buttons.push(btn);
+  }
+  function drawMahjongPlayBackground(ctx, width, height, pileTop, pileBottom, chrome, slotY, pileSway) {
+    const bgShift = pileSway ? mahjongPileSwayBackgroundShift(pileSway) : { dx: 0, dy: 0 };
+    drawMahjongPlaySceneBackgroundCached(
+      ctx,
+      width,
+      height,
+      pileTop,
+      pileBottom,
+      chrome.playBgImage,
+      bgShift
+    );
+    if (chrome.background && !chrome.playBgImage) {
+      ctx.save();
+      ctx.translate(bgShift.dx, bgShift.dy);
+      ctx.globalAlpha = 0.1;
+      ctx.fillStyle = chrome.background;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+  }
+  function drawMahjongPlayHeader(ctx, width, game, globalCoins, safeTop) {
+    const leftReserve = 54;
+    const rightReserve = Math.max(88, width * 0.22);
+    const bx = leftReserve;
+    const bannerW = Math.max(160, width - leftReserve - rightReserve);
+    const by = safeTop + 4;
+    const barH = 32;
+    const grad = ctx.createLinearGradient(bx, by, bx, by + barH);
+    grad.addColorStop(0, MJ_PALETTE.glass);
+    grad.addColorStop(1, MJ_PALETTE.glassDeep);
+    ctx.fillStyle = grad;
+    roundRect3(ctx, bx, by, bannerW, barH, 12);
+    ctx.fill();
+    ctx.strokeStyle = MJ_PALETTE.glassStroke;
+    ctx.lineWidth = 1.5;
+    roundRect3(ctx, bx, by, bannerW, barH, 12);
+    ctx.stroke();
+    const midY = by + barH / 2;
+    ctx.save();
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = MJ_PALETTE.textPrimary;
+    ctx.textAlign = "left";
+    ctx.font = "bold 14px sans-serif";
+    ctx.fillText(`\u5173\u5361 ${game.level}`, bx + 14, midY);
+    ctx.textAlign = "center";
+    ctx.font = "bold 13px sans-serif";
+    ctx.fillText(`\u23F1 ${formatTime(game.remainingMs)}`, bx + bannerW / 2, midY);
+    ctx.textAlign = "right";
+    ctx.font = "bold 15px sans-serif";
+    ctx.fillText(formatMahjongGlobalCoinAmount(globalCoins), bx + bannerW - 14, midY);
+    ctx.restore();
+  }
+  function drawMahjongSlotBar(ctx, width, slotY, slotW, slotH, pad) {
+    const barPad = 6;
+    const barH = slotH + barPad * 2;
+    const barY = slotY - barPad;
+    ctx.fillStyle = MJ_PALETTE.glassDeep;
+    roundRect3(ctx, pad - 4, barY, width - pad * 2 + 8, barH, 16);
+    ctx.fill();
+    ctx.strokeStyle = MJ_PALETTE.glassStroke;
+    ctx.lineWidth = 1.5;
+    roundRect3(ctx, pad - 4, barY, width - pad * 2 + 8, barH, 16);
+    ctx.stroke();
+    for (let i = 0; i < 7; i += 1) {
+      const x = pad + i * (slotW + 5);
+      ctx.fillStyle = MJ_PALETTE.slotWell;
+      roundRect3(ctx, x, slotY, slotW, slotH, 8);
+      ctx.fill();
+      const wellShine = ctx.createLinearGradient(x, slotY, x, slotY + slotH);
+      wellShine.addColorStop(0, "rgba(255,255,255,0.42)");
+      wellShine.addColorStop(0.55, "rgba(255,255,255,0.08)");
+      wellShine.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = wellShine;
+      roundRect3(ctx, x, slotY, slotW, slotH * 0.55, 8);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.32)";
+      ctx.lineWidth = 1;
+      roundRect3(ctx, x, slotY, slotW, slotH, 8);
+      ctx.stroke();
+    }
+  }
+  function layoutMahjongPlay(width, height, game, tileHits, buttons) {
+    tileHits.length = 0;
+    const m = mahjongPlayMetrics(width, height);
+    pushBtn(buttons, {
+      id: "mahjong_back_lobby",
+      x: 12,
+      y: m.safeTop,
+      w: 46,
+      h: 46,
+      label: "\u6682\u505C"
+    });
+    const pileLayout = pilePosesToHitsCached(
+      game.pilePoses,
+      width,
+      height,
+      game.pileLayoutEpoch
+    );
+    for (const hit of pileLayout.hits) {
+      tileHits.push(hit);
+    }
+    const pileZMax = pileLayout.zMax;
+    for (let i = 0; i < 7; i += 1) {
+      const x = m.pad + i * (m.slotW + 5);
+      const locked = i === 6 && !game.adSlotUnlocked;
+      if (locked) {
+        pushBtn(buttons, {
+          id: "mahjong_ad_slot",
+          x: x - 4,
+          y: m.slotY - 6,
+          w: m.slotW + 8,
+          h: m.slotH + 12,
+          label: "\u89E3\u9501"
+        });
+      }
+    }
+    for (const slot of mahjongToolButtonLayout(width, height)) {
+      pushBtn(buttons, {
+        id: `mahjong_tool_${slot.tool}`,
+        x: slot.x,
+        y: slot.y,
+        w: slot.w,
+        h: slot.h,
+        label: MAHJONG_TOOL_LABELS[slot.tool]
+      });
+    }
+    return pileZMax;
+  }
+  function drawMahjongPlay(ctx, width, height, game, globalCoins, tileHits, buttons, chrome = {}, flyAnims = [], nowMs = 0) {
+    var _a, _b, _c;
+    buttons.length = 0;
+    tileHits.length = 0;
+    const m = mahjongPlayMetrics(width, height);
+    drawMahjongPlayBackground(
+      ctx,
+      width,
+      height,
+      m.pileTop,
+      m.pileBottom,
+      chrome,
+      m.slotY,
+      chrome.pileSway
+    );
+    const hudCoins = globalCoins + game.coinsThisRun;
+    drawMahjongPlayHeader(ctx, width, game, hudCoins, m.safeTop);
+    const pileZMax = layoutMahjongPlay(width, height, game, tileHits, buttons);
+    const tileDrawOptsBase = {
+      mahjongLevel: game.level,
+      rasterThemeKey: chrome.tileRasterThemeKey
+    };
+    if (chrome.pileSway) {
+      applyMahjongPileSwayToHits(tileHits, game.pilePoses, pileZMax, chrome.pileSway);
+    }
+    if (chrome.tileJitters && chrome.tileJitters.length > 0) {
+      applyMahjongTileJitterToHits(tileHits, chrome.tileJitters);
+    }
+    for (const hit of tileHits) {
+      const type = game.pile[hit.index];
+      const z = (_b = (_a = game.pilePoses[hit.index]) == null ? void 0 : _a.z) != null ? _b : hit.index;
+      const layerDepth = z / pileZMax;
+      const pose = game.pilePoses[hit.index];
+      drawStandingMahjongTile(ctx, hit.x, hit.y, hit.w, hit.h, hit.rot, type, chrome.tileImage, {
+        ...tileDrawOptsBase,
+        layerDepth,
+        faceDown: game.pileFaceDown[hit.index] === true,
+        stand: pose == null ? void 0 : pose.stand
+      });
+    }
+    for (const anim of flyAnims) {
+      const s = sampleMahjongFlyAnim(anim, nowMs);
+      drawStandingMahjongTile(
+        ctx,
+        s.x,
+        s.y,
+        s.w,
+        s.h,
+        s.rot,
+        anim.type,
+        chrome.tileImage,
+        {
+          alpha: s.alpha,
+          lift: s.lift,
+          mahjongLevel: game.level
+        }
+      );
+    }
+    drawMahjongSlotBar(ctx, width, m.slotY, m.slotW, m.slotH, m.pad);
+    for (let i = 0; i < 7; i += 1) {
+      const locked = i === 6 && !game.adSlotUnlocked;
+      if (locked) {
+        const x = m.pad + i * (m.slotW + 5);
+        ctx.fillStyle = "rgba(232, 176, 112, 0.55)";
+        roundRect3(ctx, x, m.slotY, m.slotW, m.slotH, 8);
+        ctx.fill();
+        ctx.strokeStyle = MJ_PALETTE.glassStroke;
+        ctx.lineWidth = 1;
+        roundRect3(ctx, x, m.slotY, m.slotW, m.slotH, 8);
+        ctx.stroke();
+        ctx.fillStyle = MJ_PALETTE.textPrimary;
+        ctx.font = "11px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("\u89E3\u9501", x + m.slotW / 2, m.slotY + m.slotH * 0.62);
+      }
+    }
+    game.slots.forEach((type, idx) => {
+      if (idx >= game.maxSlots()) {
+        return;
+      }
+      const x = m.pad + idx * (m.slotW + 5);
+      const sr = mahjongSlotTileRect(width, height, idx);
+      drawStandingMahjongTile(ctx, sr.x, sr.y, sr.w, sr.h, 0, type, chrome.tileImage, {
+        layerDepth: 1,
+        mahjongLevel: game.level,
+        rasterThemeKey: chrome.tileRasterThemeKey
+      });
+    });
+    if (game.level === 1 && !game.guideShown) {
+      const gy = m.headerBottom - 4;
+      ctx.fillStyle = MJ_PALETTE.glass;
+      roundRect3(ctx, m.pad, gy, width - m.pad * 2, 26, 8);
+      ctx.fill();
+      ctx.strokeStyle = MJ_PALETTE.glassStroke;
+      ctx.lineWidth = 1;
+      roundRect3(ctx, m.pad, gy, width - m.pad * 2, 26, 8);
+      ctx.stroke();
+      ctx.fillStyle = MJ_PALETTE.textPrimary;
+      ctx.font = "12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("\u70B9\u51FB\u9EBB\u5C06\u653E\u5165\u69FD\u4F4D\uFF0C3 \u4E2A\u76F8\u540C\u81EA\u52A8\u6D88\u9664", width / 2, gy + 17);
+    }
+    for (const btn of buttons) {
+      if (btn.id.startsWith("mahjong_tool_")) {
+        const tool = btn.id.replace("mahjong_tool_", "");
+        const cx = btn.x + btn.w / 2;
+        const cy = btn.y + btn.h / 2;
+        const icon = (_c = chrome.toolIcon) == null ? void 0 : _c.call(chrome, tool);
+        let drewIcon = false;
+        if (icon) {
+          try {
+            ctx.drawImage(icon, btn.x, btn.y, btn.w, btn.h);
+            drewIcon = true;
+          } catch (e) {
+            drewIcon = false;
+          }
+        }
+        if (!drewIcon) {
+          const toolGrad = ctx.createRadialGradient(cx, cy - 4, 2, cx, cy, btn.w / 2);
+          toolGrad.addColorStop(0, MJ_PALETTE.glass);
+          toolGrad.addColorStop(1, MJ_PALETTE.glassDeep);
+          ctx.fillStyle = toolGrad;
+          ctx.beginPath();
+          ctx.arc(cx, cy, btn.w / 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = MJ_PALETTE.glassStroke;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+        drawMahjongToolNameLabel(ctx, btn.label, cx, btn.y + btn.h + 8);
+        drawMahjongToolCountBadge(ctx, game.tools[tool], btn.x + btn.w - 2, btn.y + 8);
+      } else if (btn.id === "mahjong_back_lobby") {
+        const cx = btn.x + btn.w / 2;
+        const cy = btn.y + btn.h / 2;
+        ctx.fillStyle = MJ_PALETTE.glassDeep;
+        ctx.beginPath();
+        ctx.arc(cx, cy, btn.w / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = MJ_PALETTE.glassStroke;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = MJ_PALETTE.textPrimary;
+        ctx.font = "bold 14px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("\u2161", cx, cy + 5);
+      }
+    }
+    ctx.textAlign = "left";
+  }
+  function mahjongSlotFullPreviewTypes(game) {
+    const n = Math.min(MAHJONG_SLOT_FULL_AD_MOVE_COUNT, game.slots.length);
+    if (n <= 0) {
+      return [0, 1, 2];
+    }
+    return game.slots.slice(-n);
+  }
+  function drawMahjongSlotFullReviveOffer(ctx, width, height, game, chrome, buttons, nowMs) {
+    drawMahjongModalVeil(ctx, width, height, 0.46);
+    const cardW = Math.min(width * 0.86, 328);
+    const footerH = 112;
+    const cardH = Math.min(Math.max(340, height * 0.44), height - 96);
+    const card = layoutMahjongModalCard(width, height, cardW, cardH, footerH);
+    const panelR = 22;
+    drawMahjongModalCardFace(ctx, card.x, card.y, card.w, card.h, panelR, chrome, nowMs);
+    if (chrome.playBgImage) {
+      drawMahjongModalFooterReadableBand(ctx, card.x, card.y, card.w, card.h, footerH);
+    }
+    drawMahjongCenterText(
+      ctx,
+      "\u724C\u69FD\u5DF2\u6EE1",
+      card.cx,
+      card.y + 36,
+      "bold 18px sans-serif",
+      "#1e5c56"
+    );
+    const closeX = card.x + card.w - 34;
+    const closeY = card.y + 22;
+    pushBtn(buttons, {
+      id: "mahjong_slot_full_close",
+      x: closeX - 18,
+      y: closeY - 18,
+      w: 36,
+      h: 36,
+      label: "\xD7"
+    });
+    drawMahjongPanelCloseOrb(ctx, closeX, closeY, 18);
+    const previewTypes = mahjongSlotFullPreviewTypes(game);
+    const tileW = Math.min(58, card.w * 0.19);
+    const tileH = tileW * 1.18;
+    const gap = tileW * 0.22;
+    const tilesW = previewTypes.length * tileW + (previewTypes.length - 1) * gap;
+    const tilesY = card.y + card.heroH * 0.54;
+    const subtitleY = card.y + 62;
+    drawMahjongCenterText(ctx, "\u79FB\u51FA3\u5F20\u82B1\u724C", card.cx, subtitleY, "15px sans-serif", "#2f6f66");
+    let tx = card.cx - tilesW / 2;
+    for (const type of previewTypes) {
+      ctx.save();
+      ctx.fillStyle = MJ_PALETTE.slotWell;
+      roundRect3(ctx, tx - 3, tilesY - 3, tileW + 6, tileH + 8, 10);
+      ctx.fill();
+      ctx.restore();
+      drawStandingMahjongTile(ctx, tx, tilesY, tileW, tileH, 0, type, chrome.tileImage, {
+        layerDepth: 1,
+        mahjongLevel: game.level
+      });
+      tx += tileW + gap;
+    }
+    const adPad = 24;
+    const adBtnH = 48;
+    const adBtnY = card.y + card.h - footerH + 26;
+    const adBtnW = card.w - adPad * 2;
+    pushBtn(buttons, {
+      id: "mahjong_slot_full_ad",
+      x: card.x + adPad,
+      y: adBtnY,
+      w: adBtnW,
+      h: adBtnH,
+      label: "\u79FB\u51FA\u7EE7\u7EED"
+    });
+    drawMahjongPrimaryCapsuleButton(ctx, card.x + adPad, adBtnY, adBtnW, adBtnH, "\u25B6  \u79FB\u51FA\u7EE7\u7EED");
+  }
+  function drawMahjongToolOfferModal(ctx, width, height, tool, buttons, chrome, coinCost) {
+    var _a;
+    drawMahjongModalVeil(ctx, width, height, 0.48);
+    const cardW = Math.min(width * 0.88, 340);
+    const pad = 28;
+    const btnH = 46;
+    const btnGap = 8;
+    const contentTop = 24;
+    const iconSize = Math.min(88, cardW * 0.26);
+    const btnBlockH = btnH * 2 + btnGap;
+    const cardH = Math.min(
+      Math.max(contentTop + iconSize + 16 + 22 + btnBlockH + 22, 248),
+      height - 88
+    );
+    const footerH = btnBlockH + 22;
+    const card = layoutMahjongModalCard(width, height, cardW, cardH, footerH);
+    const panelR = 22;
+    drawMahjongModalCardFace(ctx, card.x, card.y, card.w, card.h, panelR, chrome, 0);
+    if (chrome.playBgImage) {
+      drawMahjongModalFooterReadableBand(ctx, card.x, card.y, card.w, card.h, footerH);
+    }
+    const closeX = card.x + card.w - 34;
+    const closeY = card.y + 22;
+    pushBtn(buttons, {
+      id: "mahjong_tool_modal_close",
+      x: closeX - 18,
+      y: closeY - 18,
+      w: 36,
+      h: 36,
+      label: "\xD7"
+    });
+    drawMahjongPanelCloseOrb(ctx, closeX, closeY, 18);
+    const iconX = card.cx - iconSize / 2;
+    const iconY = card.y + contentTop;
+    const toolImg = (_a = chrome.toolIcon) == null ? void 0 : _a.call(chrome, tool);
+    if (toolImg) {
+      try {
+        ctx.drawImage(toolImg, iconX, iconY, iconSize, iconSize);
+      } catch (e) {
+      }
+    }
+    const toolName = MAHJONG_TOOL_LABELS[tool];
+    if (toolImg) {
+      const nameY = iconY + iconSize + 14;
+      drawMahjongCenterText(
+        ctx,
+        toolName,
+        card.cx,
+        nameY,
+        "bold 18px sans-serif",
+        "#1e5c56"
+      );
+    } else {
+      drawMahjongCenterText(
+        ctx,
+        toolName,
+        card.cx,
+        iconY + iconSize / 2,
+        "bold 20px sans-serif",
+        "#1e5c56"
+      );
+    }
+    const labelBottomY = toolImg ? iconY + iconSize + 14 : iconY + iconSize;
+    const btnW = card.w - pad * 2;
+    const adY = labelBottomY + (toolImg ? 18 : 14);
+    const coinY = adY + btnH + btnGap;
+    pushBtn(buttons, {
+      id: "mahjong_tool_modal_ad",
+      x: card.x + pad,
+      y: adY,
+      w: btnW,
+      h: btnH,
+      label: "\u514D\u8D39\u83B7\u5F97"
+    });
+    pushBtn(buttons, {
+      id: "mahjong_tool_modal_coin",
+      x: card.x + pad,
+      y: coinY,
+      w: btnW,
+      h: btnH,
+      label: "\u91D1\u5E01\u5151\u6362"
+    });
+    drawMahjongPrimaryCapsuleButton(
+      ctx,
+      card.x + pad,
+      adY,
+      btnW,
+      btnH,
+      "\u2197  \u514D\u8D39\u83B7\u5F97",
+      "#ffe066",
+      "#fab005",
+      "#5c3d00"
+    );
+    drawMahjongPrimaryCapsuleButton(
+      ctx,
+      card.x + pad,
+      coinY,
+      btnW,
+      btnH,
+      `\u{1FA99}  ${formatMahjongGlobalCoinAmount(coinCost)}`,
+      "#69db7c",
+      "#37b24d",
+      "#ffffff"
+    );
+  }
+  function drawMahjongSlotFullChallengeFailed(ctx, width, height, buttons, nowMs, chrome) {
+    drawMahjongModalVeil(ctx, width, height, 0.46);
+    const cardW = Math.min(width * 0.86, 328);
+    const footerH = 112;
+    const cardH = Math.min(Math.max(268, height * 0.34), height - 96);
+    const card = layoutMahjongModalCard(width, height, cardW, cardH, footerH);
+    const panelR = 22;
+    drawMahjongModalCardFace(ctx, card.x, card.y, card.w, card.h, panelR, chrome, nowMs);
+    if (chrome.playBgImage) {
+      drawMahjongModalFooterReadableBand(ctx, card.x, card.y, card.w, card.h, footerH);
+    }
+    const closeX = card.x + card.w - 34;
+    const closeY = card.y + 22;
+    pushBtn(buttons, {
+      id: "mahjong_fail_close",
+      x: closeX - 18,
+      y: closeY - 18,
+      w: 36,
+      h: 36,
+      label: "\xD7"
+    });
+    drawMahjongPanelCloseOrb(ctx, closeX, closeY, 18);
+    const bodyMidY = card.y + (card.h - footerH) / 2;
+    drawMahjongCenterText(
+      ctx,
+      "\u6311\u6218\u5931\u8D25",
+      card.cx,
+      bodyMidY,
+      "bold 20px sans-serif",
+      "#1e5c56"
+    );
+    const pad = 24;
+    const btnH = 46;
+    const btnY = card.y + card.h - footerH + 26;
+    const bw = (card.w - pad * 2 - 10) / 2;
+    const replayCost = MAHJONG_REPLAY_COIN_COST;
+    pushBtn(buttons, {
+      id: "mahjong_fail_replay",
+      x: card.x + pad,
+      y: btnY,
+      w: bw,
+      h: btnH,
+      label: "\u91CD\u73A9"
+    });
+    pushBtn(buttons, {
+      id: "mahjong_fail_revive",
+      x: card.x + pad + bw + 10,
+      y: btnY,
+      w: bw,
+      h: btnH,
+      label: "\u590D\u6D3B"
+    });
+    drawMahjongPrimaryCapsuleButton(
+      ctx,
+      card.x + pad,
+      btnY,
+      bw,
+      btnH,
+      `\u91CD\u73A9 ${formatMahjongGlobalCoinCostLabel(replayCost)}`
+    );
+    drawMahjongPrimaryCapsuleButton(
+      ctx,
+      card.x + pad + bw + 10,
+      btnY,
+      bw,
+      btnH,
+      "\u25B6 \u590D\u6D3B",
+      "#69db7c",
+      "#37b24d",
+      "#ffffff"
+    );
+  }
+  function drawMahjongWinCelebratePanel(ctx, width, height, game, buttons, autoNextMs, nowMs, celebrateImage) {
+    drawMahjongModalVeil(ctx, width, height, 0.42);
+    const cardW = Math.min(width * 0.86, 328);
+    const footerH = autoNextMs > 0 ? 132 : 112;
+    const cardH = Math.min(Math.max(440, height * 0.56), height - 64);
+    const card = layoutMahjongModalCard(width, height, cardW, cardH, footerH);
+    drawMahjongCuteCard(ctx, card.x, card.y, card.w, card.h, {
+      nowMs,
+      radius: 22,
+      border: "rgba(255, 170, 210, 0.95)",
+      fillTop: "rgba(255,255,255,0.98)",
+      fillBottom: "rgba(255,236,245,0.98)"
+    });
+    drawMahjongCelebrateHeroImage(ctx, celebrateImage, card.x, card.y, card.w, card.heroH, 22);
+    const title = `\u7B2C ${game.level} \u5173\u80DC\u5229`;
+    drawMahjongCenterText(ctx, title, card.cx, card.y + card.heroH * 0.72, "bold 20px sans-serif", "#c2255c");
+    drawMahjongCenterText(
+      ctx,
+      `\u83B7\u5F97 \u2605${game.starsThisRun}  \u91D1\u5E01 +${formatMahjongGlobalCoinAmount(game.coinsThisRun)}`,
+      card.cx,
+      card.y + card.heroH * 0.82,
+      "bold 13px sans-serif",
+      "#a61e4d"
+    );
+    if (autoNextMs > 0) {
+      drawMahjongCenterText(
+        ctx,
+        `${Math.ceil(autoNextMs / 1e3)} \u79D2\u540E\u81EA\u52A8\u8FDB\u5165\u4E0B\u4E00\u5173`,
+        card.cx,
+        card.y + card.heroH * 0.9,
+        "12px sans-serif",
+        "#1864ab"
+      );
+    }
+    drawMahjongModalFooterBand(ctx, card.x, card.y, card.w, card.h, footerH);
+    const pad = 24;
+    const bw = (card.w - pad * 2 - 8) / 2;
+    const by = card.y + card.h - footerH + 28;
+    pushBtn(buttons, { id: "mahjong_next", x: card.x + pad, y: by, w: bw, h: 44, label: "\u4E0B\u4E00\u5173" });
+    pushBtn(buttons, {
+      id: "mahjong_retry",
+      x: card.x + pad + bw + 8,
+      y: by,
+      w: bw,
+      h: 44,
+      label: "\u518D\u73A9\u4E00\u6B21"
+    });
+    pushBtn(buttons, {
+      id: "mahjong_back_lobby",
+      x: card.x + pad,
+      y: by + 52,
+      w: card.w - pad * 2,
+      h: 40,
+      label: "\u8FD4\u56DE\u9996\u9875"
+    });
+    drawMahjongPrimaryCapsuleButton(
+      ctx,
+      card.x + pad,
+      by,
+      bw,
+      44,
+      "\u4E0B\u4E00\u5173",
+      "#74c0fc",
+      "#1c7ed6",
+      "#ffffff"
+    );
+    drawMahjongPrimaryCapsuleButton(
+      ctx,
+      card.x + pad + bw + 8,
+      by,
+      bw,
+      44,
+      "\u518D\u73A9\u4E00\u6B21",
+      "#a5d8ff",
+      "#339af0",
+      "#ffffff"
+    );
+    drawMahjongPrimaryCapsuleButton(
+      ctx,
+      card.x + pad,
+      by + 52,
+      card.w - pad * 2,
+      40,
+      "\u8FD4\u56DE\u9996\u9875",
+      "#dee2e6",
+      "#ced4da",
+      "#495057"
+    );
+  }
+  function drawMahjongResult(ctx, width, height, game, buttons, autoNextMs = 0, slotFullOfferDismissed = false, nowMs = 0, celebrateImage, chrome = {}) {
+    buttons.length = 0;
+    if (game.phase === "lost" && game.failReason === "slot_full") {
+      if (!slotFullOfferDismissed) {
+        drawMahjongSlotFullReviveOffer(ctx, width, height, game, chrome, buttons, nowMs);
+      } else {
+        drawMahjongSlotFullChallengeFailed(ctx, width, height, buttons, nowMs, chrome);
+      }
+      return;
+    }
+    const won = game.phase === "won";
+    if (won && celebrateImage) {
+      drawMahjongWinCelebratePanel(
+        ctx,
+        width,
+        height,
+        game,
+        buttons,
+        autoNextMs,
+        nowMs,
+        celebrateImage
+      );
+      return;
+    }
+    drawMahjongModalVeil(ctx, width, height, won ? 0.42 : 0.48);
+    const cardW = width * 0.82;
+    const cardH = 280;
+    const cx = (width - cardW) / 2;
+    const cy = (height - cardH) / 2;
+    drawMahjongCuteCard(ctx, cx, cy, cardW, cardH, {
+      nowMs,
+      radius: 20,
+      fillTop: won ? "rgba(240, 255, 230, 0.98)" : "rgba(255,255,255,0.98)",
+      fillBottom: won ? "rgba(210, 248, 200, 0.97)" : "rgba(232, 248, 255, 0.97)",
+      border: won ? "rgba(91, 186, 72, 0.92)" : "rgba(116, 192, 252, 0.92)"
+    });
+    drawMahjongCenterText(
+      ctx,
+      won ? "\u5173\u5361\u80DC\u5229" : "\u6311\u6218\u5931\u8D25",
+      width / 2,
+      cy + 48,
+      "bold 20px sans-serif",
+      won ? "#2b8a3e" : "#1864ab"
+    );
+    if (won) {
+      drawMahjongCenterText(
+        ctx,
+        `\u83B7\u5F97 \u2605${game.starsThisRun}  \u91D1\u5E01 +${formatMahjongGlobalCoinAmount(game.coinsThisRun)}`,
+        width / 2,
+        cy + 88,
+        "15px sans-serif",
+        "#495057"
+      );
+      drawMahjongCenterText(
+        ctx,
+        `\u5269\u4F59 ${formatTime(game.remainingMs)}`,
+        width / 2,
+        cy + 118,
+        "15px sans-serif",
+        "#495057"
+      );
+      if (autoNextMs > 0) {
+        drawMahjongCenterText(
+          ctx,
+          `${Math.ceil(autoNextMs / 1e3)} \u79D2\u540E\u81EA\u52A8\u8FDB\u5165\u4E0B\u4E00\u5173`,
+          width / 2,
+          cy + 142,
+          "13px sans-serif",
+          "#1864ab"
+        );
+      }
+    } else {
+      const reason = game.failReason === "timeout" ? "\u65F6\u95F4\u5230" : "\u69FD\u4F4D\u5DF2\u6EE1";
+      drawMahjongCenterText(ctx, reason, width / 2, cy + 88, "15px sans-serif", "#495057");
+    }
+    const pad = cx + 24;
+    const bw = (cardW - 48 - 8) / 2;
+    const by = cy + cardH - 72;
+    if (won) {
+      pushBtn(buttons, { id: "mahjong_next", x: pad, y: by, w: bw, h: 44, label: "\u4E0B\u4E00\u5173" });
+      pushBtn(buttons, {
+        id: "mahjong_retry",
+        x: pad + bw + 8,
+        y: by,
+        w: bw,
+        h: 44,
+        label: "\u518D\u73A9\u4E00\u6B21"
+      });
+      pushBtn(buttons, {
+        id: "mahjong_back_lobby",
+        x: pad,
+        y: by + 52,
+        w: cardW - 48,
+        h: 40,
+        label: "\u8FD4\u56DE\u9996\u9875"
+      });
+    } else {
+      pushBtn(buttons, {
+        id: "mahjong_replay_coin",
+        x: pad,
+        y: by,
+        w: bw,
+        h: 44,
+        label: `\u91CD\u73A9 ${formatMahjongGlobalCoinCostLabel(MAHJONG_REPLAY_COIN_COST)}`
+      });
+      pushBtn(buttons, {
+        id: "mahjong_back_lobby",
+        x: pad + bw + 8,
+        y: by,
+        w: bw,
+        h: 44,
+        label: "\u8FD4\u56DE"
+      });
+    }
+    for (const btn of buttons) {
+      ctx.fillStyle = btn.id === "mahjong_back_lobby" ? "#f1f3f5" : "#4dabf7";
+      roundRect3(ctx, btn.x, btn.y, btn.w, btn.h, 10);
+      ctx.fill();
+      drawMahjongCenterText(
+        ctx,
+        btn.label,
+        btn.x + btn.w / 2,
+        btn.y + btn.h / 2,
+        "14px sans-serif",
+        btn.id === "mahjong_back_lobby" ? "#495057" : "#ffffff"
+      );
+    }
+  }
+  function roundRect3(ctx, x, y, w, h, r) {
+    const radius = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.arcTo(x + w, y, x + w, y + h, radius);
+    ctx.arcTo(x + w, y + h, x, y + h, radius);
+    ctx.arcTo(x, y + h, x, y, radius);
+    ctx.arcTo(x, y, x + w, y, radius);
+    ctx.closePath();
+  }
+  function hitMahjongTile(tileHits, x, y) {
+    for (let i = tileHits.length - 1; i >= 0; i -= 1) {
+      const t = tileHits[i];
+      if (x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h) {
+        return t.index;
+      }
+    }
+    return null;
+  }
+  function hitMahjongButton(buttons, x, y) {
+    for (let i = buttons.length - 1; i >= 0; i -= 1) {
+      const b = buttons[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+        return b;
+      }
+    }
+    return null;
+  }
+
+  // src/presentation/mahjong/MahjongThemeAssets.ts
+  var MahjongThemeAssets = class {
+    constructor(loadImage) {
+      this.loadImage = loadImage;
+      this.cache = /* @__PURE__ */ new Map();
+      this.activeThemeId = null;
+      this.lastLoadUsedFallback = false;
+    }
+    getActiveThemeId() {
+      return this.activeThemeId;
+    }
+    didLastLoadUseFallback() {
+      return this.lastLoadUsedFallback;
+    }
+    resolveTheme(themeId) {
+      var _a;
+      return (_a = getMahjongTheme(themeId)) != null ? _a : getDefaultMahjongTheme();
+    }
+    defaultTileImage(typeIndex) {
+      var _a;
+      const defaultTheme = getDefaultMahjongTheme();
+      return (_a = this.cache.get(defaultTheme.themeId)) == null ? void 0 : _a.get(typeIndex);
+    }
+    async loadThemeTiles(theme, typeCount, allowPerTileFallback) {
+      var _a;
+      let bucket = this.cache.get(theme.themeId);
+      if (!bucket) {
+        bucket = /* @__PURE__ */ new Map();
+        this.cache.set(theme.themeId, bucket);
+      }
+      const defaultTheme = getDefaultMahjongTheme();
+      const need = Math.max(typeCount, theme.tiles.length);
+      let loaded = 0;
+      for (let i = 0; i < need; i += 1) {
+        if (bucket.has(i)) {
+          loaded += 1;
+          continue;
+        }
+        const path = tileAssetPath(theme, i);
+        if (!path) {
+          continue;
+        }
+        let img = await this.loadImage(path);
+        if (!img && allowPerTileFallback && theme.themeId !== defaultTheme.themeId) {
+          const fallbackPath = tileAssetPath(defaultTheme, i);
+          if (fallbackPath) {
+            img = (_a = this.defaultTileImage(i)) != null ? _a : fallbackPath === path ? null : await this.loadImage(fallbackPath);
+          }
+          if (img) {
+            this.lastLoadUsedFallback = true;
+          }
+        }
+        if (img) {
+          bucket.set(i, img);
+          loaded += 1;
+        }
+      }
+      return loaded;
+    }
+    async ensureTheme(themeId, typeCount) {
+      var _a;
+      const requested = (_a = getMahjongTheme(themeId)) != null ? _a : getDefaultMahjongTheme();
+      const defaultTheme = getDefaultMahjongTheme();
+      this.lastLoadUsedFallback = false;
+      await this.loadThemeTiles(defaultTheme, typeCount, false);
+      let theme = requested;
+      let loaded = await this.loadThemeTiles(theme, typeCount, true);
+      const minRequired = Math.min(3, Math.max(1, theme.tiles.length));
+      if (theme.themeId !== defaultTheme.themeId && loaded < minRequired) {
+        theme = defaultTheme;
+        loaded = await this.loadThemeTiles(theme, typeCount, false);
+        this.lastLoadUsedFallback = true;
+      }
+      this.activeThemeId = theme.themeId;
+      return {
+        theme,
+        requestedThemeId: requested.themeId,
+        usedFallback: this.lastLoadUsedFallback
+      };
+    }
+    getTileImage(themeId, typeIndex) {
+      var _a, _b, _c, _d;
+      const direct = (_a = this.cache.get(themeId)) == null ? void 0 : _a.get(typeIndex);
+      if (direct) {
+        return direct;
+      }
+      const defaultTheme = getDefaultMahjongTheme();
+      if (themeId !== defaultTheme.themeId) {
+        return (_d = this.defaultTileImage(typeIndex)) != null ? _d : (_c = this.cache.get((_b = this.activeThemeId) != null ? _b : "")) == null ? void 0 : _c.get(typeIndex);
+      }
+      return void 0;
+    }
+  };
+
+  // src/presentation/mahjong/MahjongModalAssets.ts
+  var MAHJONG_MODAL_BG_SRC = {
+    slotFull: "assets/main/mahjong/modal-slot-full-bg.png"
+  };
+
+  // src/presentation/mahjong/MahjongToolIcons.ts
+  var MAHJONG_TOOL_ICON_SRC = {
+    move_out: "assets/main/mahjong/tools/tool-move-out.png",
+    gather: "assets/main/mahjong/tools/tool-gather.png",
+    shuffle: "assets/main/mahjong/tools/tool-shuffle.png",
+    reveal: "assets/main/mahjong/tools/tool-reveal.png"
+  };
+
   // src/presentation/wechat/WxCanvasGameApp.ts
+  var MAHJONG_AUTO_NEXT_MS = 1800;
   var BURIED_POSE_MS = 1100;
   var BURIED_LEAVE_MS = 560;
   var TILE_FALLBACK_COLORS = {
@@ -10880,10 +14754,7 @@
   };
   var BG_SRC = {
     lobby: "assets/main/bg/lobby.jpg",
-    level: "assets/main/bg/level.jpg",
-    lobbyCloudMint: "assets/main/bg/lobby-clouds-mint.jpg",
-    lobbyCloudMintB: "assets/main/bg/lobby-clouds-mint-b.jpg",
-    lobbyCloudMintC: "assets/main/bg/lobby-clouds-mint-c.jpg"
+    level: "assets/main/bg/level.jpg"
   };
   var LOBBY_LADDER_ICON_SRC = {
     check: "assets/main/ui/lobby-ladder/icon-check.png",
@@ -10899,6 +14770,8 @@
     sound: "assets/main/ui/icon-sound.png",
     mute: "assets/main/ui/icon-mute.png"
   };
+  var MAHJONG_HALL_SRC = "assets/main/mahjong/mahjong_button_test.png";
+  var MAHJONG_NEW_BADGE_SRC = "assets/main/mahjong/NEW.png";
   var SHARE_QR_SRC = "assets/main/ui/game-qr.png";
   var MACARON_SRC = [
     "assets/main/ui/macaron-pink.png",
@@ -10964,6 +14837,32 @@
       /** 首次进入大厅：可选授权头像昵称（原生按钮，关闭面板时销毁） */
       this.userInfoAuthButton = null;
       this.buttons = [];
+      this.mahjongButtons = [];
+      this.mahjongTileHits = [];
+      this.mahjongToolIcons = /* @__PURE__ */ new Map();
+      this.mahjongSlotFullModalBg = null;
+      this.mahjongActiveTheme = null;
+      /** 实际用于渲染贴图的主题（CDN 失败时为 default） */
+      this.mahjongDisplayThemeId = null;
+      this.mahjongWinShownAtMs = 0;
+      this.mahjongSuppressAutoNext = false;
+      this.mahjongAutoNextInFlight = false;
+      this.mahjongFlyAnims = [];
+      this.mahjongPileSway = createMahjongPileSway();
+      this.mahjongTileJitters = [];
+      this.mahjongPileLastX = 0;
+      this.mahjongPileLastY = 0;
+      /** 牌堆区滑动过则抬起不当作点牌 */
+      this.mahjongPileDragMoved = false;
+      /** 按在牌堆区或正在拖牌堆 */
+      this.mahjongPilePointerDown = false;
+      /** 倒计时 UI 按秒刷新，避免麻将对局每帧全量重绘卡死模拟器 */
+      this.mahjongTimerPaintSec = -1;
+      this.mahjongDrawRecoverAttempted = false;
+      /** 槽满首屏「牌槽已满」关闭后，展示「挑战失败」复活页。 */
+      this.mahjongSlotFullOfferDismissed = false;
+      /** 道具数量为 0 时展示的获取弹窗 */
+      this.mahjongToolOffer = null;
       this.raf = 0;
       this.statusText = "";
       /** 点道具后贴在按钮上方的短提示 */
@@ -10990,7 +14889,6 @@
       this.buriedSnowman = null;
       this.bgLobby = null;
       this.bgLevel = null;
-      this.lobbyCloudPages = [null, null, null];
       this.layoutCacheKey = "";
       this.layoutCache = { cellSize: 40, originX: 0, originY: 0 };
       /** 闯关成功庆祝图 */
@@ -11140,6 +15038,7 @@
       this.onGameClubTapped = () => {
         this.foreground.forcePause();
       };
+      this.mahjongShellLoadAttempts = 0;
       var _a, _b, _c, _d, _e;
       const info = readWxSystemInfo();
       this.wxPlatform = (info.platform || "").toLowerCase();
@@ -11179,10 +15078,41 @@
         }
       }
       this.session = session;
+      this.mahjongThemeAssets = new MahjongThemeAssets((src) => this.loadBgImage(src));
       this.boardView = new BoardView({ cellSize: 40, originX: 0, originY: 0 });
       this.sceneBg.layout(this.width, this.height);
       this.onTouchStartBound = (e) => this.handleTouchStart(e);
       this.onTouchMoveBound = (e) => this.handleTouchMove(e);
+      this.onMahjongMouseMoveBound = (e) => {
+        if (!isWxDesktopIdeHost()) {
+          return;
+        }
+        const { x, y } = this.mapClientPointToGame(e.clientX, e.clientY);
+        const inPile = this.isInMahjongPileArea(x, y);
+        if (!inPile && !this.mahjongPilePointerDown) {
+          this.mahjongPileLastX = x;
+          this.mahjongPileLastY = y;
+          return;
+        }
+        const gain = this.mahjongPilePointerDown || e.buttons === 1 ? 1 : 0.42;
+        this.handleMahjongPilePointerMove(x, y, true, gain);
+      };
+      this.onMahjongMouseDownBound = (e) => {
+        const { x, y } = this.mapClientPointToGame(e.clientX, e.clientY);
+        if (this.mode === "mahjong_play" && this.isInMahjongPileArea(x, y)) {
+          this.mahjongPilePointerDown = true;
+          this.mahjongPileLastX = x;
+          this.mahjongPileLastY = y;
+          this.mahjongPileDragMoved = false;
+        }
+      };
+      this.onMahjongMouseUpBound = (e) => {
+        if (this.mode === "mahjong_play" && this.overlay === "none" && !this.isInputMuted()) {
+          const { x, y } = this.mapClientPointToGame(e.clientX, e.clientY);
+          this.handleMahjongPlayTap(x, y);
+        }
+        this.mahjongPilePointerDown = false;
+      };
       this.onTouchEndBound = (e) => this.handleTouchEnd(e);
       this.onTouchCancelBound = (e) => this.handleTouchCancel(e);
       this.foreground = new ForegroundGate({
@@ -11221,12 +15151,10 @@
       }
       jobs.push(async () => {
         this.bgLobby = await this.loadBgImage(BG_SRC.lobby);
+        clearMahjongPlaySceneBackgroundCache();
       });
       jobs.push(async () => {
         this.bgLevel = await this.loadBgImage(BG_SRC.level);
-      });
-      jobs.push(async () => {
-        this.lobbyCloudPages[0] = await this.loadBgImage(BG_SRC.lobbyCloudMint);
       });
       for (const [key, src] of Object.entries(BOOSTER_ICON_SRC)) {
         jobs.push(async () => {
@@ -11268,6 +15196,51 @@
           this.buriedSnowman = await this.loadBgImage(BURIED_SPRITE_SRC.snowman);
         });
       }
+      jobs.push(async () => {
+        const img = await this.loadBgImage(MAHJONG_HALL_SRC);
+        if (img) {
+          this.uiIcons.set("mahjong_hall", img);
+        }
+        const badge = await this.loadBgImage(MAHJONG_NEW_BADGE_SRC);
+        if (badge) {
+          this.uiIcons.set("mahjong_new_badge", badge);
+        }
+        const [front, frontWhite, frontPetRabbit, top, bottom, left, right, back] = await Promise.all([
+          this.loadBgImage(MAHJONG_SHELL_SRC.front),
+          this.loadBgImage(MAHJONG_SHELL_SRC.frontWhite),
+          this.loadBgImage(MAHJONG_SHELL_SRC.frontPetRabbit),
+          this.loadBgImage(MAHJONG_SHELL_SRC.top),
+          this.loadBgImage(MAHJONG_SHELL_SRC.bottom),
+          this.loadBgImage(MAHJONG_SHELL_SRC.left),
+          this.loadBgImage(MAHJONG_SHELL_SRC.right),
+          this.loadBgImage(MAHJONG_SHELL_SRC.back)
+        ]);
+        const shellOk = applyMahjongShellImages({
+          front,
+          frontWhite,
+          frontPetRabbit,
+          top,
+          bottom,
+          left,
+          right,
+          back
+        });
+        console.info(
+          "[mahjong-shell] preload",
+          shellOk ? "ready" : "incomplete",
+          shellOk ? "" : getMahjongShellMissingKeys().join(",")
+        );
+        for (const tool of Object.keys(MAHJONG_TOOL_ICON_SRC)) {
+          const timg = await this.loadBgImage(MAHJONG_TOOL_ICON_SRC[tool]);
+          if (timg) {
+            this.mahjongToolIcons.set(tool, timg);
+          }
+        }
+        this.mahjongSlotFullModalBg = await this.loadBgImage(MAHJONG_MODAL_BG_SRC.slotFull);
+      });
+      jobs.push(async () => {
+        await this.mahjongThemeAssets.ensureTheme("default", 6);
+      });
       if (isWxDesktopIdeHost()) {
         for (const job of jobs) {
           await job();
@@ -11302,7 +15275,7 @@
         this.uiIcons.size
       );
     }
-    /** 云层翻页、过关海报、小程序码：不挡首屏。 */
+    /** 过关海报、小程序码：不挡首屏。 */
     async preloadDeferredAssets() {
       if (isWxDesktopIdeHost()) {
         await new Promise((resolve) => {
@@ -11310,12 +15283,6 @@
         });
       }
       await Promise.all([
-        this.loadBgImage(BG_SRC.lobbyCloudMintB).then((img) => {
-          this.lobbyCloudPages[1] = img;
-        }),
-        this.loadBgImage(BG_SRC.lobbyCloudMintC).then((img) => {
-          this.lobbyCloudPages[2] = img;
-        }),
         this.loadBgImage(WIN_CELEBRATE_SRC).then((img) => {
           this.winCelebrate = img;
         }),
@@ -11391,6 +15358,9 @@
       wx.onTouchMove(this.onTouchMoveBound);
       wx.onTouchEnd(this.onTouchEndBound);
       wx.onTouchCancel(this.onTouchCancelBound);
+      if (isWxDesktopIdeHost()) {
+        this.bindMahjongDesktopMouseListeners(true);
+      }
       if (!isWxDesktopIdeHost()) {
         wx.onHide(this.onHideBound);
         wx.onShow(this.onShowBound);
@@ -11595,7 +15565,168 @@
       if (this.resultFx.isActive()) {
         return true;
       }
+      if (this.mode === "mahjong_play" && this.mahjongPileSwayAnimating()) {
+        return true;
+      }
       return false;
+    }
+    mahjongPileSwayAnimating() {
+      const s = this.mahjongPileSway;
+      return Math.abs(s.vx) > 0.07 || Math.abs(s.vy) > 0.07 || Math.abs(s.vr) > 6e-5 || Math.abs(s.ox) > 0.35 || Math.abs(s.oy) > 0.35 || Math.abs(s.rot) > 35e-5;
+    }
+    handleMahjongPlayTap(x, y) {
+      const mjHit = hitMahjongButton(this.mahjongButtons, x, y);
+      if (mjHit) {
+        void this.handleMahjongUi(mjHit);
+        return;
+      }
+      if (this.mahjongToolOffer) {
+        return;
+      }
+      const game = this.session.mahjong.getActiveGame();
+      if ((game == null ? void 0 : game.phase) !== "playing" || this.mahjongPileDragMoved) {
+        return;
+      }
+      const tileIdx = hitMahjongTile(this.mahjongTileHits, x, y);
+      if (tileIdx === null) {
+        return;
+      }
+      this.session.playUiSfx();
+      const starsBefore = game.starsThisRun;
+      const tileType = game.pile[tileIdx];
+      const targetSlot = Math.min(game.maxSlots() - 1, game.slots.length);
+      const fromHit = this.mahjongTileHits.find((h) => h.index === tileIdx);
+      const slotRect = mahjongSlotTileRect(this.width, this.height, targetSlot);
+      this.session.mahjong.trackTileTap(game.level);
+      const tapped = game.tapPile(tileIdx);
+      if (!tapped) {
+        this.requestPaint();
+        return;
+      }
+      if (fromHit) {
+        this.mahjongFlyAnims.push(
+          createMahjongFlyAnim({
+            type: tileType,
+            fromX: fromHit.x,
+            fromY: fromHit.y,
+            fromW: fromHit.w,
+            fromH: fromHit.h,
+            fromRot: fromHit.rot,
+            toX: slotRect.x,
+            toY: slotRect.y,
+            toW: slotRect.w,
+            toH: slotRect.h,
+            startMs: this.nowMs || Date.now()
+          })
+        );
+      }
+      if (game.starsThisRun > starsBefore) {
+        this.session.mahjong.trackTripleClear(game.level, game.starsThisRun);
+      }
+      if (game.level === 1) {
+        game.guideShown = true;
+      }
+      if (game.phase === "won") {
+        this.mahjongWinShownAtMs = this.nowMs || Date.now();
+      }
+      void this.session.mahjong.saveActiveRun();
+      this.requestPaint();
+    }
+    isInMahjongPileArea(x, y) {
+      const m = mahjongPlayMetrics(this.width, this.height);
+      const pad = 6;
+      return x >= pad && x <= this.width - pad && y >= m.pileTop - 28 && y <= m.pileBottom + 28;
+    }
+    bindMahjongDesktopMouseListeners(bind) {
+      var _a, _b, _c, _d, _e, _f, _g, _h;
+      const g = globalThis;
+      const win = g.window;
+      if (!(win == null ? void 0 : win.addEventListener) || !win.removeEventListener) {
+        const canvasNode = this.canvas;
+        if (bind) {
+          (_a = canvasNode.addEventListener) == null ? void 0 : _a.call(canvasNode, "mousemove", this.onMahjongMouseMoveBound);
+          (_b = canvasNode.addEventListener) == null ? void 0 : _b.call(canvasNode, "mousedown", this.onMahjongMouseDownBound);
+          (_c = canvasNode.addEventListener) == null ? void 0 : _c.call(canvasNode, "mouseup", this.onMahjongMouseUpBound);
+          (_d = canvasNode.addEventListener) == null ? void 0 : _d.call(canvasNode, "mouseleave", this.onMahjongMouseUpBound);
+        } else {
+          (_e = canvasNode.removeEventListener) == null ? void 0 : _e.call(canvasNode, "mousemove", this.onMahjongMouseMoveBound);
+          (_f = canvasNode.removeEventListener) == null ? void 0 : _f.call(canvasNode, "mousedown", this.onMahjongMouseDownBound);
+          (_g = canvasNode.removeEventListener) == null ? void 0 : _g.call(canvasNode, "mouseup", this.onMahjongMouseUpBound);
+          (_h = canvasNode.removeEventListener) == null ? void 0 : _h.call(canvasNode, "mouseleave", this.onMahjongMouseUpBound);
+        }
+        return;
+      }
+      if (bind) {
+        win.addEventListener("mousemove", this.onMahjongMouseMoveBound);
+        win.addEventListener("mousedown", this.onMahjongMouseDownBound);
+        win.addEventListener("mouseup", this.onMahjongMouseUpBound);
+      } else {
+        win.removeEventListener("mousemove", this.onMahjongMouseMoveBound);
+        win.removeEventListener("mousedown", this.onMahjongMouseDownBound);
+        win.removeEventListener("mouseup", this.onMahjongMouseUpBound);
+      }
+    }
+    /** 开发者工具：DOM 坐标 → 逻辑画布坐标 */
+    mapClientPointToGame(clientX, clientY) {
+      const canvas = this.canvas;
+      if (typeof canvas.getBoundingClientRect === "function") {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = this.width / Math.max(1, rect.width);
+        const scaleY = this.height / Math.max(1, rect.height);
+        return {
+          x: (clientX - rect.left) * scaleX,
+          y: (clientY - rect.top) * scaleY
+        };
+      }
+      return { x: clientX, y: clientY };
+    }
+    handleMahjongPilePointerMove(x, y, force = false, gain = 1) {
+      if (this.mode !== "mahjong_play" || this.overlay !== "none") {
+        return;
+      }
+      if (!force && !this.mahjongPilePointerDown && !this.isInMahjongPileArea(x, y)) {
+        this.mahjongPileLastX = x;
+        this.mahjongPileLastY = y;
+        return;
+      }
+      const dx = (x - this.mahjongPileLastX) * gain;
+      const dy = (y - this.mahjongPileLastY) * gain;
+      if (dx !== 0 || dy !== 0) {
+        const game = this.session.mahjong.getActiveGame();
+        if ((game == null ? void 0 : game.phase) === "playing") {
+          const pileHits = pilePosesToHits(game.pilePoses, this.width, this.height);
+          pokeMahjongTilesOnPointerMove(
+            pileHits,
+            this.mahjongTileJitters,
+            this.mahjongPileLastX,
+            this.mahjongPileLastY,
+            x,
+            y,
+            dx,
+            dy
+          );
+        }
+        if (Math.hypot(dx, dy) > 2) {
+          this.mahjongPileDragMoved = true;
+        }
+        this.markUserActivity();
+        this.requestPaint();
+        this.kickRenderLoop();
+      }
+      this.mahjongPileLastX = x;
+      this.mahjongPileLastY = y;
+    }
+    resetMahjongPileSway() {
+      const s = this.mahjongPileSway;
+      s.ox = 0;
+      s.oy = 0;
+      s.rot = 0;
+      s.vx = 0;
+      s.vy = 0;
+      s.vr = 0;
+      this.mahjongTileJitters.length = 0;
+      this.mahjongPileDragMoved = false;
+      this.mahjongPilePointerDown = false;
     }
     /** 大厅呼吸、结算彩带、粉碎倒计时、公告泡泡需要持续转；对局静止盘面可停循环。 */
     wantsAmbientFx() {
@@ -11652,8 +15783,10 @@
         return;
       }
       this.frameGuard = true;
+      let keepLoop = false;
       try {
         if (this.pumping) {
+          keepLoop = this.needsPaint;
           return;
         }
         this.pumping = true;
@@ -11668,6 +15801,31 @@
           this.updateBuriedCollect(this.nowMs);
           if (this.mode === "lobby") {
             this.updateLobbyCamera(dt);
+          }
+          if (this.mode === "mahjong_play") {
+            const mj = this.session.mahjong.getActiveGame();
+            if ((mj == null ? void 0 : mj.phase) === "playing") {
+              mj.tick(dt);
+            }
+            if (updateMahjongPileSway(this.mahjongPileSway, dt)) {
+              this.requestPaint();
+            }
+            if (updateMahjongTileJitters(this.mahjongTileJitters, dt)) {
+              this.requestPaint();
+            }
+            if (pruneMahjongFlyAnims(this.mahjongFlyAnims, now)) {
+              this.requestPaint();
+            }
+            if ((mj == null ? void 0 : mj.phase) === "won") {
+              if (this.mahjongWinShownAtMs === 0) {
+                this.mahjongWinShownAtMs = now;
+              }
+              if (!this.mahjongSuppressAutoNext && now - this.mahjongWinShownAtMs >= MAHJONG_AUTO_NEXT_MS) {
+                void this.advanceMahjongAfterWin();
+              }
+            } else {
+              this.mahjongWinShownAtMs = 0;
+            }
           }
           if (this.mode === "crush" || this.mode === "clean" || this.mode === "playing" || this.mode === "result") {
             this.pruneCrushBursts(now);
@@ -11689,8 +15847,22 @@
           }
           const animating = this.sceneIsBusy();
           const ambientBubble = this.lobbyNoticeBubbleNeedsTick();
+          const mjGame = this.session.mahjong.getActiveGame();
+          const mahjongPlaying = this.mode === "mahjong_play" && (mjGame == null ? void 0 : mjGame.phase) === "playing";
+          const mahjongWon = (mjGame == null ? void 0 : mjGame.phase) === "won";
+          let mahjongTimerPaint = false;
+          if (mahjongPlaying && mjGame) {
+            const sec = Math.ceil(mjGame.remainingMs / 1e3);
+            if (sec !== this.mahjongTimerPaintSec) {
+              this.mahjongTimerPaintSec = sec;
+              mahjongTimerPaint = true;
+            }
+          } else if (!mahjongWon) {
+            this.mahjongTimerPaintSec = -1;
+          }
+          const mahjongKeepLoop = mahjongPlaying || mahjongWon;
           const desktopIde = isWxDesktopIdeHost();
-          const busy = shouldKeepRenderLoop({
+          keepLoop = shouldKeepRenderLoop({
             animating,
             lastInteractMs: this.lastInteractMs,
             nowMs: now,
@@ -11698,7 +15870,7 @@
               desktopIde,
               ambientFx: this.wantsAmbientFx()
             })
-          }) || ambientBubble;
+          }) || ambientBubble || mahjongKeepLoop || animating;
           this.frameDelayMs = resolveNextFrameDelayMs({
             animating,
             desktopIde,
@@ -11707,19 +15879,28 @@
           if (ambientBubble && !animating) {
             this.frameDelayMs = Math.max(this.frameDelayMs, desktopIde ? 90 : 70);
           }
-          if (this.needsPaint || busy) {
+          if (mahjongKeepLoop && !animating && desktopIde) {
+            this.frameDelayMs = Math.max(this.frameDelayMs, 220);
+          } else if (mahjongKeepLoop && !animating) {
+            this.frameDelayMs = Math.max(this.frameDelayMs, desktopIde ? 160 : 200);
+          }
+          const shouldDraw = this.needsPaint || animating || ambientBubble || mahjongTimerPaint || mahjongWon;
+          if (shouldDraw) {
             this.draw();
             this.frameErrors = 0;
+            if (!animating && !mahjongTimerPaint && !mahjongWon) {
+              this.needsPaint = false;
+            }
           }
-          this.needsPaint = busy;
         } catch (err) {
           console.error("[crush-crush] frame failed", err);
           this.frameErrors += 1;
           this.needsPaint = !shouldBackoffAfterFrameErrors(this.frameErrors);
+          keepLoop = this.needsPaint;
         } finally {
           this.pumping = false;
         }
-        if (!this.foregroundHidden && this.started && this.needsPaint) {
+        if (!this.foregroundHidden && this.started && keepLoop) {
           this.raf = this.scheduleFrame(this.loopBound);
         } else {
           this.raf = 0;
@@ -11818,6 +15999,8 @@
       }
       if (this.mode === "lobby" && !this.leavingLobby) {
         this.syncLobbyBanner();
+      } else {
+        this.interceptLobbyBanner();
       }
     }
     kickRenderLoop() {
@@ -11958,6 +16141,9 @@
       wx.offTouchMove(this.onTouchMoveBound);
       wx.offTouchEnd(this.onTouchEndBound);
       wx.offTouchCancel(this.onTouchCancelBound);
+      if (isWxDesktopIdeHost()) {
+        this.bindMahjongDesktopMouseListeners(false);
+      }
       (_a = this.unsub) == null ? void 0 : _a.call(this);
       this.unsub = null;
       this.share.dispose();
@@ -12704,6 +16890,13 @@
         this.crushTapOnDown = this.tryHandleCrushTap(p.x, p.y);
         return;
       }
+      if (this.mode === "mahjong_play") {
+        this.mahjongPileLastX = p.x;
+        this.mahjongPileLastY = p.y;
+        this.mahjongPileDragMoved = false;
+        this.mahjongPilePointerDown = this.isInMahjongPileArea(p.x, p.y);
+        return;
+      }
       if (this.mode === "playing" && !this.animator.isPlaying() && !this.swapSlide && !this.hammerTargeting) {
         const chrome = this.hitButton(p.x, p.y);
         if (chrome && chrome.id !== "level") {
@@ -12741,6 +16934,16 @@
       }
       if (this.mode === "lobby") {
         this.moveLobbyDrag(p.x, p.y);
+        return;
+      }
+      if (this.mode === "mahjong_play") {
+        const inPile = this.isInMahjongPileArea(p.x, p.y);
+        this.handleMahjongPilePointerMove(
+          p.x,
+          p.y,
+          this.mahjongPilePointerDown || inPile,
+          1
+        );
         return;
       }
       if (this.mode === "playing" && !this.animator.isPlaying() && !this.swapSlide && !this.hammerTargeting) {
@@ -12786,6 +16989,11 @@
         return;
       }
       if (this.mode === "lobby" && this.endLobbyDrag()) {
+        return;
+      }
+      if (this.mode === "mahjong_play") {
+        this.mahjongPilePointerDown = false;
+        this.handleMahjongPlayTap(x, y);
         return;
       }
       if (this.crushTapOnDown) {
@@ -12838,6 +17046,7 @@
       }
     }
     handleTouchCancel(_e) {
+      this.mahjongPilePointerDown = false;
       this.crushTapOnDown = false;
       this.lobbyDrag = null;
       this.leaderboardDrag = null;
@@ -12968,6 +17177,93 @@
       const hit = this.hitButton(x, y);
       return !!hit && hit.id !== "level";
     }
+    /** 大厅左下角：萌宠麻将馆入口图（在音效钮上方，不压关卡梯子）。 */
+    drawLobbyMahjongEntry(settings) {
+      var _a;
+      const img = this.uiIcons.get("mahjong_hall");
+      if (!img || ((_a = img.width) != null ? _a : 0) <= 0) {
+        return;
+      }
+      const { w: barW } = lobbyBarSize(this.width, this.height);
+      const ladderLeft = (this.width - barW) / 2 - this.width * LADDER_ZIGZAG_OF_WIDTH;
+      const sideW = Math.min(
+        LOBBY_SIDE_ACTION_MAX_W,
+        Math.max(LOBBY_SIDE_ACTION_MIN_W, Math.floor(this.width * 0.2))
+      );
+      const x = LOBBY_SIDE_ACTION_X;
+      const ladderGap = 10;
+      let size = Math.floor(Math.min(sideW, ladderLeft - ladderGap - x));
+      if (size < 36) {
+        return;
+      }
+      let y = settings.y - 6 - size;
+      const sideTop = lobbySideActionsTop(this.statusBarHeight);
+      const sideBottom = sideTop + LOBBY_SIDE_ACTION_H * 3 + LOBBY_SIDE_ACTION_GAP * 2 + 6;
+      for (let pass = 0; pass < 4; pass += 1) {
+        let adjusted = false;
+        for (const node of this.getLobbyLevelNodes()) {
+          const pad = 6;
+          const barL = node.barX - pad;
+          const barR = node.barX + node.barW + pad;
+          const barT = node.barY - pad;
+          const barB = node.barY + node.barH + pad;
+          const entryR = x + size;
+          const entryB = y + size;
+          if (entryR <= barL || x >= barR || entryB <= barT || y >= barB) {
+            continue;
+          }
+          const fitW = Math.floor(node.barX - ladderGap - x);
+          if (fitW < size) {
+            size = Math.max(36, fitW);
+            adjusted = true;
+          }
+          y = Math.min(y, barT - size - 8);
+          adjusted = true;
+        }
+        y = Math.max(y, sideBottom);
+        if (!adjusted) {
+          break;
+        }
+      }
+      if (size < 36) {
+        return;
+      }
+      const btn = {
+        id: "mahjong_hall",
+        x,
+        y,
+        w: size,
+        h: size,
+        label: "",
+        hitPad: 10
+      };
+      this.buttons.push(btn);
+      const unlocked = this.session.isMahjongHallUnlocked();
+      const showNew = this.session.shouldShowMahjongHallNewBadge();
+      const { ctx } = this;
+      const paintEntry = () => {
+        var _a2, _b, _c, _d;
+        ctx.save();
+        if (!unlocked) {
+          ctx.filter = "grayscale(100%)";
+          ctx.globalAlpha = 0.72;
+        }
+        ctx.drawImage(img, x, y, size, size);
+        const badge = this.uiIcons.get("mahjong_new_badge");
+        if (showNew && badge && ((_a2 = badge.width) != null ? _a2 : 0) > 0 && ((_b = badge.height) != null ? _b : 0) > 0) {
+          const srcW = Math.max(1, (_c = badge.width) != null ? _c : 1);
+          const srcH = Math.max(1, (_d = badge.height) != null ? _d : 1);
+          const badgeH = Math.max(14, Math.round(size * 0.3));
+          const badgeW = Math.round(badgeH * (srcW / srcH));
+          const overlap = Math.round(size * 0.05);
+          const badgeX = x + size - badgeW + overlap;
+          const badgeY = y - Math.round(badgeH * 0.2);
+          ctx.drawImage(badge, badgeX, badgeY, badgeW, badgeH);
+        }
+        ctx.restore();
+      };
+      paintEntry();
+    }
     /** 大厅 / 局内左下角：音效开关。局内与道具栏同高，上方附「回首页」。 */
     drawNavChips() {
       if (this.mode !== "lobby") {
@@ -13015,6 +17311,7 @@
         chrome.settings.h,
         8
       );
+      this.drawLobbyMahjongEntry(chrome.settings);
       if (chrome.claim) {
         const claimBtn = {
           id: "claim_shuffle",
@@ -14113,10 +18410,380 @@
         }
       }
     }
+    /** 点击入口：直进当前关（无限进度叠加，无关卡列表页）。 */
+    enterMahjongPlay() {
+      this.leavingLobby = true;
+      this.interceptLobbyBanner();
+      const level = this.session.mahjong.resolveEntryLevel();
+      this.session.mahjong.trackHallEnter(level);
+      void this.openMahjongPlayWhenReady();
+    }
+    /** 先加载五面壳 + 萌宠贴图，再进对局，避免第 1 关首帧空白/绿牌。 */
+    async openMahjongPlayWhenReady() {
+      this.session.mahjong.enterFromHall();
+      this.mahjongWinShownAtMs = 0;
+      this.mahjongSuppressAutoNext = false;
+      this.mahjongFlyAnims.length = 0;
+      this.resetMahjongPileSway();
+      this.mahjongTimerPaintSec = -1;
+      this.mahjongDrawRecoverAttempted = false;
+      this.mahjongSlotFullOfferDismissed = false;
+      await this.ensureMahjongTileShellPackLoaded();
+      await this.syncMahjongThemeAssets();
+      void this.session.refreshMahjongThemeCatalog().finally(() => {
+        void this.syncMahjongThemeAssets();
+      });
+      this.mode = "mahjong_play";
+      this.markUserActivity();
+      this.requestPaint();
+    }
+    async loadMahjongShellPackOnce() {
+      const [front, frontWhite, frontPetRabbit, top, bottom, left, right, back] = await Promise.all([
+        this.loadBgImage(MAHJONG_SHELL_SRC.front),
+        this.loadBgImage(MAHJONG_SHELL_SRC.frontWhite),
+        this.loadBgImage(MAHJONG_SHELL_SRC.frontPetRabbit),
+        this.loadBgImage(MAHJONG_SHELL_SRC.top),
+        this.loadBgImage(MAHJONG_SHELL_SRC.bottom),
+        this.loadBgImage(MAHJONG_SHELL_SRC.left),
+        this.loadBgImage(MAHJONG_SHELL_SRC.right),
+        this.loadBgImage(MAHJONG_SHELL_SRC.back)
+      ]);
+      return applyMahjongShellImages({
+        front,
+        frontWhite,
+        frontPetRabbit,
+        top,
+        bottom,
+        left,
+        right,
+        back
+      });
+    }
+    async ensureMahjongTileShellPackLoaded() {
+      if (isMahjongTileShellReady()) {
+        return;
+      }
+      const maxAttempts = 3;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        this.mahjongShellLoadAttempts += 1;
+        const ok = await this.loadMahjongShellPackOnce();
+        if (ok) {
+          console.info(
+            "[mahjong-shell] ready v",
+            MAHJONG_SHELL_ASSET_VER,
+            "(attempt",
+            this.mahjongShellLoadAttempts,
+            ")"
+          );
+          return;
+        }
+        console.warn(
+          "[mahjong-shell] missing:",
+          getMahjongShellMissingKeys().join(", "),
+          "paths=",
+          Object.values(MAHJONG_SHELL_SRC).join(" | ")
+        );
+        await new Promise((resolve) => {
+          setTimeout(resolve, 180);
+        });
+      }
+    }
+    async syncMahjongThemeAssets() {
+      var _a;
+      const game = this.session.mahjong.getActiveGame();
+      if (!game) {
+        return;
+      }
+      await this.ensureMahjongTileShellPackLoaded();
+      const result = await this.mahjongThemeAssets.ensureTheme(game.themeId, game.typeCount);
+      this.mahjongActiveTheme = result.theme;
+      this.mahjongDisplayThemeId = result.theme.themeId;
+      if (result.usedFallback) {
+        this.session.mahjong.trackThemeCdnFallback(result.requestedThemeId);
+      }
+      clearMahjongTileRasterCache();
+      clearMahjongPileLayoutCache();
+      clearMahjongPlaySceneBackgroundCache();
+      const themeKey = (_a = this.mahjongDisplayThemeId) != null ? _a : game.themeId;
+      warmMahjongTileRasterCache(
+        themeKey,
+        game.typeCount,
+        (typeIndex) => this.mahjongThemeAssets.getTileImage(themeKey, typeIndex),
+        drawStandingMahjongTileBlocks,
+        this.width
+      );
+      this.requestPaint();
+    }
+    buildMahjongPlayChrome(game) {
+      var _a, _b;
+      const theme = this.mahjongActiveTheme;
+      const now = this.nowMs || Date.now();
+      const autoNextMs = game.phase === "won" && !this.mahjongSuppressAutoNext && this.mahjongWinShownAtMs > 0 ? Math.max(0, MAHJONG_AUTO_NEXT_MS - (now - this.mahjongWinShownAtMs)) : 0;
+      return {
+        themeName: theme == null ? void 0 : theme.name,
+        background: theme == null ? void 0 : theme.background,
+        playBgImage: (_a = this.bgLobby) != null ? _a : this.bgLevel,
+        autoNextMs,
+        pileSway: this.mahjongPileSway,
+        tileJitters: this.mahjongTileJitters,
+        tileImage: (typeIndex) => {
+          var _a2;
+          return this.mahjongThemeAssets.getTileImage(
+            (_a2 = this.mahjongDisplayThemeId) != null ? _a2 : game.themeId,
+            typeIndex
+          );
+        },
+        tileRasterThemeKey: (_b = this.mahjongDisplayThemeId) != null ? _b : game.themeId,
+        toolIcon: (tool) => this.mahjongToolIcons.get(tool),
+        slotFullModalBg: this.mahjongSlotFullModalBg,
+        toolOfferModalBg: this.mahjongSlotFullModalBg
+      };
+    }
+    async advanceMahjongAfterWin() {
+      if (this.mahjongAutoNextInFlight) {
+        return;
+      }
+      const game = this.session.mahjong.getActiveGame();
+      if (!game || game.phase !== "won") {
+        return;
+      }
+      this.mahjongAutoNextInFlight = true;
+      const next = game.level + 1;
+      this.mahjongWinShownAtMs = 0;
+      this.mahjongSuppressAutoNext = false;
+      this.mahjongFlyAnims.length = 0;
+      await this.session.mahjong.finishActive(true);
+      this.session.mahjong.startLevel(next, false);
+      this.session.mahjong.trackAutoNext(next);
+      void this.syncMahjongThemeAssets();
+      this.mode = "mahjong_play";
+      this.requestPaint();
+      this.mahjongAutoNextInFlight = false;
+    }
+    async runMahjongSlotFullReviveAd() {
+      const result = await this.session.showMahjongSlotFullReviveAd();
+      if (result === "revived") {
+        this.mahjongSuppressAutoNext = false;
+        this.mahjongSlotFullOfferDismissed = false;
+        this.notifyUser("\u5DF2\u79FB\u51FA3\u5F20\u82B1\u724C\uFF0C\u8BF7\u7EE7\u7EED\u6D88\u9664", "\u79FB\u51FA\u6210\u529F");
+        void this.session.mahjong.saveActiveRun();
+      } else if (result === "skipped") {
+        this.notifyUser("\u770B\u5B8C\u89C6\u9891\u624D\u80FD\u590D\u6D3B", "\u6FC0\u52B1\u89C6\u9891");
+      } else if (result === "unavailable") {
+        this.notifyUser("\u89C6\u9891\u52A0\u8F7D\u4E2D\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5", "\u5E7F\u544A");
+      } else if (result === "error") {
+        this.notifyUser("\u590D\u6D3B\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5", "\u5E7F\u544A");
+      }
+      this.requestPaint();
+    }
+    mahjongToolLabel(tool) {
+      return MAHJONG_TOOL_LABELS[tool];
+    }
+    async handleMahjongUi(btn) {
+      var _a, _b, _c, _d, _e;
+      this.session.playUiSfx();
+      this.markUserActivity();
+      const gamePhase = (_a = this.session.mahjong.getActiveGame()) == null ? void 0 : _a.phase;
+      if (gamePhase === "won" || gamePhase === "lost") {
+        this.mahjongSuppressAutoNext = true;
+      }
+      let id = btn.id;
+      if (id === "mahjong_fail_close") {
+        id = "mahjong_back_lobby";
+      }
+      if (id === "mahjong_slot_full_close") {
+        this.mahjongSlotFullOfferDismissed = true;
+        this.requestPaint();
+        return;
+      }
+      if (id === "mahjong_back_home") {
+        this.session.mahjong.leaveTable();
+        this.mode = "lobby";
+        this.leavingLobby = false;
+        this.syncLobbyBanner();
+        this.requestPaint();
+        return;
+      }
+      if (id === "mahjong_back_lobby") {
+        const game = this.session.mahjong.getActiveGame();
+        if ((game == null ? void 0 : game.phase) === "won") {
+          await this.session.mahjong.finishActive(true);
+        } else if ((game == null ? void 0 : game.phase) === "lost") {
+          await this.session.mahjong.finishActive(false);
+        } else {
+          this.session.mahjong.leaveTable();
+        }
+        this.mahjongSlotFullOfferDismissed = false;
+        this.mode = "lobby";
+        this.leavingLobby = false;
+        this.syncLobbyBanner();
+        this.requestPaint();
+        return;
+      }
+      if (id === "mahjong_slot_full_ad" || id === "mahjong_fail_revive") {
+        await this.runMahjongSlotFullReviveAd();
+        return;
+      }
+      if (id === "mahjong_ad_slot") {
+        const result = await this.session.showMahjongAdSlot();
+        if (result === "unlocked") {
+          this.notifyUser("\u5DF2\u89E3\u9501\u672C\u5C40\u7B2C 7 \u69FD", "\u89E3\u9501\u6210\u529F");
+        } else if (result === "skipped") {
+          this.notifyUser("\u770B\u5B8C\u89C6\u9891\u624D\u80FD\u89E3\u9501", "\u6FC0\u52B1\u89C6\u9891");
+        } else if (result === "disabled") {
+          this.notifyUser("\u89C6\u9891\u69FD\u6682\u672A\u5F00\u653E", "\u89E3\u9501");
+        } else if (result === "unavailable") {
+          this.notifyUser("\u89C6\u9891\u52A0\u8F7D\u4E2D\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5", "\u5E7F\u544A");
+        } else if (result === "error") {
+          this.notifyUser("\u89E3\u9501\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5", "\u5E7F\u544A");
+        }
+        this.requestPaint();
+        return;
+      }
+      if (id === "mahjong_tool_modal_close") {
+        this.mahjongToolOffer = null;
+        this.requestPaint();
+        return;
+      }
+      if (id === "mahjong_tool_modal_ad") {
+        const tool = this.mahjongToolOffer;
+        if (!tool) {
+          return;
+        }
+        const result = await this.session.showMahjongToolGrantAd(tool);
+        if (result === "granted") {
+          this.mahjongToolOffer = null;
+          this.notifyUser(`\u5DF2\u83B7\u5F97 1 \u4E2A${this.mahjongToolLabel(tool)}`, "\u9053\u5177");
+          void this.session.mahjong.saveActiveRun();
+        } else if (result === "skipped") {
+          this.notifyUser("\u770B\u5B8C\u89C6\u9891\u624D\u80FD\u9886\u53D6", "\u6FC0\u52B1\u89C6\u9891");
+        } else if (result === "unavailable") {
+          this.notifyUser("\u89C6\u9891\u52A0\u8F7D\u4E2D\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5", "\u5E7F\u544A");
+        } else {
+          this.notifyUser("\u9886\u53D6\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5", "\u5E7F\u544A");
+        }
+        this.requestPaint();
+        return;
+      }
+      if (id === "mahjong_tool_modal_coin") {
+        const tool = this.mahjongToolOffer;
+        if (!tool) {
+          return;
+        }
+        const cost = mahjongCoinCost();
+        if (this.session.mahjong.buyTool(tool)) {
+          this.mahjongToolOffer = null;
+          this.notifyUser(
+            `\u5DF2\u5151\u6362 1 \u4E2A${this.mahjongToolLabel(tool)}`,
+            `\u91D1\u5E01 -${formatMahjongGlobalCoinAmount(cost)}`
+          );
+        } else {
+          this.notifyUser(
+            "\u91D1\u5E01\u4E0D\u8DB3\uFF0C\u7EE7\u7EED\u6D88\u9664\u83B7\u53D6\u5427",
+            `\u9700\u8981${formatMahjongGlobalCoinCostLabel(cost)}`
+          );
+        }
+        this.requestPaint();
+        return;
+      }
+      if (id.startsWith("mahjong_tool_")) {
+        const tool = id.replace("mahjong_tool_", "");
+        const game = this.session.mahjong.getActiveGame();
+        if (!game || game.phase !== "playing") {
+          return;
+        }
+        if (game.tools[tool] <= 0) {
+          this.mahjongToolOffer = tool;
+          this.requestPaint();
+          return;
+        }
+        if (!game.useTool(tool)) {
+          const hint = tool === "reveal" ? "\u6CA1\u6709\u53EF\u7FFB\u5F00\u7684\u6263\u724C" : "\u5F53\u524D\u65E0\u6CD5\u4F7F\u7528\u8BE5\u9053\u5177";
+          this.notifyUser(hint, "\u9053\u5177");
+        } else {
+          if (tool === "reveal") {
+            this.notifyUser("\u5DF2\u7FFB\u5F00\u4E00\u5F20\u6263\u724C", "\u7FFB\u724C");
+          }
+          this.session.mahjong.trackToolUse(tool, game.level);
+          void this.session.mahjong.saveActiveRun();
+        }
+        this.requestPaint();
+        return;
+      }
+      if (id === "mahjong_next") {
+        const game = this.session.mahjong.getActiveGame();
+        const next = ((_b = game == null ? void 0 : game.level) != null ? _b : 1) + 1;
+        await this.session.mahjong.finishActive(true);
+        this.session.mahjong.startLevel(next, false);
+        this.mahjongWinShownAtMs = 0;
+        void this.syncMahjongThemeAssets();
+        this.mode = "mahjong_play";
+        this.requestPaint();
+        return;
+      }
+      if (id === "mahjong_retry") {
+        const game = this.session.mahjong.getActiveGame();
+        const level = (_c = game == null ? void 0 : game.level) != null ? _c : 1;
+        await this.session.mahjong.finishActive(true);
+        await this.session.mahjong.clearSavedRun();
+        this.session.mahjong.startLevel(level, false);
+        this.mode = "mahjong_play";
+        this.requestPaint();
+        return;
+      }
+      if (id === "mahjong_fail_replay") {
+        const game = this.session.mahjong.getActiveGame();
+        const level = (_d = game == null ? void 0 : game.level) != null ? _d : 1;
+        if (!this.session.mahjong.payReplay()) {
+          this.notifyUser(
+            "\u989D\u5EA6\u4E0D\u8DB3",
+            `\u9700\u8981${formatMahjongGlobalCoinCostLabel(MAHJONG_REPLAY_COIN_COST)}`
+          );
+          return;
+        }
+        this.mahjongSlotFullOfferDismissed = false;
+        this.mahjongSuppressAutoNext = false;
+        this.mahjongFlyAnims.length = 0;
+        await this.session.mahjong.restartLevel(level);
+        void this.syncMahjongThemeAssets();
+        this.mode = "mahjong_play";
+        this.requestPaint();
+        return;
+      }
+      if (id === "mahjong_replay_coin") {
+        const game = this.session.mahjong.getActiveGame();
+        const level = (_e = game == null ? void 0 : game.level) != null ? _e : 1;
+        if (!this.session.mahjong.payReplay()) {
+          this.notifyUser(
+            "\u989D\u5EA6\u4E0D\u8DB3",
+            `\u9700\u8981${formatMahjongGlobalCoinCostLabel(MAHJONG_REPLAY_COIN_COST)}`
+          );
+          return;
+        }
+        await this.session.mahjong.finishActive(false);
+        await this.session.mahjong.clearSavedRun();
+        this.mahjongSlotFullOfferDismissed = false;
+        this.session.mahjong.startLevel(level, false);
+        this.mode = "mahjong_play";
+        this.requestPaint();
+        return;
+      }
+    }
     async handleButton(id, levelId) {
       var _a, _b, _c, _d;
-      if (id === "booster_hammer" || id === "booster_shuffle" || id === "booster_extra" || id === "mute" || id === "level" || id === "lobby" || id === "settings" || id === "howto" || id === "notice" || id === "club" || id === "recommend" || id === "post" || id === "invite" || id === "claim_shuffle" || id === "resume") {
+      if (id === "booster_hammer" || id === "booster_shuffle" || id === "booster_extra" || id === "mute" || id === "level" || id === "lobby" || id === "settings" || id === "howto" || id === "notice" || id === "club" || id === "recommend" || id === "post" || id === "invite" || id === "claim_shuffle" || id === "resume" || id === "mahjong_hall") {
         this.session.playUiSfx();
+      }
+      if (id === "mahjong_hall") {
+        void this.session.dismissMahjongHallNewBadge().then(() => {
+          this.requestPaint();
+        });
+        if (!this.session.isMahjongHallUnlocked()) {
+          this.notifyUser("\u901A\u5173\u7B2C20\u5173\u540E\u89E3\u9501\u840C\u5BA0\u9EBB\u5C06\u9986", "20\u5173\u540E\u89E3\u9501");
+          return;
+        }
+        this.enterMahjongPlay();
+        return;
       }
       if (id === "level") {
         const target = levelId != null ? levelId : this.resolveEntryLevelId();
@@ -14791,6 +19458,7 @@
       return null;
     }
     draw() {
+      var _a;
       const { ctx } = this;
       this.buttons.length = 0;
       try {
@@ -14799,23 +19467,82 @@
       } catch (e) {
       }
       try {
-        const bgMode = this.mode === "lobby" ? "lobby" : "level";
-        this.sceneBg.draw(
-          ctx,
-          {
-            lobby: this.bgLobby,
-            level: this.bgLevel,
-            lobbyCloudPages: this.lobbyCloudPages
-          },
-          bgMode,
-          this.nowMs || Date.now(),
-          bgMode === "lobby" ? this.lobbyCamY : 0
-        );
+        if (this.mode !== "mahjong_play") {
+          const bgMode = this.mode === "lobby" ? "lobby" : "level";
+          this.sceneBg.draw(
+            ctx,
+            {
+              lobby: this.bgLobby,
+              level: this.bgLevel
+            },
+            bgMode,
+            this.nowMs || Date.now(),
+            bgMode === "lobby" ? this.lobbyCamY : 0
+          );
+        }
         if (this.mode === "lobby") {
           this.drawLobby();
           this.drawNavChips();
           this.drawLobbySideActions();
           this.drawPageOverlay();
+          return;
+        }
+        if (this.mode === "mahjong_play") {
+          let game = this.session.mahjong.getActiveGame();
+          if (!game && !this.mahjongDrawRecoverAttempted) {
+            this.mahjongDrawRecoverAttempted = true;
+            this.session.mahjong.enterFromHall();
+            game = this.session.mahjong.getActiveGame();
+          }
+          if (!game) {
+            this.mode = "lobby";
+            this.requestPaint();
+            return;
+          }
+          if (game.phase !== "playing") {
+            this.mahjongToolOffer = null;
+          }
+          if (!isMahjongTileShellReady() && this.mahjongShellLoadAttempts < 12) {
+            void this.ensureMahjongTileShellPackLoaded().then(() => this.requestPaint());
+          }
+          const chrome = this.buildMahjongPlayChrome(game);
+          drawMahjongPlay(
+            ctx,
+            this.width,
+            this.height,
+            game,
+            this.session.mahjong.getProgress().coins,
+            this.mahjongTileHits,
+            this.mahjongButtons,
+            chrome,
+            this.mahjongFlyAnims,
+            this.nowMs || Date.now()
+          );
+          if (this.mahjongToolOffer && game.phase === "playing") {
+            drawMahjongToolOfferModal(
+              ctx,
+              this.width,
+              this.height,
+              this.mahjongToolOffer,
+              this.mahjongButtons,
+              chrome,
+              mahjongCoinCost()
+            );
+          }
+          if (game.phase === "won" || game.phase === "lost") {
+            drawMahjongResult(
+              ctx,
+              this.width,
+              this.height,
+              game,
+              this.mahjongButtons,
+              game.phase === "won" ? (_a = chrome.autoNextMs) != null ? _a : 0 : 0,
+              this.mahjongSlotFullOfferDismissed,
+              this.nowMs || Date.now(),
+              this.winCelebrate,
+              chrome
+            );
+          }
           return;
         }
         this.drawHud();
@@ -15413,13 +20140,7 @@
       return { dx: 0, dy: 0, dw: this.width, dh: this.height };
     }
     getCloudCoverRect() {
-      const img = this.lobbyCloudPages.find(
-        (page) => !!page && (page.width || 0) > 0
-      );
-      if (img) {
-        return this.sceneBg.getCoverLayout(img, 0.48);
-      }
-      return { dx: 0, dy: 0, dw: this.width, dh: this.height };
+      return this.getLobbyCoverRect();
     }
     getLobbyLevelNodes() {
       const cover = this.getLobbyCoverRect();

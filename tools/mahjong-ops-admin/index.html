@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>萌宠麻将馆 · 运营配置</title>
+    <link rel="stylesheet" href="admin.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div>
+        <h1>萌宠麻将馆 · 运营配置</h1>
+        <p class="sub">可视化编辑 → 校验归一化 → 导出 CDN / 云函数发布</p>
+      </div>
+      <div class="top-actions">
+        <button type="button" id="btn-reload-defaults" class="btn ghost">载入包内默认</button>
+        <label class="btn ghost file-btn">
+          导入 JSON
+          <input type="file" id="file-import" accept="application/json,.json" hidden />
+        </label>
+        <button type="button" id="btn-normalize" class="btn">校验并归一化</button>
+        <button type="button" id="btn-sample" class="btn">运行抽检</button>
+        <button type="button" id="btn-download" class="btn primary">下载 JSON</button>
+      </div>
+    </header>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <main class="layout">
+      <nav class="side">
+        <button type="button" data-panel="setup" class="nav active">部署向导</button>
+        <button type="button" data-panel="economy" class="nav">经济与倒计时</button>
+        <button type="button" data-panel="generation" class="nav">关卡生成</button>
+        <button type="button" data-panel="theme" class="nav">主题策略</button>
+        <button type="button" data-panel="overrides" class="nav">关卡覆盖</button>
+        <button type="button" data-panel="ops" class="nav">抽检与广告</button>
+        <button type="button" data-panel="publish" class="nav">发布</button>
+        <button type="button" data-panel="json" class="nav">JSON 预览</button>
+      </nav>
+
+      <section class="panel active" id="panel-setup">
+        <h2>部署向导</h2>
+        <p class="hint">先在终端执行 <code>npm run mahjong:ops-setup</code>，再按清单在开发者工具部署云函数。</p>
+        <div class="row-btns">
+          <button type="button" id="btn-run-setup-hint" class="btn ghost">刷新清单状态</button>
+          <button type="button" id="btn-open-publish" class="btn primary">去发布页</button>
+        </div>
+        <pre id="setup-checklist" class="sample-result setup-checklist"></pre>
+      </section>
+
+      <section class="panel" id="panel-economy">
+        <h2>经济与倒计时</h2>
+        <div class="grid">
+          <label>配置版本 version<input type="number" id="f-version" min="1" /></label>
+          <label>兑换/重玩金币 coinCost<input type="number" id="f-coinCost" min="1" /></label>
+          <label>三消得币 coinPerTriple<input type="number" id="f-coinPerTriple" min="0" /></label>
+          <label>三消得星 starPerTriple<input type="number" id="f-starPerTriple" min="0" /></label>
+          <label>默认倒计时（秒）<input type="number" id="f-timeoutSec" min="60" /></label>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-generation">
+        <h2>关卡生成</h2>
+        <div class="grid">
+          <label>种子版本 seedVersion<input type="number" id="f-seedVersion" min="1" /></label>
+          <label>可解性重试 maxAttempts<input type="number" id="f-maxAttempts" min="1" max="64" /></label>
+          <label>第 1 关张数 level1Tiles<input type="number" id="f-level1Tiles" min="3" max="105" /></label>
+          <label>标准张数 standardTiles<input type="number" id="f-standardTiles" min="9" max="105" /></label>
+          <label>第 2 关种类数 typeCountLevel2<input type="number" id="f-typeCountLevel2" min="3" max="20" /></label>
+          <label>L3+ 种类 min<input type="number" id="f-typeMin" min="3" max="20" /></label>
+          <label>L3+ 种类 maxInclusive<input type="number" id="f-typeMax" min="3" max="20" /></label>
+        </div>
+        <p class="hint">修改 seedVersion 会整体换牌堆；上线前建议跑抽检。</p>
+      </section>
+
+      <section class="panel" id="panel-theme">
+        <h2>主题策略</h2>
+        <div class="grid">
+          <label>第 1 关主题
+            <select id="f-level1ThemeId"></select>
+          </label>
+          <label>第 2 关主题
+            <select id="f-level2ThemeId"></select>
+          </label>
+          <label>3000+ 循环起点 cycleAfterLevel<input type="number" id="f-cycleAfterLevel" min="10" /></label>
+          <label class="check">
+            <input type="checkbox" id="f-sequentialFromLevel3" />
+            第 3 关起按主题列表顺序轮换（否则随机）
+          </label>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-overrides">
+        <h2>关卡覆盖（卡点 / 运营关）</h2>
+        <p class="hint">按关卡号覆盖主题、种类数或单独限时；留空表示不覆盖该项。</p>
+        <table class="table" id="overrides-table">
+          <thead>
+            <tr>
+              <th>关卡</th>
+              <th>主题</th>
+              <th>种类数</th>
+              <th>限时(秒)</th>
+              <th>备注</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="overrides-body"></tbody>
+        </table>
+        <button type="button" id="btn-add-override" class="btn ghost">+ 添加一行</button>
+      </section>
+
+      <section class="panel" id="panel-ops">
+        <h2>抽检与广告</h2>
+        <div class="grid">
+          <label class="check">
+            <input type="checkbox" id="f-samplingEnabled" />
+            开启可解性抽检
+          </label>
+          <label>每 N 关抽检 everyNLevels<input type="number" id="f-everyNLevels" min="1" /></label>
+          <label class="check">
+            <input type="checkbox" id="f-rewardedVideoSlot" />
+            开放激励视频第 7 槽
+          </label>
+          <label class="check">
+            <input type="checkbox" id="f-freeToUse" />
+            道具免费（预留开关）
+          </label>
+        </div>
+        <pre id="sample-result" class="sample-result"></pre>
+      </section>
+
+      <section class="panel" id="panel-publish">
+        <h2>发布到线上</h2>
+        <ol class="steps">
+          <li><strong>CDN</strong>：下载 JSON 后上传到 `opsConfigUrl`，并在 `mahjong-cdn.json` 打开 enabled。</li>
+          <li><strong>云库</strong>：部署 <code>setMahjongOps</code>，环境变量 <code>MAHJONG_OPS_ADMIN_TOKEN</code>（≥8 位）。</li>
+          <li><strong>HTTP 一键发布（推荐）</strong>：云开发控制台 → 云函数 <code>setMahjongOps</code> → 开启「HTTP 访问 / 云接入」→ 复制触发 URL 填到下方（无需固定 IP）。</li>
+          <li><strong>备用</strong>：复制「云函数参数」到开发者工具 → 云函数测试（<code>callFunction</code>，本仓库小游戏内也是这种方式）。</li>
+        </ol>
+        <div class="grid">
+          <label>云环境 envId（只读参考）<input type="text" id="f-cloudEnv" readonly /></label>
+          <label>管理员 Token（仅本地浏览器保存）<input type="password" id="f-adminToken" autocomplete="off" /></label>
+          <label class="span-2">setMahjongOps HTTP 触发 URL<input type="url" id="f-httpPublishUrl" placeholder="https://xxx.service.tcloud.tencent.com/..." /></label>
+        </div>
+        <div class="row-btns">
+          <button type="button" id="btn-publish-cloud" class="btn primary">一键发布到云（HTTP）</button>
+          <button type="button" id="btn-copy-cloud" class="btn">复制 callFunction 测试参数</button>
+          <button type="button" id="btn-write-bundled" class="btn danger">写回包内 mahjong-ops.json</button>
+        </div>
+        <pre id="publish-result" class="sample-result"></pre>
+        <p class="hint warn">写回包内配置会影响下次发版默认值，仅在本机开发环境使用。</p>
+      </section>
+
+      <section class="panel" id="panel-json">
+        <h2>JSON 预览</h2>
+        <textarea id="json-preview" spellcheck="false"></textarea>
+        <button type="button" id="btn-apply-json" class="btn">从下方 JSON 应用到表单</button>
+      </section>
+    </main>
+
+    <script src="admin.js" type="module"></script>
+  </body>
+</html>

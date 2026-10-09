@@ -32,6 +32,9 @@ export const StorageKeys = {
   DailyLoop: 'crush.player.daily',
   Boosters: 'crush.player.boosters',
   NoticeSeen: 'crush.player.noticeSeen',
+  /** 大厅麻将馆入口：用户已点过，不再显示 NEW 角标 */
+  MahjongHallNewDismissed: 'crush.player.mahjongHallNewDismissed',
+  MahjongHallProgress: 'crush.player.mahjongHall',
   Invite: 'crush.player.invite',
   DeviceId: 'crush.player.device',
 } as const;

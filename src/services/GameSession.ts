@@ -97,6 +97,20 @@ import {
   ensureWxUserProfile,
   readCachedWxProfile,
 } from '../core/adapters/WxUserProfile';
+import { MahjongHallService } from './MahjongHallService';
+import { createWxMahjongManifestFetcher } from '../core/adapters/MahjongCdnFetch';
+import { fetchMahjongOpsViaCloudFunction } from '../core/adapters/WxMahjongOpsCloud';
+import {
+  fetchMahjongThemeManifestFromCdn,
+  getMahjongThemeManifestVersion,
+} from '../logic/mahjong/MahjongThemeCatalog';
+import {
+  fetchMahjongOpsFromCdn,
+  fetchMahjongOpsFromCloud,
+  getMahjongOpsVersion,
+  isMahjongRewardedVideoSlotEnabled,
+} from '../logic/mahjong/MahjongOpsConfig';
+import type { MahjongToolId } from '../logic/mahjong/MahjongConfig';
 
 export interface GameSessionDeps {
   storage: IStorage;
@@ -118,6 +132,7 @@ export class GameSession {
   public readonly fsm: GameStateMachine;
   public readonly events: GameEventBus;
   public readonly progress: LevelProgress;
+  public readonly mahjong: MahjongHallService;
 
   private readonly finder = new MatchFinder();
   private readonly resolver = new MatchResolver(new MatchFinder());
@@ -137,6 +152,8 @@ export class GameSession {
   private inviteToast: string | null = null;
   private claimingInvite = false;
   private seenNoticeIds = new Set<string>();
+  /** 大厅麻将馆 NEW 角标：点过入口后不再展示 */
+  private mahjongHallNewDismissed = false;
   private readonly extraMovesGrant = itemsJson.extraMoves.moves;
 
   private board: BoardModel | null = null;
@@ -189,6 +206,10 @@ export class GameSession {
     this.fsm = new GameStateMachine('Boot');
     this.events = new GameEventBus();
     this.progress = new LevelProgress();
+    this.mahjong = new MahjongHallService(deps.storage, deps.analytics);
+    this.mahjong.setCloudSyncHook(() => {
+      this.queueCloudPush();
+    });
 
     const movesGranted =
       typeof balanceJson.reviveMovesGranted === 'number'
@@ -241,6 +262,14 @@ export class GameSession {
         ? savedNotices.filter((id): id is string => typeof id === 'string' && id.length > 0)
         : [],
     );
+    const mahjongNewDismissed = await this.deps.storage.get<boolean>(
+      StorageKeys.MahjongHallNewDismissed,
+    );
+    this.mahjongHallNewDismissed = mahjongNewDismissed === true;
+    await this.mahjong.load();
+    this.mahjong.setPlayerKey(this.getInviteCode() || 'local');
+    void this.refreshMahjongThemeCatalog();
+    void this.refreshMahjongOpsConfig();
     if (daily.grantedHammer) {
       this.boosters.loadStock(addBoosterToWallet(this.boosters.getStock(), 'hammer', 1));
       this.daily = { ...this.daily, bonusHammer: 0 };
@@ -640,6 +669,7 @@ export class GameSession {
       settings: { muted: this.deps.audio.isMuted() },
       daily: { ...this.daily },
       invite: toInviteCloudSlice(this.invite),
+      mahjong: this.mahjong.getCloudSlice(),
     };
   }
 
@@ -712,6 +742,10 @@ export class GameSession {
       await this.deps.storage.set(StorageKeys.DailyLoop, this.daily);
       await this.deps.storage.set(StorageKeys.Settings, merged.settings);
       await this.deps.storage.set(StorageKeys.Invite, this.invite);
+      if (merged.mahjong) {
+        this.mahjong.loadProgress(merged.mahjong);
+        await this.deps.storage.set(StorageKeys.MahjongHallProgress, this.mahjong.getCloudSlice());
+      }
       this.cloudHydrated = true;
       await this.flushCloudPush();
     } catch {
@@ -1182,7 +1216,217 @@ export class GameSession {
     return Math.max(fromScores, fromHighest);
   }
 
+  /** 主线通关第 20 关后解锁萌宠麻将馆；开发版/体验版/开发者工具便于联调。 */
+  public isMahjongHallUnlocked(): boolean {
+    if (shouldUnlockAllLevelsForPreview()) {
+      return true;
+    }
+    return this.getMaxClearedLevelId() >= 20;
+  }
 
+  public shouldShowMahjongHallNewBadge(): boolean {
+    return !this.mahjongHallNewDismissed;
+  }
+
+  public async dismissMahjongHallNewBadge(): Promise<void> {
+    if (this.mahjongHallNewDismissed) {
+      return;
+    }
+    this.mahjongHallNewDismissed = true;
+    await this.deps.storage.set(StorageKeys.MahjongHallNewDismissed, true);
+  }
+
+  /** 从 CDN 拉取麻将主题 manifest（`mahjong-cdn.json` 配置）。 */
+  public async refreshMahjongThemeCatalog(): Promise<boolean> {
+    try {
+      const ok = await fetchMahjongThemeManifestFromCdn(createWxMahjongManifestFetcher());
+      if (ok) {
+        this.deps.analytics.track('mahjong_cdn_manifest_ok', {
+          version: getMahjongThemeManifestVersion(),
+        });
+      }
+      return ok;
+    } catch {
+      this.deps.analytics.track('mahjong_cdn_manifest_fail', {});
+      return false;
+    }
+  }
+
+  /** 运营配置：CDN opsConfigUrl 优先，否则云函数 getMahjongOps。 */
+  public async refreshMahjongOpsConfig(): Promise<boolean> {
+    try {
+      const fetchJson = createWxMahjongManifestFetcher();
+      const cdnOk = await fetchMahjongOpsFromCdn(fetchJson);
+      if (cdnOk) {
+        this.deps.analytics.track('mahjong_ops_config_ok', {
+          source: 'cdn',
+          version: getMahjongOpsVersion(),
+        });
+        return true;
+      }
+      const cloudOk = await fetchMahjongOpsFromCloud(() => fetchMahjongOpsViaCloudFunction());
+      if (cloudOk) {
+        this.deps.analytics.track('mahjong_ops_config_ok', {
+          source: 'cloud',
+          version: getMahjongOpsVersion(),
+        });
+        return true;
+      }
+      return false;
+    } catch {
+      this.deps.analytics.track('mahjong_ops_config_fail', {});
+      return false;
+    }
+  }
+
+  /** 激励视频解锁麻将馆本局第 7 槽。 */
+  public async showMahjongAdSlot(): Promise<
+    'unlocked' | 'disabled' | 'skipped' | 'unavailable' | 'error'
+  > {
+    const game = this.mahjong.getActiveGame();
+    if (!game || game.adSlotUnlocked) {
+      return 'unavailable';
+    }
+    if (!isMahjongRewardedVideoSlotEnabled()) {
+      return 'disabled';
+    }
+
+    this.deps.analytics.track('ad_show', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_ad_slot',
+      levelId: game.level,
+    });
+
+    if (!canCreateWxFullscreenAds()) {
+      if (!shouldUnlockAllLevelsForPreview()) {
+        return 'unavailable';
+      }
+      const ok = await this.mahjong.unlockAdSlot();
+      if (ok) {
+        this.deps.analytics.track('ad_complete', {
+          placement: 'rewarded_revive',
+          reason: 'mahjong_ad_slot_dev',
+        });
+      }
+      return ok ? 'unlocked' : 'error';
+    }
+
+    void this.deps.ads.load('rewarded_revive');
+    const result = await this.deps.ads.show('rewarded_revive');
+    if (result === 'completed') {
+      this.deps.analytics.track('ad_complete', {
+        placement: 'rewarded_revive',
+        reason: 'mahjong_ad_slot',
+      });
+      const ok = await this.mahjong.unlockAdSlot();
+      return ok ? 'unlocked' : 'error';
+    }
+    if (result === 'skipped') {
+      return 'skipped';
+    }
+    this.deps.analytics.track('ad_error', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_ad_slot',
+      result,
+    });
+    return result === 'not_ready' ? 'unavailable' : 'error';
+  }
+
+  /** 槽位已满：看激励视频移出 3 张后继续本局。 */
+  public async showMahjongSlotFullReviveAd(): Promise<
+    'revived' | 'skipped' | 'unavailable' | 'error'
+  > {
+    const game = this.mahjong.getActiveGame();
+    if (!game?.canReviveFromSlotFullAd()) {
+      return 'unavailable';
+    }
+
+    this.deps.analytics.track('ad_show', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_slot_full',
+      levelId: game.level,
+    });
+
+    if (!canCreateWxFullscreenAds()) {
+      if (!shouldUnlockAllLevelsForPreview()) {
+        return 'unavailable';
+      }
+      const ok = await this.mahjong.reviveAfterSlotFullAd();
+      if (ok) {
+        this.deps.analytics.track('ad_complete', {
+          placement: 'rewarded_revive',
+          reason: 'mahjong_slot_full_dev',
+        });
+      }
+      return ok ? 'revived' : 'error';
+    }
+
+    void this.deps.ads.load('rewarded_revive');
+    const result = await this.deps.ads.show('rewarded_revive');
+    if (result === 'completed') {
+      this.deps.analytics.track('ad_complete', {
+        placement: 'rewarded_revive',
+        reason: 'mahjong_slot_full',
+      });
+      const ok = await this.mahjong.reviveAfterSlotFullAd();
+      return ok ? 'revived' : 'error';
+    }
+    if (result === 'skipped') {
+      return 'skipped';
+    }
+    this.deps.analytics.track('ad_error', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_slot_full',
+      result,
+    });
+    return result === 'not_ready' ? 'unavailable' : 'error';
+  }
+
+  /** 道具数量为 0：看激励视频获得 1 个。 */
+  public async showMahjongToolGrantAd(
+    tool: MahjongToolId,
+  ): Promise<'granted' | 'skipped' | 'unavailable' | 'error'> {
+    this.deps.analytics.track('ad_show', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_tool',
+      tool,
+    });
+
+    if (!canCreateWxFullscreenAds()) {
+      if (!shouldUnlockAllLevelsForPreview()) {
+        return 'unavailable';
+      }
+      this.mahjong.grantTool(tool, 'ad');
+      this.deps.analytics.track('ad_complete', {
+        placement: 'rewarded_revive',
+        reason: 'mahjong_tool_dev',
+        tool,
+      });
+      return 'granted';
+    }
+
+    void this.deps.ads.load('rewarded_revive');
+    const result = await this.deps.ads.show('rewarded_revive');
+    if (result === 'completed') {
+      this.deps.analytics.track('ad_complete', {
+        placement: 'rewarded_revive',
+        reason: 'mahjong_tool',
+        tool,
+      });
+      this.mahjong.grantTool(tool, 'ad');
+      return 'granted';
+    }
+    if (result === 'skipped') {
+      return 'skipped';
+    }
+    this.deps.analytics.track('ad_error', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_tool',
+      tool,
+      result,
+    });
+    return result === 'not_ready' ? 'unavailable' : 'error';
+  }
 
   /** 大厅藤蔓：当前节点的 5 关（兼容旧逻辑） */
   public getVineNode(): VineNodeInfo {
@@ -1842,7 +2086,7 @@ export class GameSession {
   }
 
   /**
-   * 在大厅展示底部横幅。进关或弹层时不要调。
+   * 在大厅展示底部横幅。进关、麻将馆对局或弹层时不要调。
    */
   public async showLobbyBanner(): Promise<AdShowResult> {
     if (!this.isLobbyBannerEnabled()) {
@@ -1853,8 +2097,12 @@ export class GameSession {
       this.hideLobbyBanner();
       return 'error';
     }
+    if (this.mahjong.getActiveGame()) {
+      this.hideLobbyBanner();
+      return 'error';
+    }
     const result = await this.deps.ads.show('banner_lobby');
-    if (this.fsm.getCurrent() !== 'Lobby') {
+    if (this.fsm.getCurrent() !== 'Lobby' || this.mahjong.getActiveGame()) {
       this.hideLobbyBanner();
       return 'error';
     }
