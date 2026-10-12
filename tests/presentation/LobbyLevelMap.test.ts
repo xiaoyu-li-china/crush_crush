@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { listAllVineNodes, listVineNodesThrough } from '../../src/logic/level/LevelVine';
 import {
-  isCandyHouseLevel,
   isLobbyNodeExposed,
   isLobbyNodeOnScreen,
   layoutLobbyLevelNodes,
@@ -26,7 +25,6 @@ import {
   lobbySnapEase,
   lobbySnapTarget,
   lobbyMacaronRadius,
-  lobbyHouseRadius,
   lobbySwipeHintOpacity,
   lobbyBrandAnchorY,
   lobbyLevelBandTop,
@@ -41,8 +39,6 @@ import {
   LOBBY_SWIPE_HINT_FADE_MS,
   LOBBY_SWIPE_HINT_HOLD_MS,
   LOBBY_TITLE_UY,
-  LOBBY_TREE_PROMPT,
-  LEVELS_PER_CANDY_HOUSE,
 } from '../../src/presentation/ui/LobbyLevelMap';
 
 describe('LobbyLevelMap 糖果梯子', () => {
@@ -69,7 +65,7 @@ describe('LobbyLevelMap 糖果梯子', () => {
       assert.ok(nodes[i]!.y > nodes[i + 1]!.y);
     }
     assert.equal(nodes[0]!.kind, 'ladder');
-    assert.equal(nodes[19]!.kind, 'candy-house');
+    assert.equal(nodes[19]!.kind, 'ladder');
     assert.equal(nodes[0]!.circleSide, 'right');
     assert.equal(nodes[1]!.circleSide, 'left');
     // 之字错位：右糖条偏右，左糖条偏左
@@ -79,7 +75,6 @@ describe('LobbyLevelMap 糖果梯子', () => {
     assert.ok(nodes[0]!.barH >= 32);
     assert.ok(nodes[0]!.hitR > 16);
     assert.ok(lobbyMacaronRadius(400) < 28);
-    assert.ok(lobbyHouseRadius(400) > lobbyMacaronRadius(400));
   });
 
   it('camY 增大时整列下移，可承接更高关与无限滑动', () => {
@@ -112,11 +107,7 @@ describe('LobbyLevelMap 糖果梯子', () => {
     assert.ok(lobbyCameraMax(40, height) > lobbyCameraMax(22, height));
   });
 
-  it('第 20 关为糖果屋，路径点按关号升序', () => {
-    assert.equal(LEVELS_PER_CANDY_HOUSE, 20);
-    assert.equal(isCandyHouseLevel(20), true);
-    assert.equal(isCandyHouseLevel(40), true);
-    assert.equal(isCandyHouseLevel(19), false);
+  it('第 20 关与普通关同型，路径点按关号升序', () => {
     const height = 800;
     const nodes = layoutLobbyLevelNodes({
       vines: listAllVineNodes(1, 20),
@@ -131,8 +122,8 @@ describe('LobbyLevelMap 糖果梯子', () => {
     for (let i = 1; i < pts.length; i += 1) {
       assert.ok(pts[i]!.levelId > pts[i - 1]!.levelId);
     }
-    const house = nodes.find((n) => n.levelId === 20);
-    assert.equal(house?.kind, 'candy-house');
+    const lvl20 = nodes.find((n) => n.levelId === 20);
+    assert.equal(lvl20?.kind, 'ladder');
   });
 
   it('梯子左右摆幅落在安全边距内', () => {
@@ -272,13 +263,12 @@ describe('LobbyLevelMap 糖果梯子', () => {
     );
   });
 
-  it('大厅文案改成糖果梯子 / 糖果屋', () => {
-    assert.equal(LOBBY_TREE_PROMPT, '沿糖果梯子闯关，冲进糖果屋！');
+  it('大厅翻页文案为糖果梯子区间', () => {
     assert.equal(LOBBY_MORE_LEVELS_HINT, '上滑闯关');
     assert.equal(LOBBY_BRAND_TITLE, '萌宠粉碎消');
     assert.equal(LOBBY_BRAND_SUBTITLE, '闯关消除 · 可爱小动物');
-    assert.ok(lobbyPageCaption(3, 20).includes('糖果屋') || lobbyPageCaption(3, 20).includes('关'));
-    assert.equal(lobbyComingSoonLine(lobbyMaxPageIndex(20), 20), '20关后有新玩法，敬请期待');
+    assert.match(lobbyPageCaption(1, 20), /糖果梯子/);
+    assert.equal(lobbyComingSoonLine(lobbyMaxPageIndex(20), 20), '');
   });
 
   it('lobby caption sits below the brand area on the first screen', () => {

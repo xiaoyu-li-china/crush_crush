@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "economy": {
+    "coinCost": 100,
+    "coinPerTriple": 1,
+    "starPerTriple": 1
+  },
+  "session": {
+    "timeoutSec": 120
+  },
+  "generation": {
+    "seedVersion": 1,
+    "maxAttempts": 16,
+    "level1Tiles": 9,
+    "standardTiles": 105,
+    "typeCountLevel2": 7,
+    "typeCountFromLevel3": { "min": 8, "maxInclusive": 10 }
+  },
+  "theme": {
+    "level1ThemeId": "default",
+    "level2ThemeId": "default",
+    "cycleAfterLevel": 3000,
+    "sequentialFromLevel3": false
+  },
+  "levelOverrides": [],
+  "sampling": {
+    "enabled": true,
+    "everyNLevels": 50
+  },
+  "ads": {
+    "rewardedVideoSlot": true
+  },
+  "tools": {
+    "freeToUse": true
+  },
+  "_comment": "运维可通过 CDN opsConfigUrl 或云库 mahjong_ops/config 热更新；客户端合并后以 version 为准。"
+}

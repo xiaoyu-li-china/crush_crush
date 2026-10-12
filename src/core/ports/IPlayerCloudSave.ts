@@ -3,6 +3,7 @@ import type { BoosterStock } from '../../logic/economy/BoosterInventory';
 import type { DailyLoopData } from '../../logic/economy/DailyLoop';
 import type { InviteCloudSlice } from '../../logic/economy/InviteLoop';
 import type { LevelProgressData } from '../../logic/level/LevelProgress';
+import type { MahjongHallProgressData } from '../../logic/mahjong/MahjongProgress';
 
 /** 绑定到微信用户（openid）的云端存档。 */
 export interface PlayerCloudSnapshot {
@@ -12,6 +13,8 @@ export interface PlayerCloudSnapshot {
   settings: PlayerSettings;
   daily: DailyLoopData;
   invite?: InviteCloudSlice;
+  /** 萌宠麻将馆进度（V1.2 云存档） */
+  mahjong?: MahjongHallProgressData;
 }
 
 export interface InviteClaimResult {

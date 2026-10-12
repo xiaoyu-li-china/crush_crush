@@ -1,5 +1,6 @@
 import type { BoardShape } from '../board/BoardShape';
 import type { BoardSize, TileKind } from '../board/TileType';
+import type { Match3ProceduralMeta } from './Match3ProceduralMeta';
 
 export type LevelGoal =
   | { type: 'collect'; kind: TileKind; count: number }
@@ -54,7 +55,11 @@ export interface LevelConfig {
   };
   /** 开局预置猫头鹰 / 闪光，制造大连锁 */
   starterSpecials?: { owls?: number; sparkles?: number };
+  /** 本关棋盘随机填充的萌宠种类数（缺省按关号曲线） */
+  basicKindCount?: number;
   goals: LevelGoal[];
   crushEnabled: boolean;
   crushDurationMs: number;
+  /** 仅 21+ 程序化关：UI 与进关提示 */
+  procedural?: Match3ProceduralMeta;
 }

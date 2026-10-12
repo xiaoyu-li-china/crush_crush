@@ -6,8 +6,6 @@
 export interface SceneBgImages {
   lobby: WxImage | null;
   level: WxImage | null;
-  /** 云层页资源仍加载；大厅滑动时底图保持不动 */
-  lobbyCloudPages?: Array<WxImage | null>;
 }
 
 interface SparkleSpec {
@@ -62,6 +60,7 @@ export class CuteSceneBackground {
     mode: 'lobby' | 'level',
     nowMs: number,
     _lobbyPanY = 0,
+    levelHue?: number,
   ): void {
     const { width, height } = this;
     if (width <= 0 || height <= 0) {
@@ -76,7 +75,9 @@ export class CuteSceneBackground {
       return;
     }
 
-    if (img) {
+    if (typeof levelHue === 'number') {
+      this.drawLevelHueGradient(ctx, width, height, levelHue);
+    } else if (img) {
       this.drawFallbackGradient(ctx, mode, width, height);
       try {
         this.drawCoverImage(ctx, img, width, height, 1, 0, 0, 0.92);
@@ -87,7 +88,63 @@ export class CuteSceneBackground {
       this.drawFallbackGradient(ctx, mode, width, height);
     }
 
+    if (img && typeof levelHue === 'number') {
+      ctx.save();
+      ctx.globalAlpha = 0.42;
+      try {
+        this.drawCoverImage(ctx, img, width, height, 1, 0, 0, 0.92);
+      } catch {
+        // ignore tint overlay failure
+      }
+      ctx.restore();
+    }
+
     this.drawSparkles(ctx, t, 0.2);
+  }
+
+  private drawLevelHueGradient(
+    ctx: WxCanvasRenderingContext2D,
+    width: number,
+    height: number,
+    hue: number,
+  ): void {
+    const h = ((hue % 360) + 360) % 360;
+    const stop = (hh: number, s: number, l: number) => {
+      const c = (1 - Math.abs(2 * (l / 100) - 1)) * (s / 100);
+      const x = c * (1 - Math.abs(((hh / 60) % 2) - 1));
+      const m = l / 100 - c / 2;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      if (hh < 60) {
+        r = c;
+        g = x;
+      } else if (hh < 120) {
+        r = x;
+        g = c;
+      } else if (hh < 180) {
+        g = c;
+        b = x;
+      } else if (hh < 240) {
+        g = x;
+        b = c;
+      } else if (hh < 300) {
+        r = x;
+        b = c;
+      } else {
+        r = c;
+        b = x;
+      }
+      const byte = (v: number) => Math.round((v + m) * 255);
+      return `rgb(${byte(r)},${byte(g)},${byte(b)})`;
+    };
+    const g = ctx.createLinearGradient(0, 0, 0, height);
+    g.addColorStop(0, stop(h, 55, 78));
+    g.addColorStop(0.45, stop((h + 20) % 360, 50, 88));
+    g.addColorStop(0.72, stop((h + 55) % 360, 45, 82));
+    g.addColorStop(1, stop((h + 90) % 360, 50, 58));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, width, height);
   }
 
   /**

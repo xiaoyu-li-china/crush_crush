@@ -6,12 +6,10 @@ import {
   LEVELS_PER_VINE_NODE,
   type VineNodeInfo,
 } from '../../logic/level/LevelVine';
-import noticeJson from '../../config/notice.json';
-
 /** 关卡条高度占屏高（略矮，8 关更紧凑） */
 export const LADDER_BAR_H_OF_HEIGHT = 0.042;
-/** 关卡条宽度占屏宽（居中列，成块更易识别） */
-export const LADDER_BAR_W_OF_WIDTH = 0.52;
+/** 关卡条宽度占屏宽（略收窄，给左下麻将馆入口让位） */
+export const LADDER_BAR_W_OF_WIDTH = 0.48;
 /** 左右错位摆幅占屏宽（对齐设计稿之字梯） */
 export const LADDER_ZIGZAG_OF_WIDTH = 0.055;
 /**
@@ -34,13 +32,8 @@ export const LOBBY_LADDER_TOP_INSET = 10;
 export const MACARON_RADIUS_OF_COVER = 30 / 576;
 export const MACARON_SPRITE_FILL = 0.97;
 
-/** 每座糖果屋对应关卡数（章末仍可点进，绘制与普通条一致） */
-export const LEVELS_PER_CANDY_HOUSE = 20;
-
 /** 树干提示条相对 cover 的中线位置（贴列表下方，不压关卡条） */
 export const TREE_CAPTION_UY = 0.78;
-
-export const LOBBY_TREE_PROMPT = '沿糖果梯子闯关，冲进糖果屋！';
 
 export const LOBBY_MORE_LEVELS_HINT = '上滑闯关';
 export const LOBBY_SWIPE_HINT_HOLD_MS = 3000;
@@ -187,7 +180,7 @@ export function cloudLevelSlots(
   return CLOUD_PAGE_SLOTS[page % CLOUD_PAGE_SLOTS.length]!;
 }
 
-export type LobbyNodeKind = 'ladder' | 'candy-house';
+export type LobbyNodeKind = 'ladder';
 export type LobbyCircleSide = 'left' | 'right';
 
 export interface LobbyLevelNode {
@@ -264,10 +257,6 @@ export function lobbyBarSize(width: number, height: number): { w: number; h: num
     w: Math.min(width * LADDER_BAR_W_OF_WIDTH, width - 72),
     h: Math.max(32, height * LADDER_BAR_H_OF_HEIGHT),
   };
-}
-
-export function isCandyHouseLevel(levelId: number): boolean {
-  return levelId > 0 && levelId % LEVELS_PER_CANDY_HOUSE === 0;
 }
 
 /**
@@ -385,8 +374,9 @@ export function lobbyMaxPageIndex(totalLevels: number): number {
   return Math.max(0, Math.round(maxCam / h));
 }
 
+/** 标题区第三行提示（已停用固定公告句，避免与顶栏通关公告重复） */
 export function lobbyComingSoonLine(_page = 0, _totalLevels = 0): string {
-  return noticeJson.body;
+  return '';
 }
 
 export function lobbyLayerHeight(height: number): number {
@@ -438,10 +428,6 @@ export function lobbyMacaronRadius(coverDw: number): number {
   return coverDw * MACARON_RADIUS_OF_COVER;
 }
 
-export function lobbyHouseRadius(coverDw: number): number {
-  return lobbyMacaronRadius(coverDw) * 1.55;
-}
-
 /**
  * 糖果梯云朵版：横向胶囊条左右交替，低关在下、高关在上。
  */
@@ -481,7 +467,6 @@ export function layoutLobbyLevelNodes(args: {
   const out: LobbyLevelNode[] = [];
   for (const levelId of levelIds) {
     const slot = lobbyLadderSlot(levelId);
-    const house = isCandyHouseLevel(levelId);
     const side = lobbyCircleSide(levelId);
     const cy = bottom - slot.uy * step + camY;
     const barY = cy - barH / 2;
@@ -497,7 +482,7 @@ export function layoutLobbyLevelNodes(args: {
       x: circleX,
       y: cy,
       hitR: circleR,
-      kind: house ? 'candy-house' : 'ladder',
+      kind: 'ladder',
       barX,
       barY,
       barW,
@@ -623,10 +608,6 @@ export function lobbyPageCaption(page: number, totalLevels = 0): string {
   const end = totalLevels > 0 ? Math.min(totalLevels, rawEnd) : rawEnd;
   if (start > end) {
     return '';
-  }
-  const chapter = Math.ceil(end / LEVELS_PER_CANDY_HOUSE);
-  if (isCandyHouseLevel(end) || end === totalLevels) {
-    return `第 ${chapter} 座糖果屋 · ${start}-${end} 关`;
   }
   if (start === end) {
     return `第 ${start} 关`;

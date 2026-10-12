@@ -9,10 +9,16 @@ import {
   mergeInviteCloud,
   parseInviteCloudSlice,
 } from '../economy/InviteLoop';
+import { ladderCoinsSpent } from '../economy/ladderCoins';
 import {
   normalizeLevelProgressData,
   type LevelProgressData,
 } from '../level/LevelProgress';
+import {
+  emptyMahjongProgress,
+  type MahjongHallProgressData,
+} from '../mahjong/MahjongProgress';
+import { mergeMahjongProgress } from './mergeMahjongCloudSave';
 
 export function mergeLevelProgress(
   local: LevelProgressData,
@@ -33,6 +39,7 @@ export function mergeLevelProgress(
     lastPlayedLevelId:
       a.highestLevelId >= b.highestLevelId ? a.lastPlayedLevelId : b.lastPlayedLevelId,
     levelScores: scores,
+    ladderCoinsSpent: Math.max(ladderCoinsSpent(a), ladderCoinsSpent(b)),
   });
 }
 
@@ -87,6 +94,7 @@ export function mergePlayerCloudSnapshots(
       progress: normalizeLevelProgressData(local.progress),
       boosters: clampBoosterWallet(local.boosters),
       invite: parseInviteCloudSlice(local.invite),
+      mahjong: mergeMahjongProgress(local.mahjong ?? emptyMahjongProgress(), null),
       updatedAt: Math.max(1, local.updatedAt || Date.now()),
     };
   }
@@ -100,6 +108,10 @@ export function mergePlayerCloudSnapshots(
     invite: mergeInviteCloud(
       parseInviteCloudSlice(local.invite),
       parseInviteCloudSlice(remote.invite),
+    ),
+    mahjong: mergeMahjongProgress(
+      local.mahjong ?? emptyMahjongProgress(),
+      remote.mahjong,
     ),
   };
 }

@@ -10,7 +10,9 @@ export type BoardShape =
   | 'plus'
   | 'ring'
   | 'double_ring'
-  | 'hourglass';
+  | 'hourglass'
+  /** 沙漏腰略宽：7×7 最窄行 3 格（标准 hourglass 为 1 格） */
+  | 'hourglass_wide';
 
 /** 8 列挖第 4 列（左 3 右 4）；7 列挖中间列（左 3 右 3）。 */
 function isSplit34Cell(col: number, cols: number): boolean {
@@ -74,10 +76,11 @@ export function isCellPlayable(
     const hole = shape === 'double_ring' ? 2 : rows >= 8 ? 2 : 1;
     return !(row >= hole && row < rows - hole && col >= hole && col < cols - hole);
   }
-  if (shape === 'hourglass') {
+  if (shape === 'hourglass' || shape === 'hourglass_wide') {
     const y = rows <= 1 ? 0.5 : row / (rows - 1);
     const x = cols <= 1 ? 0.5 : (col + 0.5) / cols;
-    const half = 0.14 + Math.abs(y - 0.5) * 0.58;
+    const waist = shape === 'hourglass_wide' ? 0.16 : 0.14;
+    const half = waist + Math.abs(y - 0.5) * 0.58;
     return Math.abs(x - 0.5) <= half;
   }
   if (shape === 'heart') {

@@ -10,3 +10,6 @@ library/
 temp/
 local/
 build/
+tmp-mj-preview/
+tools/mahjong-ops-admin/.env.local
+tools/mahjong-ops-admin/generated/

@@ -18,6 +18,9 @@ import { MatchResolver } from '../logic/board/MatchResolver';
 import { MoveValidator } from '../logic/board/MoveValidator';
 import { expandSparkleBlasts, expandSpecialClears } from '../logic/board/SpecialRules';
 import { isBasicTile, isHole, isSpecialTile, TileKind } from '../logic/board/TileType';
+import { match3BasicKindCount } from '../logic/level/match3BasicKindCount';
+import { totalLadderCoinsEarned } from '../logic/economy/ladderCoins';
+import { MAHJONG_HALL_UNLOCK_LADDER_COINS } from '../logic/mahjong/MahjongConfig';
 import { AdPlacementPolicy } from '../logic/economy/AdPlacementPolicy';
 import { lobbyBannerReserveHeight } from '../core/utils/lobbyBanner';
 import {
@@ -82,21 +85,44 @@ import { CrushResolver } from '../logic/crush/CrushResolver';
 import { matchPraiseForScore } from '../logic/fx/MatchPraise';
 import { StorageKeys, type PlayerSettings } from '../core/ports/IStorage';
 import levelsJson from '../config/levels.json';
+import {
+  isMatch3LevelWithinCap,
+  match3LobbyDisplayLevelCount,
+  resolveMatch3LevelConfig,
+} from '../logic/level/Match3InfiniteLevels';
 import adPlacementsJson from '../config/ad-placements.json';
 import balanceJson from '../config/balance.json';
 import itemsJson from '../config/items.json';
 import noticeJson from '../config/notice.json';
 import type { IChallengeApi } from '../core/ports/IChallengeApi';
 import {
+  buildLeaderboardHint,
+  findPasser,
   formatLeaderboardLine,
+  hintFromNotify,
   leaderboardRewardText,
   rankFriends,
 } from '../logic/economy/FriendLeaderboard';
+import { buildPostClearAnnouncement } from '../logic/economy/postClearAnnouncement';
 import type { LeaderboardView } from '../logic/economy/FriendLeaderboard';
 import {
   ensureWxUserProfile,
   readCachedWxProfile,
 } from '../core/adapters/WxUserProfile';
+import { MahjongHallService } from './MahjongHallService';
+import { createWxMahjongManifestFetcher } from '../core/adapters/MahjongCdnFetch';
+import { fetchMahjongOpsViaCloudFunction } from '../core/adapters/WxMahjongOpsCloud';
+import {
+  fetchMahjongThemeManifestFromCdn,
+  getMahjongThemeManifestVersion,
+} from '../logic/mahjong/MahjongThemeCatalog';
+import {
+  fetchMahjongOpsFromCdn,
+  fetchMahjongOpsFromCloud,
+  getMahjongOpsVersion,
+  isMahjongRewardedVideoSlotEnabled,
+} from '../logic/mahjong/MahjongOpsConfig';
+import type { MahjongToolId } from '../logic/mahjong/MahjongConfig';
 
 export interface GameSessionDeps {
   storage: IStorage;
@@ -118,6 +144,7 @@ export class GameSession {
   public readonly fsm: GameStateMachine;
   public readonly events: GameEventBus;
   public readonly progress: LevelProgress;
+  public readonly mahjong: MahjongHallService;
 
   private readonly finder = new MatchFinder();
   private readonly resolver = new MatchResolver(new MatchFinder());
@@ -135,8 +162,14 @@ export class GameSession {
   private dailyGrantPending = false;
   private invite: InviteState = { ...EMPTY_INVITE_STATE };
   private inviteToast: string | null = null;
+  /** 通关后顶部公告（大厅 / 局内），进下一关时清除 */
+  private postClearAnnouncement: string | null = null;
+  private lastLeaderboardSelfRank = 0;
+  private lastLeaderboardRanks = new Map<string, number>();
   private claimingInvite = false;
   private seenNoticeIds = new Set<string>();
+  /** 大厅麻将馆 NEW 角标：点过入口后不再展示 */
+  private mahjongHallNewDismissed = false;
   private readonly extraMovesGrant = itemsJson.extraMoves.moves;
 
   private board: BoardModel | null = null;
@@ -189,6 +222,10 @@ export class GameSession {
     this.fsm = new GameStateMachine('Boot');
     this.events = new GameEventBus();
     this.progress = new LevelProgress();
+    this.mahjong = new MahjongHallService(deps.storage, deps.analytics);
+    this.mahjong.setCloudSyncHook(() => {
+      this.queueCloudPush();
+    });
 
     const movesGranted =
       typeof balanceJson.reviveMovesGranted === 'number'
@@ -241,6 +278,24 @@ export class GameSession {
         ? savedNotices.filter((id): id is string => typeof id === 'string' && id.length > 0)
         : [],
     );
+    const mahjongNewDismissed = await this.deps.storage.get<boolean>(
+      StorageKeys.MahjongHallNewDismissed,
+    );
+    this.mahjongHallNewDismissed = mahjongNewDismissed === true;
+    await this.mahjong.load();
+    this.mahjong.setPlayerKey(this.getInviteCode() || 'local');
+    this.mahjong.setLadderCoinWallet({
+      getAvailable: () => this.progress.getLadderCoinsAvailable(),
+      spend: (amount) => {
+        const ok = this.progress.spendLadderCoins(amount);
+        if (ok) {
+          void this.deps.storage.set(StorageKeys.PlayerProgress, this.progress.getData());
+        }
+        return ok;
+      },
+    });
+    void this.refreshMahjongThemeCatalog();
+    void this.refreshMahjongOpsConfig();
     if (daily.grantedHammer) {
       this.boosters.loadStock(addBoosterToWallet(this.boosters.getStock(), 'hammer', 1));
       this.daily = { ...this.daily, bonusHammer: 0 };
@@ -299,6 +354,7 @@ export class GameSession {
       throw new Error(`Cannot start level from state: ${this.fsm.getCurrent()}`);
     }
 
+    this.clearPostClearAnnouncement();
     this.level = config;
     this.goals = new LevelGoals(config.goals);
     this.movesLeft = config.moves;
@@ -313,7 +369,9 @@ export class GameSession {
 
     this.board = new BoardModel(config.board);
     applyBoardShape(this.board, config.shape);
-    generatePlayableBoard(this.board, config.seed);
+    const basicKinds = match3BasicKindCount(config.id, config);
+    this.resolver.setBasicKindCount(basicKinds);
+    generatePlayableBoard(this.board, config.seed, basicKinds);
     this.iceAtStart = 0;
     this.gemsAtStart = 0;
     this.cloudsAtStart = 0;
@@ -506,6 +564,7 @@ export class GameSession {
           avatarUrl: profile.avatarUrl || undefined,
         });
         if (res.ok && res.rows && res.rows.length > 0) {
+          this.syncLeaderboardRankSnapshot(res.rows);
           const rows = res.rows.map((row) =>
             formatLeaderboardLine({
               ...row,
@@ -590,6 +649,15 @@ export class GameSession {
     return text;
   }
 
+  public getPostClearAnnouncement(): string | null {
+    const text = this.postClearAnnouncement?.trim();
+    return text || null;
+  }
+
+  public clearPostClearAnnouncement(): void {
+    this.postClearAnnouncement = null;
+  }
+
   public hasSeenNotice(id: string): boolean {
     return this.seenNoticeIds.has(id);
   }
@@ -640,6 +708,7 @@ export class GameSession {
       settings: { muted: this.deps.audio.isMuted() },
       daily: { ...this.daily },
       invite: toInviteCloudSlice(this.invite),
+      mahjong: this.mahjong.getCloudSlice(),
     };
   }
 
@@ -712,6 +781,10 @@ export class GameSession {
       await this.deps.storage.set(StorageKeys.DailyLoop, this.daily);
       await this.deps.storage.set(StorageKeys.Settings, merged.settings);
       await this.deps.storage.set(StorageKeys.Invite, this.invite);
+      if (merged.mahjong) {
+        this.mahjong.loadProgress(merged.mahjong);
+        await this.deps.storage.set(StorageKeys.MahjongHallProgress, this.mahjong.getCloudSlice());
+      }
       this.cloudHydrated = true;
       await this.flushCloudPush();
     } catch {
@@ -749,13 +822,84 @@ export class GameSession {
     if (!this.level) {
       return;
     }
+    const clearedLevelId = this.level.id;
     const firstClear = isFreshPlayer(this.progress.getData());
-    this.progress.markLevelCleared(this.level.id, this.score);
+    this.progress.markLevelCleared(clearedLevelId, this.score);
     this.noteDailyClear();
     if (firstClear) {
       this.noteInviteFirstClear();
     }
     this.persistProgress();
+    this.postClearAnnouncement = buildPostClearAnnouncement({ clearedLevelId });
+    void this.enrichPostClearAnnouncement(clearedLevelId);
+  }
+
+  private syncLeaderboardRankSnapshot(
+    rows: ReadonlyArray<{ userId: string; rank?: number; isSelf?: boolean }>,
+  ): void {
+    const self = rows.find((row) => row.isSelf);
+    this.lastLeaderboardSelfRank = self?.rank ?? 0;
+    this.lastLeaderboardRanks = new Map(
+      rows.map((row) => [row.userId, Math.max(0, Math.floor(row.rank ?? 0))]),
+    );
+  }
+
+  private async enrichPostClearAnnouncement(_clearedLevelId: number): Promise<void> {
+    const api = this.deps.challengeApi;
+    if (!api) {
+      return;
+    }
+    const userId = this.getInviteCode() || 'me';
+    const profile = this.readWxProfile();
+    const oldRank = this.lastLeaderboardSelfRank;
+    const oldRanks = new Map(this.lastLeaderboardRanks);
+    try {
+      const res = await api.leaderboard(userId, this.getMaxClearedLevelId(), {
+        nickName:
+          profile.nickName && profile.nickName !== '微信玩家'
+            ? profile.nickName
+            : undefined,
+        avatarUrl: profile.avatarUrl || undefined,
+      });
+      if (!res.ok || !res.rows?.length) {
+        return;
+      }
+      this.syncLeaderboardRankSnapshot(res.rows);
+      const ranked = res.rows.map((row) => ({
+        userId: row.userId,
+        rank: Math.max(1, Math.floor(row.rank ?? 0)),
+      }));
+      const self = res.rows.find((row) => row.isSelf);
+      const selfRank = self?.rank ?? res.selfRank ?? 0;
+
+      let hint = (res.hint ?? '').trim();
+      if (!hint && res.notifies?.length) {
+        const unread = res.notifies.find((n) => !n.read && n.message?.trim());
+        if (unread?.message) {
+          hint = hintFromNotify(unread.message);
+        }
+      }
+      if (!hint) {
+        const passerId = findPasser(userId, oldRank, ranked, oldRanks);
+        const passer = res.rows.find((row) => row.userId === passerId);
+        const passerName = (passer?.nickName || passer?.userId || '').trim();
+        const above = res.rows.find((row) => row.rank === selfRank - 1);
+        hint = buildLeaderboardHint({
+          passedBy: passerName ? passerName.slice(0, 12) : null,
+          selfScore: Math.max(0, Math.floor(self?.score ?? self?.maxLevel ?? 0)),
+          aboveScore:
+            above != null
+              ? Math.max(0, Math.floor(above.score ?? above.maxLevel ?? 0))
+              : null,
+        });
+      }
+      if (hint) {
+        this.postClearAnnouncement = hint;
+        this.events.emit({ type: 'PostClearAnnouncement' });
+      }
+    } catch {
+      // 排行不可用时不影响本地里程碑公告
+    }
   }
 
   private noteInviteFirstClear(): void {
@@ -1145,7 +1289,13 @@ export class GameSession {
     return this.levelTable;
   }
 
+  /** 大厅梯子展示关数（含未解锁预览）；配置模板仍为 1–20。 */
   public getLevelCount(): number {
+    return match3LobbyDisplayLevelCount(this.progress.getHighestLevelId());
+  }
+
+  /** 正式关卡模板数量（1–20）。 */
+  public getOfficialLevelTemplateCount(): number {
     return this.levelTable.length;
   }
 
@@ -1153,11 +1303,19 @@ export class GameSession {
     return this.progress.getBestScore(levelId);
   }
 
+  public getLadderCoinsAvailable(): number {
+    return this.progress.getLadderCoinsAvailable();
+  }
+
+  public getLadderCoinsForLevel(levelId: number): number {
+    return this.progress.getLadderCoinsForLevel(levelId);
+  }
+
   public isLevelUnlocked(levelId: number): boolean {
     return isLevelUnlockedForPlayer(
       levelId,
       this.progress.getHighestLevelId(),
-      this.levelTable.length,
+      this.getLevelCount(),
       shouldUnlockAllLevelsForPreview(),
     );
   }
@@ -1182,13 +1340,273 @@ export class GameSession {
     return Math.max(fromScores, fromHighest);
   }
 
+  /** 通关第 20 关，或梯子累计金币达标，解锁萌宠麻将馆；开发版/体验版/开发者工具便于联调。 */
+  public isMahjongHallUnlocked(): boolean {
+    if (shouldUnlockAllLevelsForPreview()) {
+      return true;
+    }
+    if (this.getMaxClearedLevelId() >= 20) {
+      return true;
+    }
+    const earned = totalLadderCoinsEarned(this.progress.getData().levelScores);
+    return earned >= MAHJONG_HALL_UNLOCK_LADDER_COINS;
+  }
 
+  public shouldShowMahjongHallNewBadge(): boolean {
+    return !this.mahjongHallNewDismissed;
+  }
+
+  public async dismissMahjongHallNewBadge(): Promise<void> {
+    if (this.mahjongHallNewDismissed) {
+      return;
+    }
+    this.mahjongHallNewDismissed = true;
+    await this.deps.storage.set(StorageKeys.MahjongHallNewDismissed, true);
+  }
+
+  /** 从 CDN 拉取麻将主题 manifest（`mahjong-cdn.json` 配置）。 */
+  public async refreshMahjongThemeCatalog(): Promise<boolean> {
+    try {
+      const ok = await fetchMahjongThemeManifestFromCdn(createWxMahjongManifestFetcher());
+      if (ok) {
+        this.deps.analytics.track('mahjong_cdn_manifest_ok', {
+          version: getMahjongThemeManifestVersion(),
+        });
+      }
+      return ok;
+    } catch {
+      this.deps.analytics.track('mahjong_cdn_manifest_fail', {});
+      return false;
+    }
+  }
+
+  /** 运营配置：CDN opsConfigUrl 优先，否则云函数 getMahjongOps。 */
+  public async refreshMahjongOpsConfig(): Promise<boolean> {
+    try {
+      const fetchJson = createWxMahjongManifestFetcher();
+      const cdnOk = await fetchMahjongOpsFromCdn(fetchJson);
+      if (cdnOk) {
+        this.deps.analytics.track('mahjong_ops_config_ok', {
+          source: 'cdn',
+          version: getMahjongOpsVersion(),
+        });
+        return true;
+      }
+      const cloudOk = await fetchMahjongOpsFromCloud(() => fetchMahjongOpsViaCloudFunction());
+      if (cloudOk) {
+        this.deps.analytics.track('mahjong_ops_config_ok', {
+          source: 'cloud',
+          version: getMahjongOpsVersion(),
+        });
+        return true;
+      }
+      return false;
+    } catch {
+      this.deps.analytics.track('mahjong_ops_config_fail', {});
+      return false;
+    }
+  }
+
+  /** 激励视频解锁麻将馆本局第 7 槽。 */
+  public async showMahjongAdSlot(): Promise<
+    'unlocked' | 'disabled' | 'skipped' | 'unavailable' | 'error'
+  > {
+    const game = this.mahjong.getActiveGame();
+    if (!game || game.adSlotUnlocked) {
+      return 'unavailable';
+    }
+    if (!isMahjongRewardedVideoSlotEnabled()) {
+      return 'disabled';
+    }
+
+    this.deps.analytics.track('ad_show', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_ad_slot',
+      levelId: game.level,
+    });
+
+    if (!canCreateWxFullscreenAds()) {
+      if (!shouldUnlockAllLevelsForPreview()) {
+        return 'unavailable';
+      }
+      const ok = await this.mahjong.unlockAdSlot();
+      if (ok) {
+        this.deps.analytics.track('ad_complete', {
+          placement: 'rewarded_revive',
+          reason: 'mahjong_ad_slot_dev',
+        });
+      }
+      return ok ? 'unlocked' : 'error';
+    }
+
+    void this.deps.ads.load('rewarded_revive');
+    const result = await this.deps.ads.show('rewarded_revive');
+    if (result === 'completed') {
+      this.deps.analytics.track('ad_complete', {
+        placement: 'rewarded_revive',
+        reason: 'mahjong_ad_slot',
+      });
+      const ok = await this.mahjong.unlockAdSlot();
+      return ok ? 'unlocked' : 'error';
+    }
+    if (result === 'skipped') {
+      return 'skipped';
+    }
+    this.deps.analytics.track('ad_error', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_ad_slot',
+      result,
+    });
+    return result === 'not_ready' ? 'unavailable' : 'error';
+  }
+
+  /** 大厅入口金币不足：看广告免金币重开本关。 */
+  public async showMahjongAdReplayUnlock(): Promise<
+    'restarted' | 'skipped' | 'unavailable' | 'error'
+  > {
+    const level = this.mahjong.resolveEntryLevel();
+    this.deps.analytics.track('ad_show', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_replay_gate',
+      levelId: level,
+    });
+
+    if (!canCreateWxFullscreenAds()) {
+      if (!shouldUnlockAllLevelsForPreview()) {
+        return 'unavailable';
+      }
+      await this.mahjong.restartLevel(level);
+      this.deps.analytics.track('ad_complete', {
+        placement: 'rewarded_revive',
+        reason: 'mahjong_replay_gate_dev',
+        levelId: level,
+      });
+      return 'restarted';
+    }
+
+    void this.deps.ads.load('rewarded_revive');
+    const result = await this.deps.ads.show('rewarded_revive');
+    if (result === 'completed') {
+      this.deps.analytics.track('ad_complete', {
+        placement: 'rewarded_revive',
+        reason: 'mahjong_replay_gate',
+        levelId: level,
+      });
+      await this.mahjong.restartLevel(level);
+      return 'restarted';
+    }
+    if (result === 'skipped') {
+      return 'skipped';
+    }
+    this.deps.analytics.track('ad_error', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_replay_gate',
+      result,
+    });
+    return result === 'not_ready' ? 'unavailable' : 'error';
+  }
+
+  /** 槽位已满：看激励视频移出 3 张后继续本局。 */
+  public async showMahjongSlotFullReviveAd(): Promise<
+    'revived' | 'skipped' | 'unavailable' | 'error'
+  > {
+    const game = this.mahjong.getActiveGame();
+    if (!game?.canReviveFromSlotFullAd()) {
+      return 'unavailable';
+    }
+
+    this.deps.analytics.track('ad_show', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_slot_full',
+      levelId: game.level,
+    });
+
+    if (!canCreateWxFullscreenAds()) {
+      if (!shouldUnlockAllLevelsForPreview()) {
+        return 'unavailable';
+      }
+      const ok = await this.mahjong.reviveAfterSlotFullAd();
+      if (ok) {
+        this.deps.analytics.track('ad_complete', {
+          placement: 'rewarded_revive',
+          reason: 'mahjong_slot_full_dev',
+        });
+      }
+      return ok ? 'revived' : 'error';
+    }
+
+    void this.deps.ads.load('rewarded_revive');
+    const result = await this.deps.ads.show('rewarded_revive');
+    if (result === 'completed') {
+      this.deps.analytics.track('ad_complete', {
+        placement: 'rewarded_revive',
+        reason: 'mahjong_slot_full',
+      });
+      const ok = await this.mahjong.reviveAfterSlotFullAd();
+      return ok ? 'revived' : 'error';
+    }
+    if (result === 'skipped') {
+      return 'skipped';
+    }
+    this.deps.analytics.track('ad_error', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_slot_full',
+      result,
+    });
+    return result === 'not_ready' ? 'unavailable' : 'error';
+  }
+
+  /** 道具数量为 0：看激励视频获得 1 个。 */
+  public async showMahjongToolGrantAd(
+    tool: MahjongToolId,
+  ): Promise<'granted' | 'skipped' | 'unavailable' | 'error'> {
+    this.deps.analytics.track('ad_show', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_tool',
+      tool,
+    });
+
+    if (!canCreateWxFullscreenAds()) {
+      if (!shouldUnlockAllLevelsForPreview()) {
+        return 'unavailable';
+      }
+      this.mahjong.grantTool(tool, 'ad');
+      this.deps.analytics.track('ad_complete', {
+        placement: 'rewarded_revive',
+        reason: 'mahjong_tool_dev',
+        tool,
+      });
+      return 'granted';
+    }
+
+    void this.deps.ads.load('rewarded_revive');
+    const result = await this.deps.ads.show('rewarded_revive');
+    if (result === 'completed') {
+      this.deps.analytics.track('ad_complete', {
+        placement: 'rewarded_revive',
+        reason: 'mahjong_tool',
+        tool,
+      });
+      this.mahjong.grantTool(tool, 'ad');
+      return 'granted';
+    }
+    if (result === 'skipped') {
+      return 'skipped';
+    }
+    this.deps.analytics.track('ad_error', {
+      placement: 'rewarded_revive',
+      reason: 'mahjong_tool',
+      tool,
+      result,
+    });
+    return result === 'not_ready' ? 'unavailable' : 'error';
+  }
 
   /** 大厅藤蔓：当前节点的 5 关（兼容旧逻辑） */
   public getVineNode(): VineNodeInfo {
     return getActiveVineNode(
       this.progress.getHighestLevelId(),
-      this.levelTable.length,
+      this.getLevelCount(),
     );
   }
 
@@ -1196,7 +1614,7 @@ export class GameSession {
   public listLobbyVineNodes(): VineNodeInfo[] {
     return listAllVineNodes(
       this.progress.getHighestLevelId(),
-      this.levelTable.length,
+      this.getLevelCount(),
     );
   }
 
@@ -1271,7 +1689,8 @@ export class GameSession {
       return false;
     }
     this.cleaningUsedThisSettle = true;
-    generatePlayableBoard(this.board, this.level.seed + 7777 + this.level.id);
+    const basicKinds = match3BasicKindCount(this.level.id, this.level);
+    generatePlayableBoard(this.board, this.level.seed + 7777 + this.level.id, basicKinds);
     this.clean = new CrushRewardModel(this.cleanDurationMs, Math.max(1, this.crushTapPower));
     this.deps.analytics.track('crush_start', {
       levelId: this.level.id,
@@ -1321,7 +1740,7 @@ export class GameSession {
     if (!this.level) {
       return false;
     }
-    return this.levelTable.some((item) => item.id === this.level!.id + 1);
+    return isMatch3LevelWithinCap(this.level.id + 1);
   }
 
   /**
@@ -1842,7 +2261,7 @@ export class GameSession {
   }
 
   /**
-   * 在大厅展示底部横幅。进关或弹层时不要调。
+   * 在大厅展示底部横幅。进关、麻将馆对局或弹层时不要调。
    */
   public async showLobbyBanner(): Promise<AdShowResult> {
     if (!this.isLobbyBannerEnabled()) {
@@ -1853,8 +2272,12 @@ export class GameSession {
       this.hideLobbyBanner();
       return 'error';
     }
+    if (this.mahjong.getActiveGame()) {
+      this.hideLobbyBanner();
+      return 'error';
+    }
     const result = await this.deps.ads.show('banner_lobby');
-    if (this.fsm.getCurrent() !== 'Lobby') {
+    if (this.fsm.getCurrent() !== 'Lobby' || this.mahjong.getActiveGame()) {
       this.hideLobbyBanner();
       return 'error';
     }
@@ -1906,7 +2329,7 @@ export class GameSession {
       return false;
     }
     const nextId = this.level.id + 1;
-    if (!this.levelTable.some((item) => item.id === nextId)) {
+    if (!isMatch3LevelWithinCap(nextId)) {
       return false;
     }
     await this.startLevel(nextId);
@@ -2446,13 +2869,10 @@ export class GameSession {
   }
 
   private findLevelConfig(levelId: number): LevelConfig {
-    const found = this.levelTable.find((item) => item.id === levelId);
-    if (found) {
-      return found;
-    }
-    if (this.levelTable[0]) {
-      return this.levelTable[0];
-    }
-    throw new Error(`Level config not found: ${levelId}`);
+    return resolveMatch3LevelConfig(
+      levelId,
+      this.levelTable,
+      this.getInviteCode() || 'local',
+    );
   }
 }

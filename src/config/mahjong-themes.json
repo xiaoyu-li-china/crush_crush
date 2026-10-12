@@ -1,0 +1,75 @@
+{
+  "version": 2,
+  "defaultThemeId": "default",
+  "themes": [
+    {
+      "themeId": "default",
+      "name": "萌宠经典",
+      "tiles": [
+        "assets/main/tiles/red.png",
+        "assets/main/tiles/blue.png",
+        "assets/main/tiles/green.png",
+        "assets/main/tiles/yellow.png",
+        "assets/main/tiles/purple.png",
+        "assets/main/tiles/owl.png",
+        "assets/main/tiles/bear.png",
+        "assets/main/tiles/pig.png",
+        "assets/main/tiles/panda.png",
+        "assets/main/tiles/corgi.png"
+      ],
+      "background": "#5eb8b8"
+    },
+    {
+      "themeId": "corgi_01",
+      "name": "柴犬麻将馆",
+      "tiles": [
+        "themes/corgi_01/tile_0.png",
+        "themes/corgi_01/tile_1.png",
+        "themes/corgi_01/tile_2.png",
+        "themes/corgi_01/tile_3.png",
+        "themes/corgi_01/tile_4.png",
+        "themes/corgi_01/tile_5.png"
+      ],
+      "background": "#fff3bf"
+    },
+    {
+      "themeId": "cat_01",
+      "name": "猫咪麻将馆",
+      "tiles": [
+        "themes/cat_01/tile_0.png",
+        "themes/cat_01/tile_1.png",
+        "themes/cat_01/tile_2.png",
+        "themes/cat_01/tile_3.png",
+        "themes/cat_01/tile_4.png",
+        "themes/cat_01/tile_5.png"
+      ],
+      "background": "#e5dbff"
+    },
+    {
+      "themeId": "bunny_01",
+      "name": "兔兔麻将馆",
+      "tiles": [
+        "themes/bunny_01/tile_0.png",
+        "themes/bunny_01/tile_1.png",
+        "themes/bunny_01/tile_2.png",
+        "themes/bunny_01/tile_3.png",
+        "themes/bunny_01/tile_4.png",
+        "themes/bunny_01/tile_5.png"
+      ],
+      "background": "#d3f9d8"
+    },
+    {
+      "themeId": "panda_01",
+      "name": "熊猫麻将馆",
+      "tiles": [
+        "themes/panda_01/tile_0.png",
+        "themes/panda_01/tile_1.png",
+        "themes/panda_01/tile_2.png",
+        "themes/panda_01/tile_3.png",
+        "themes/panda_01/tile_4.png",
+        "themes/panda_01/tile_5.png"
+      ],
+      "background": "#edf2ff"
+    }
+  ]
+}

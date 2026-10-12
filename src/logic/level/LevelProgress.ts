@@ -1,3 +1,9 @@
+import {
+  ladderCoinsAvailable,
+  ladderCoinsFromScore,
+  ladderCoinsSpent,
+} from '../economy/ladderCoins';
+
 /**
  * 玩家关卡进度（可经 IStorage 持久化）。
  * 关卡 id 升级后必须保持稳定：版本更新只追加关卡，不改已有 id。
@@ -12,6 +18,8 @@ export interface LevelProgressData {
   lastPlayedLevelId: number;
   /** 每关历史最高分（key 为关卡 id 字符串，便于 JSON 持久化） */
   levelScores?: Record<string, number>;
+  /** 已在萌宠麻将馆等玩法中消耗掉的梯子金币 */
+  ladderCoinsSpent?: number;
 }
 
 export const PROGRESS_SCHEMA_VERSION = 1;
@@ -76,6 +84,7 @@ export function normalizeLevelProgressData(raw: unknown): LevelProgressData {
     totalScore: asNonNegInt(data.totalScore, 0),
     lastPlayedLevelId: lastPlayed,
     levelScores: scores,
+    ladderCoinsSpent: asNonNegInt(data.ladderCoinsSpent, 0),
   };
 }
 
@@ -103,6 +112,26 @@ export class LevelProgress {
 
   public getBestScore(levelId: number): number {
     return this.data.levelScores?.[String(levelId)] ?? 0;
+  }
+
+  public getLadderCoinsForLevel(levelId: number): number {
+    return ladderCoinsFromScore(this.getBestScore(levelId));
+  }
+
+  public getLadderCoinsAvailable(): number {
+    return ladderCoinsAvailable(this.data);
+  }
+
+  public spendLadderCoins(amount: number): boolean {
+    const cost = Math.floor(amount);
+    if (cost <= 0) {
+      return true;
+    }
+    if (this.getLadderCoinsAvailable() < cost) {
+      return false;
+    }
+    this.data.ladderCoinsSpent = ladderCoinsSpent(this.data) + cost;
+    return true;
   }
 
   /** 是否已通关该关（持久化记录） */

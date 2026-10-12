@@ -7,6 +7,10 @@ const KIND_NAME: Partial<Record<number, string>> = {
   [TileKind.Green]: '绿蛙',
   [TileKind.Yellow]: '黄鸡',
   [TileKind.Purple]: '紫猫',
+  [TileKind.Bear]: '棕熊',
+  [TileKind.Pig]: '小猪',
+  [TileKind.Panda]: '熊猫',
+  [TileKind.Corgi]: '柴犬',
 };
 
 /** 单项目标：完整动词，避免「清冰块」这种含糊说法。 */

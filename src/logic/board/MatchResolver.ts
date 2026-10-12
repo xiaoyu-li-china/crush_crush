@@ -110,6 +110,8 @@ export interface ResolveOptions {
 export class MatchResolver {
   private readonly finder: MatchFinder;
 
+  private basicKindCount = BASIC_TILE_KINDS.length;
+
   /** 消除前拷贝 MatchSet 下标，避免与 finder 内部缓冲别名冲突。 */
   private clearIndices: Int32Array;
 
@@ -135,6 +137,14 @@ export class MatchResolver {
     this.finder = finder ?? new MatchFinder(maxCells);
     this.clearIndices = new Int32Array(maxCells);
     this.clearCapacity = maxCells;
+  }
+
+  /** 与当前梯子关一致的萌宠种类数（填充新块时使用）。 */
+  public setBasicKindCount(count: number): void {
+    this.basicKindCount = Math.min(
+      BASIC_TILE_KINDS.length,
+      Math.max(1, Math.floor(count)),
+    );
   }
 
   /**
@@ -404,7 +414,7 @@ export class MatchResolver {
   private applyFill(board: BoardModel, random: () => number): void {
     const { rows, cols } = board.size;
     const { cells, tileIds, sparkles } = board;
-    const kindCount = BASIC_TILE_KINDS.length;
+    const kindCount = this.basicKindCount;
     let spawned = false;
 
     for (let c = 0; c < cols; c += 1) {

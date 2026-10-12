@@ -34,7 +34,7 @@ export function buildShareTitle(
     case 'booster_group':
       return `发到群里一起玩，第 ${level} 关更好过`;
     default:
-      return '萌宠粉碎消，沿糖果梯子冲进糖果屋';
+      return '萌宠粉碎消，沿糖果梯子一路闯关';
   }
 }
 

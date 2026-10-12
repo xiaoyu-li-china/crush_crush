@@ -1,0 +1,32 @@
+{
+  "version": 2,
+  "defaultThemeId": "default",
+  "themes": [
+    {
+      "themeId": "default",
+      "name": "萌宠经典",
+      "tiles": [
+        "https://your-cdn.example.com/mahjong/default/tile_0.png",
+        "https://your-cdn.example.com/mahjong/default/tile_1.png",
+        "https://your-cdn.example.com/mahjong/default/tile_2.png",
+        "https://your-cdn.example.com/mahjong/default/tile_3.png",
+        "https://your-cdn.example.com/mahjong/default/tile_4.png",
+        "https://your-cdn.example.com/mahjong/default/tile_5.png"
+      ],
+      "background": "#e7f5ff"
+    },
+    {
+      "themeId": "corgi_01",
+      "name": "柴犬麻将馆",
+      "tiles": [
+        "themes/corgi_01/tile_0.png",
+        "themes/corgi_01/tile_1.png",
+        "themes/corgi_01/tile_2.png",
+        "themes/corgi_01/tile_3.png",
+        "themes/corgi_01/tile_4.png",
+        "themes/corgi_01/tile_5.png"
+      ],
+      "background": "themes/corgi_01/bg.png"
+    }
+  ]
+}

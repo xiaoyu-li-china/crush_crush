@@ -1,0 +1,48 @@
+{
+  "version": 2,
+  "economy": {
+    "coinCost": 100,
+    "coinPerTriple": 1,
+    "starPerTriple": 1
+  },
+  "session": {
+    "timeoutSec": 720
+  },
+  "generation": {
+    "seedVersion": 1,
+    "maxAttempts": 16,
+    "level1Tiles": 9,
+    "standardTiles": 105,
+    "typeCountLevel2": 6,
+    "typeCountFromLevel3": { "min": 6, "maxInclusive": 8 }
+  },
+  "theme": {
+    "level1ThemeId": "default",
+    "level2ThemeId": "default",
+    "cycleAfterLevel": 3000,
+    "sequentialFromLevel3": false
+  },
+  "levelOverrides": [
+    {
+      "level": 50,
+      "themeId": "shiba",
+      "note": "运营抽检关 / 卡点示例"
+    },
+    {
+      "level": 100,
+      "typeCount": 8,
+      "timeoutSec": 600,
+      "note": "难度略升 + 10 分钟限时"
+    }
+  ],
+  "sampling": {
+    "enabled": true,
+    "everyNLevels": 50
+  },
+  "ads": {
+    "rewardedVideoSlot": true
+  },
+  "tools": {
+    "freeToUse": true
+  }
+}

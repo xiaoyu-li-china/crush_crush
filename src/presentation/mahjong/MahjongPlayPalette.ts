@@ -1,0 +1,42 @@
+/** 对局页统一色板：桌布青绿 + 实物麻将白绿牌体。 */
+export const MJ_PALETTE = {
+  bgTop: '#5eb8b8',
+  bgMid: '#52adad',
+  bgDeep: '#489e9e',
+  matGlow: 'rgba(255,255,255,0.1)',
+  matShade: 'rgba(28,92,92,0.12)',
+  /** 牌侧白塑壳（参考实物侧面） */
+  mahjongSideLight: '#ffffff',
+  mahjongSide: '#f3f3f3',
+  mahjongSideDeep: '#dcdcdc',
+  /** 牌面白塑 + 内凹萌宠填色绿 */
+  mahjongFaceTop: '#ffffff',
+  mahjongFaceMid: '#fafafa',
+  mahjongFaceBottom: '#ececec',
+  mahjongFaceSheen: 'rgba(255,255,255,0.55)',
+  mahjongEngraveShadow: '#1a4d38',
+  mahjongEngraveFill: '#2d8a58',
+  mahjongEngraveHighlight: '#45b872',
+  /** 牌背亮绿（与 ref 抠图一致） */
+  mahjongBackGreen: '#8ecf8a',
+  mahjongBackGreenDeep: '#6fb86c',
+  /** @deprecated 旧玉牌侧色，保留避免 bundle 外引用断裂 */
+  jadeSideLight: 'rgba(196, 232, 224, 0.92)',
+  jadeSide: 'rgba(142, 196, 186, 0.88)',
+  jadeSideDeep: 'rgba(98, 158, 148, 0.86)',
+  jadeFaceTop: 'rgba(255, 255, 255, 0.94)',
+  jadeFaceMid: 'rgba(228, 246, 242, 0.88)',
+  jadeFaceBottom: 'rgba(205, 232, 224, 0.82)',
+  jadeInnerGlow: 'rgba(210, 248, 238, 0.35)',
+  tileShadow: 'rgba(8, 48, 44, 0.28)',
+  tileShadowSoft: 'rgba(12, 58, 52, 0.14)',
+  tileShadowContact: 'rgba(6, 36, 34, 0.36)',
+  glass: 'rgba(255,255,255,0.24)',
+  glassDeep: 'rgba(45,120,118,0.42)',
+  glassStroke: 'rgba(255,255,255,0.38)',
+  slotWell: 'rgba(32,96,94,0.28)',
+  textPrimary: '#ffffff',
+  textSoft: 'rgba(255,255,255,0.88)',
+  accentWarm: '#e8b070',
+  accentWarmDeep: '#c8925a',
+} as const;
