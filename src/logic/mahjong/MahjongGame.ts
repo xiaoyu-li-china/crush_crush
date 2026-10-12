@@ -169,10 +169,15 @@ export class MahjongGame {
     return false;
   }
 
+  /** 给定槽位追加一张牌并按种类三消后的结果（不改本局状态）。 */
+  public slotsAfterAppend(slots: readonly number[], tile: number): number[] {
+    return resolveTriplesByKind([...slots, tile], (t) => this.matchKind(t));
+  }
+
   /** 入槽后检测是否刚完成三消（用于奖励）。 */
   private applySlotWithReward(tile: number): void {
     const beforeLen = this.slots.length;
-    this.slots = resolveTriplesByKind([...this.slots, tile], (t) => this.matchKind(t));
+    this.slots = this.slotsAfterAppend(this.slots, tile);
     const removed = beforeLen + 1 - this.slots.length;
     if (removed >= 3) {
       const triples = Math.floor(removed / 3);

@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "defaultThemeId": "default",
   "themes": [
     {
@@ -11,7 +11,11 @@
         "assets/main/tiles/green.png",
         "assets/main/tiles/yellow.png",
         "assets/main/tiles/purple.png",
-        "assets/main/tiles/owl.png"
+        "assets/main/tiles/owl.png",
+        "assets/main/tiles/bear.png",
+        "assets/main/tiles/pig.png",
+        "assets/main/tiles/panda.png",
+        "assets/main/tiles/corgi.png"
       ],
       "background": "#5eb8b8"
     },

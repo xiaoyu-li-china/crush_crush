@@ -174,7 +174,8 @@ describe('引流关卡曲线', () => {
       assert.ok(item.ice, `level ${id} ice`);
       assert.ok(item.goals.some((g) => g.type === 'clear_ice'));
       assert.ok((item.starterSpecials?.owls ?? 0) >= 1);
-      assert.ok(item.moves <= 15, `level ${id} tight`);
+      const maxMoves = 15;
+      assert.ok(item.moves <= maxMoves, `level ${id} tight`);
       assert.ok(item.moves >= 14, `level ${id} playable`);
     }
     assert.equal(level(16).shape, 'ring');
@@ -183,8 +184,12 @@ describe('引流关卡曲线', () => {
     assert.equal(level(17).buried?.penguins, 2);
     assert.equal(level(18).iceStyle, 'encase');
     assert.equal(level(19).shape, 'double_ring');
-    assert.equal(level(20).shape, 'hourglass');
+    assert.equal(level(20).shape, 'hourglass_wide');
+    assert.equal(level(20).iceStyle, undefined);
     assert.ok(level(20).cloudGems && level(20).buried);
-    assert.ok(level(20).moves <= level(16).moves);
+    assert.equal(level(20).moves, 14);
+    assert.equal(level(20).cloudRows, 2);
+    assert.equal(level(20).buried?.penguins, 2);
+    assert.equal(level(20).cloudGems, 5);
   });
 });

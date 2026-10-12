@@ -10,9 +10,5 @@
   "sparkle": {
     "imageUrlId": "",
     "imageUrl": "assets/main/share/sparkle-500x400.jpg"
-  },
-  "mahjong_button": {
-    "imageUrlId": "",
-    "imageUrl": "assets/main/mahjong/mahjong_button_test.png"
   }
 }

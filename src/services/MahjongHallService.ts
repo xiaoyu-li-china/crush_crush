@@ -22,11 +22,17 @@ import {
   type MahjongHallProgressData,
 } from '../logic/mahjong/MahjongProgress';
 
+export type MahjongLadderCoinWallet = {
+  getAvailable: () => number;
+  spend: (amount: number) => boolean;
+};
+
 export class MahjongHallService {
   private data: MahjongHallProgressData = emptyMahjongProgress();
   private active: MahjongGame | null = null;
   private playerKey = 'local';
   private cloudSyncHook: (() => void) | null = null;
+  private ladderCoinWallet: MahjongLadderCoinWallet | null = null;
 
   public constructor(
     private readonly storage: IStorage,
@@ -36,6 +42,18 @@ export class MahjongHallService {
   /** 本地麻将进度变更后触发云存档推送（由 GameSession 注入）。 */
   public setCloudSyncHook(hook: () => void): void {
     this.cloudSyncHook = hook;
+  }
+
+  /** 萌宠麻将馆消耗统一走梯子关卡折算金币。 */
+  public setLadderCoinWallet(wallet: MahjongLadderCoinWallet): void {
+    this.ladderCoinWallet = wallet;
+  }
+
+  public getSpendableCoins(): number {
+    if (this.ladderCoinWallet) {
+      return this.ladderCoinWallet.getAvailable();
+    }
+    return this.data.coins;
   }
 
   public setPlayerKey(key: string): void {
@@ -85,23 +103,52 @@ export class MahjongHallService {
 
   /** 入口直进对局：有未完成局则恢复，否则当前进度关（无限叠加的最高可挑战关）。 */
   public resolveEntryLevel(): number {
-    if (this.data.savedRun?.phase === 'playing') {
+    if (
+      this.data.savedRun?.phase === 'playing' ||
+      this.data.savedRun?.phase === 'lost'
+    ) {
       return this.data.savedRun.level;
+    }
+    if (this.data.blockedReplayLevel != null) {
+      return this.data.blockedReplayLevel;
     }
     return this.data.highestUnlocked;
   }
 
+  /** 无未完成局且本关已失败锁定时，不可免费再进。 */
+  public canFreeEnterMahjongLevel(level: number): boolean {
+    const safeLevel = Math.max(1, Math.floor(level));
+    if (
+      this.data.savedRun &&
+      this.data.savedRun.level === safeLevel &&
+      (this.data.savedRun.phase === 'playing' || this.data.savedRun.phase === 'lost')
+    ) {
+      return true;
+    }
+    return this.data.blockedReplayLevel !== safeLevel;
+  }
+
   public enterFromHall(): MahjongGame {
     const level = this.resolveEntryLevel();
+    if (!this.canFreeEnterMahjongLevel(level)) {
+      throw new Error('MAHJONG_REPLAY_REQUIRED');
+    }
     const resume =
-      this.data.savedRun?.phase === 'playing' && this.data.savedRun.level === level;
+      this.data.savedRun != null &&
+      this.data.savedRun.level === level &&
+      (this.data.savedRun.phase === 'playing' || this.data.savedRun.phase === 'lost');
     return this.startLevel(level, resume);
   }
 
-  /** 本关重开：清存档并重新生成牌局（不扣金币）。 */
+  /** 本关重开：清存档并重新生成牌局（需已付金币或从失败 UI 触发）。 */
   public async restartLevel(level: number): Promise<MahjongGame> {
-    await this.finishActive(false);
-    await this.clearSavedRun();
+    if (this.active) {
+      this.data.tools = { ...this.active.tools };
+      this.active = null;
+    }
+    this.data.savedRun = null;
+    this.data.blockedReplayLevel = null;
+    await this.persist();
     return this.startLevel(level, false);
   }
 
@@ -110,10 +157,28 @@ export class MahjongHallService {
       MAHJONG_INFINITE_LEVEL_CAP,
       Math.max(1, Math.floor(level)),
     );
-    if (resume && this.data.savedRun && this.data.savedRun.level === safeLevel) {
-      this.active = MahjongGame.fromSnapshot(this.data.savedRun);
-      this.analytics.track('mahjong_level_resume', { level: safeLevel });
-      return this.active;
+    if (
+      resume &&
+      this.data.savedRun &&
+      this.data.savedRun.level === safeLevel &&
+      (this.data.savedRun.phase === 'playing' || this.data.savedRun.phase === 'lost')
+    ) {
+      if (
+        this.data.savedRun.phase === 'playing' &&
+        this.data.blockedReplayLevel === safeLevel
+      ) {
+        resume = false;
+      } else {
+        this.active = MahjongGame.fromSnapshot(this.data.savedRun);
+        this.analytics.track('mahjong_level_resume', {
+          level: safeLevel,
+          phase: this.active.phase,
+        });
+        return this.active;
+      }
+    }
+    if (!resume && this.data.blockedReplayLevel === safeLevel) {
+      throw new Error('MAHJONG_REPLAY_REQUIRED');
     }
     const generated = generateMahjongLevel(safeLevel, this.playerKey);
     if (shouldMahjongOpsSampleLevel(safeLevel)) {
@@ -181,8 +246,19 @@ export class MahjongHallService {
     this.analytics.track('mahjong_progress_save');
   }
 
+  /** 失败瞬间写入 lost 快照，避免磁盘仍留 playing 可白嫖续玩。 */
+  public async persistFailedRun(): Promise<void> {
+    if (!this.active || this.active.phase !== 'lost') {
+      return;
+    }
+    this.data.savedRun = this.active.toSnapshot();
+    this.data.blockedReplayLevel = this.active.level;
+    await this.persist();
+  }
+
   public async clearSavedRun(): Promise<void> {
     this.data.savedRun = null;
+    this.data.blockedReplayLevel = null;
     await this.persist();
   }
 
@@ -192,12 +268,7 @@ export class MahjongHallService {
     }
     const game = this.active;
     if (won) {
-      this.data = recordMahjongClear(
-        this.data,
-        game.level,
-        game.starsThisRun,
-        game.coinsThisRun,
-      );
+      this.data = recordMahjongClear(this.data, game.level, game.starsThisRun, 0);
       this.data.tools = { ...game.tools };
       if (game.level === 1) {
         this.data.guideSeen = true;
@@ -209,8 +280,10 @@ export class MahjongHallService {
       });
     } else {
       this.data.tools = { ...game.tools };
-      this.data.coins += game.coinsThisRun;
       this.data.savedRun = null;
+      if (this.data.blockedReplayLevel == null) {
+        this.data.blockedReplayLevel = game.level;
+      }
       this.analytics.track('mahjong_level_fail', {
         level: game.level,
         reason: game.failReason ?? 'unknown',
@@ -224,15 +297,24 @@ export class MahjongHallService {
     if (this.active?.phase === 'playing') {
       this.data.savedRun = this.active.toSnapshot();
       void this.persist();
+    } else if (this.active?.phase === 'lost') {
+      void this.persistFailedRun();
     }
     this.active = null;
   }
 
   public spendCoins(amount: number): boolean {
-    if (this.data.coins < amount) {
+    const cost = Math.floor(amount);
+    if (cost <= 0) {
+      return true;
+    }
+    if (this.ladderCoinWallet) {
+      return this.ladderCoinWallet.spend(cost);
+    }
+    if (this.data.coins < cost) {
       return false;
     }
-    this.data.coins -= amount;
+    this.data.coins -= cost;
     void this.persist();
     return true;
   }
@@ -280,6 +362,7 @@ export class MahjongHallService {
     if (!this.active?.reviveMoveOutFromSlots()) {
       return false;
     }
+    this.data.blockedReplayLevel = null;
     this.data.savedRun = this.active.toSnapshot();
     await this.persist();
     this.analytics.track('mahjong_slot_full_revive', { level: this.active.level });

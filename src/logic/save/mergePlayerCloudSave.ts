@@ -9,6 +9,7 @@ import {
   mergeInviteCloud,
   parseInviteCloudSlice,
 } from '../economy/InviteLoop';
+import { ladderCoinsSpent } from '../economy/ladderCoins';
 import {
   normalizeLevelProgressData,
   type LevelProgressData,
@@ -38,6 +39,7 @@ export function mergeLevelProgress(
     lastPlayedLevelId:
       a.highestLevelId >= b.highestLevelId ? a.lastPlayedLevelId : b.lastPlayedLevelId,
     levelScores: scores,
+    ladderCoinsSpent: Math.max(ladderCoinsSpent(a), ladderCoinsSpent(b)),
   });
 }
 

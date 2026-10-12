@@ -25,7 +25,8 @@ describe('麻将无限关生成', () => {
     const g3 = generateMahjongLevel(3, 'inf');
     const g4 = generateMahjongLevel(4, 'inf');
     assert.equal(g4.typeCount, t2);
-    assert.ok(g3.typeCount >= 6 && g3.typeCount <= 8);
+    assert.ok(g3.typeCount >= 8 && g3.typeCount <= 10);
+    assert.equal(t2, 7);
   });
 
   it('抽样高关卡 105 张、可解、种类计数合法', () => {

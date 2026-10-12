@@ -92,6 +92,65 @@ describe('萌宠麻将馆逻辑', () => {
     assert.equal(restored.tapPile(0), true);
   });
 
+  it('失败后存档为 lost，不可当 playing 续玩', async () => {
+    const { MahjongHallService } = await import('../../src/services/MahjongHallService');
+    const analytics = { track: () => {} };
+    let stored: unknown = null;
+    const storage = {
+      get: async () => stored,
+      set: async (_k: string, v: unknown) => {
+        stored = v;
+      },
+      remove: async () => {},
+    };
+    const svc = new MahjongHallService(storage, analytics);
+    await svc.load();
+    svc.setPlayerKey('fail-save');
+    svc.startLevel(2, false);
+    const g = svc.getActiveGame()!;
+    const pileLen = g.pile.length;
+    g.phase = 'lost';
+    g.failReason = 'slot_full';
+    await svc.persistFailedRun();
+    assert.equal(svc.getProgress().savedRun?.phase, 'lost');
+    svc.leaveTable();
+    assert.equal(svc.getActiveGame(), null);
+    const resumed = svc.enterFromHall();
+    assert.equal(resumed.phase, 'lost');
+    assert.equal(resumed.pile.length, pileLen);
+    assert.throws(() => svc.startLevel(2, false), /MAHJONG_REPLAY_REQUIRED/);
+  });
+
+  it('失败结算离开后不可免费再进，须付费重开', async () => {
+    const { MahjongHallService } = await import('../../src/services/MahjongHallService');
+    const analytics = { track: () => {} };
+    const storage = {
+      get: async () => null,
+      set: async () => {},
+      remove: async () => {},
+    };
+    const svc = new MahjongHallService(storage, analytics);
+    await svc.load();
+    svc.setPlayerKey('fail-block');
+    svc.startLevel(2, false);
+    const g = svc.getActiveGame()!;
+    g.phase = 'lost';
+    await svc.persistFailedRun();
+    await svc.finishActive(false);
+    assert.equal(svc.getProgress().savedRun, null);
+    assert.equal(svc.getProgress().blockedReplayLevel, 2);
+    assert.equal(svc.canFreeEnterMahjongLevel(2), false);
+    assert.throws(() => svc.enterFromHall(), /MAHJONG_REPLAY_REQUIRED/);
+    svc.setLadderCoinWallet({
+      getAvailable: () => 9999,
+      spend: () => true,
+    });
+    assert.equal(svc.payReplay(), true);
+    await svc.restartLevel(2);
+    assert.equal(svc.getActiveGame()?.phase, 'playing');
+    assert.equal(svc.getProgress().blockedReplayLevel, null);
+  });
+
   it('槽满失败后重开保持关卡号并回到进行中', async () => {
     const { MahjongHallService } = await import('../../src/services/MahjongHallService');
     const analytics = { track: () => {} };

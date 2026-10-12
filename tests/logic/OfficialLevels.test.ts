@@ -18,7 +18,7 @@ describe('正式关卡可玩性', () => {
   it('1–20 关都能开局，目标绑到真实盘面，埋藏都在冰下', async () => {
     const session = new GameSession(createMemoryDeps());
     await session.init();
-    assert.equal(session.getLevelCount(), 20);
+    assert.equal(session.getOfficialLevelTemplateCount(), 20);
     assert.deepEqual(
       levels.map((item) => item.id),
       Array.from({ length: 20 }, (_, i) => i + 1),

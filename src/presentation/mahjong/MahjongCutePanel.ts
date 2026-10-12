@@ -494,6 +494,7 @@ export function drawMahjongPrimaryCapsuleButton(
   top = '#ffe066',
   bottom = '#fab005',
   textColor = '#5c3d00',
+  fontSize = 16,
 ): void {
   const g = ctx.createLinearGradient(x, y, x, y + h);
   g.addColorStop(0, top);
@@ -505,7 +506,14 @@ export function drawMahjongPrimaryCapsuleButton(
   ctx.lineWidth = 2;
   roundRectPath(ctx, x + 1, y + 1, w - 2, h - 2, h / 2 - 1);
   ctx.stroke();
-  drawMahjongCenterText(ctx, label, x + w / 2, y + h / 2, 'bold 16px sans-serif', textColor);
+  drawMahjongCenterText(
+    ctx,
+    label,
+    x + w / 2,
+    y + h / 2,
+    `bold ${fontSize}px sans-serif`,
+    textColor,
+  );
 }
 
 /** 主线风格关闭圆钮（黄色 ×）。 */

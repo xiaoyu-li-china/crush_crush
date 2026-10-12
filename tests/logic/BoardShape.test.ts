@@ -156,6 +156,19 @@ describe('BoardShape plus / ring', () => {
     assert.equal(isCellPlayable(1, 3, 7, 7, 'double_ring'), true);
   });
 
+  it('7x7 hourglass_wide 最窄行 3 格', () => {
+    let mid = 0;
+    for (let c = 0; c < 7; c += 1) {
+      if (isCellPlayable(3, c, 7, 7, 'hourglass_wide')) {
+        mid += 1;
+      }
+    }
+    assert.equal(mid, 3);
+    assert.equal(isCellPlayable(3, 3, 7, 7, 'hourglass'), true);
+    assert.equal(isCellPlayable(3, 2, 7, 7, 'hourglass'), false);
+    assert.equal(isCellPlayable(3, 2, 7, 7, 'hourglass_wide'), true);
+  });
+
   it('8x8 hourglass 中间窄、两端宽', () => {
     let playable = 0;
     for (let r = 0; r < 8; r += 1) {

@@ -1,5 +1,34 @@
 import type { MahjongToolId } from '../../logic/mahjong/MahjongConfig';
 
+/** 对局顶栏左侧「回首页」胶囊（与主线左下回首页同款口径） */
+export const MAHJONG_PLAY_BACK_HOME_W = 58;
+export const MAHJONG_PLAY_BACK_HOME_H = 28;
+export const MAHJONG_PLAY_BACK_HOME_X = 10;
+export const MAHJONG_PLAY_HEADER_BAR_H = 32;
+
+export function mahjongPlayBackHomeFrame(safeTop: number): {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+} {
+  const y =
+    safeTop +
+    4 +
+    (MAHJONG_PLAY_HEADER_BAR_H - MAHJONG_PLAY_BACK_HOME_H) / 2;
+  return {
+    x: MAHJONG_PLAY_BACK_HOME_X,
+    y,
+    w: MAHJONG_PLAY_BACK_HOME_W,
+    h: MAHJONG_PLAY_BACK_HOME_H,
+  };
+}
+
+/** 顶栏 HUD 条起始 x（让出回首页钮） */
+export function mahjongPlayHeaderLeftReserve(): number {
+  return MAHJONG_PLAY_BACK_HOME_X + MAHJONG_PLAY_BACK_HOME_W + 8;
+}
+
 /** 左侧留给 lobby 底图小动物（兔子等） */
 export const MAHJONG_TOOL_LEFT_RESERVE_RATIO = 0.3;
 /** 小动物区与道具组之间的空隙（px） */

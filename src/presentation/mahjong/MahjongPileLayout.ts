@@ -14,7 +14,7 @@ export { appendRandomPilePose, buildMahjongPilePoses } from '../../logic/mahjong
 export const MAHJONG_PILE_REF_POSE_SCALE = 0.16;
 
 /** 在基准宽度上的整体倍率（改后需 npm run build:wechat）。 */
-export const MAHJONG_PILE_TILE_SIZE_FACTOR = 0.66;
+export const MAHJONG_PILE_TILE_SIZE_FACTOR = 0.99;
 
 /** 105 关 scale=0.16 时牌宽占屏宽比例。 */
 const MAHJONG_PILE_TILE_WIDTH_RATIO = 0.21;
@@ -40,15 +40,15 @@ export interface MahjongBlockShape {
 export function mahjongBlockShape(stand: number | undefined): MahjongBlockShape {
   switch (stand) {
     case MAHJONG_STAND_EDGE_SHORT:
-      return { topW: 0.86, topH: MAHJONG_TILE_FACE_ASPECT, ext: 0.16 };
+      return { topW: 0.86, topH: MAHJONG_TILE_FACE_ASPECT, ext: 0.2 };
     case MAHJONG_STAND_EDGE_LONG:
-      return { topW: 1, topH: 0.3, ext: 0.88 };
+      return { topW: 1, topH: 0.32, ext: 0.88 };
     case MAHJONG_STAND_TILT:
-      return { topW: 1, topH: MAHJONG_TILE_FACE_ASPECT, ext: 0.22 };
-    case MAHJONG_STAND_UPRIGHT:
       return { topW: 1, topH: MAHJONG_TILE_FACE_ASPECT, ext: 0.26 };
+    case MAHJONG_STAND_UPRIGHT:
+      return { topW: 1, topH: MAHJONG_TILE_FACE_ASPECT, ext: 0.3 };
     default:
-      return { topW: 1, topH: MAHJONG_TILE_FACE_ASPECT, ext: 0.16 };
+      return { topW: 1, topH: MAHJONG_TILE_FACE_ASPECT, ext: 0.2 };
   }
 }
 

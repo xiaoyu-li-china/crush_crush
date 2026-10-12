@@ -8,6 +8,7 @@ import { mahjongBlockShape } from './MahjongPileLayout';
 import {
   getMahjongTileRasterBlit,
   mahjongTileRasterEligible,
+  quantizeMahjongTileFaceW,
 } from './MahjongTileRasterCache';
 import { getMahjongTileShellPack } from './MahjongTileShellAssets';
 
@@ -37,6 +38,8 @@ export interface DrawMahjongTileOptions {
   mahjongLevel?: number;
   /** 主题 id，用于牌面位图缓存键 */
   rasterThemeKey?: string;
+  /** 飞牌等尺寸变化时用固定牌面宽取缓存再缩放 */
+  rasterFaceW?: number;
 }
 
 function roundRect(
@@ -100,6 +103,33 @@ function drawImageContain(
   ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
 }
 
+/** 铺满区域并居中裁剪，牌面萌宠用 cover 才能随牌放大、只留一圈边。 */
+function drawImageCover(
+  ctx: WxCanvasRenderingContext2D,
+  img: WxImage,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): void {
+  const src = img as { width?: number; height?: number };
+  const iw = src.width ?? w;
+  const ih = src.height ?? h;
+  if (iw <= 0 || ih <= 0) {
+    ctx.drawImage(img, x, y, w, h);
+    return;
+  }
+  const scale = Math.max(w / iw, h / ih);
+  const dw = iw * scale;
+  const dh = ih * scale;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  ctx.restore();
+}
+
 function petImage(
   lookup: MahjongTileImageLookup | undefined,
   type: number,
@@ -115,10 +145,15 @@ function drawPetOrSwatch(
   y: number,
   w: number,
   h: number,
+  mode: 'cover' | 'contain' = 'cover',
 ): void {
   const img = petImage(lookup, type);
   if (img) {
-    drawImageContain(ctx, img, x, y, w, h);
+    if (mode === 'cover') {
+      drawImageCover(ctx, img, x, y, w, h);
+    } else {
+      drawImageContain(ctx, img, x, y, w, h);
+    }
     return;
   }
   ctx.fillStyle = TILE_COLORS[type % TILE_COLORS.length] ?? '#adb5bd';
@@ -142,6 +177,7 @@ function drawBlockBody(
   r: number,
   greenFrom: number,
   greenTo: number,
+  extTint: 'green' | 'jade' = 'green',
 ): void {
   const h = topH + ext;
   const side = ctx.createLinearGradient(0, y + topH - r, 0, y + h);
@@ -151,24 +187,141 @@ function drawBlockBody(
   roundRect(ctx, x, y, w, h, r);
   ctx.fill();
 
+  ctx.save();
+  roundRect(ctx, x, y, w, h, r);
+  ctx.clip();
   if (greenTo > greenFrom) {
-    ctx.save();
-    roundRect(ctx, x, y, w, h, r);
-    ctx.clip();
     const gy0 = y + topH + ext * greenFrom - (greenFrom <= 0 ? r : 0);
     const gy1 = y + topH + ext * greenTo;
     const g = ctx.createLinearGradient(0, gy0, 0, gy1);
-    g.addColorStop(0, C.greenLight);
-    g.addColorStop(1, C.greenDeep);
+    if (extTint === 'jade') {
+      g.addColorStop(0, C.faceTop);
+      g.addColorStop(0.4, C.faceBottom);
+      g.addColorStop(1, '#ebe3d4');
+    } else {
+      g.addColorStop(0, C.greenLight);
+      g.addColorStop(0.42, C.green);
+      g.addColorStop(1, C.greenDeep);
+    }
     ctx.fillStyle = g;
     ctx.fillRect(x, gy0, w, gy1 - gy0);
-    ctx.restore();
+    if (greenFrom <= 0.02) {
+      const seamH = Math.max(0.8, ext * 0.12);
+      const seam = ctx.createLinearGradient(0, y + topH - seamH * 0.3, 0, y + topH + seamH);
+      seam.addColorStop(0, 'rgba(255,255,255,0.5)');
+      seam.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = seam;
+      ctx.fillRect(x, y + topH - seamH * 0.3, w, seamH * 1.3);
+    }
   }
 
+  const sideShade = ctx.createLinearGradient(x, 0, x + w, 0);
+  sideShade.addColorStop(0, 'rgba(255,255,255,0.22)');
+  sideShade.addColorStop(0.5, 'rgba(255,255,255,0)');
+  sideShade.addColorStop(1, 'rgba(40, 32, 18, 0.1)');
+  ctx.fillStyle = sideShade;
+  ctx.fillRect(x, y + topH - r * 0.5, w, ext + r * 0.5);
+
+  if (ext > 0) {
+    const rimH = Math.max(1, ext * 0.35);
+    const rim = ctx.createLinearGradient(0, y + h - rimH, 0, y + h);
+    rim.addColorStop(0, 'rgba(30, 70, 45, 0)');
+    rim.addColorStop(
+      1,
+      extTint === 'jade' ? 'rgba(100, 88, 70, 0.14)' : 'rgba(25, 55, 38, 0.22)',
+    );
+    ctx.fillStyle = rim;
+    ctx.fillRect(x, y + h - rimH, w, rimH);
+  }
+  ctx.restore();
+
   ctx.strokeStyle = C.edgeLine;
-  ctx.lineWidth = Math.max(0.6, w * 0.012);
+  ctx.lineWidth = Math.max(0.65, w * 0.013);
   roundRect(ctx, x, y, w, h, r);
   ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+  ctx.lineWidth = Math.max(0.45, w * 0.008);
+  roundRect(ctx, x + w * 0.01, y + w * 0.01, w - w * 0.02, h - w * 0.02, r - w * 0.01);
+  ctx.stroke();
+}
+
+/** 牌面与厚度交界：一圈细棱 + 下沿轻阴影，增强「实体块」手感（不超出轮廓）。 */
+function drawFaceThicknessLedge(
+  ctx: WxCanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  topH: number,
+  ext: number,
+  r: number,
+): void {
+  if (ext <= 0) {
+    return;
+  }
+  ctx.save();
+  roundRect(ctx, x, y, w, topH + ext, r);
+  ctx.clip();
+  const ly = y + topH - Math.max(0.6, w * 0.01);
+  const lh = Math.max(1.4, ext * 0.28);
+  const ledge = ctx.createLinearGradient(0, ly, 0, ly + lh);
+  ledge.addColorStop(0, 'rgba(70, 62, 48, 0.16)');
+  ledge.addColorStop(0.4, 'rgba(255,255,255,0.32)');
+  ledge.addColorStop(1, 'rgba(110, 98, 78, 0.1)');
+  ctx.fillStyle = ledge;
+  ctx.fillRect(x + w * 0.05, ly, w * 0.9, lh);
+  const ao = ctx.createLinearGradient(0, ly + lh * 0.3, 0, ly + lh + ext * 0.25);
+  ao.addColorStop(0, 'rgba(50, 42, 30, 0)');
+  ao.addColorStop(1, 'rgba(50, 42, 30, 0.1)');
+  ctx.fillStyle = ao;
+  ctx.fillRect(x, ly, w, ext * 0.35);
+  ctx.restore();
+}
+
+/** 牌面釉光：左上高光、右下环境暗角、小高光点（类似手持亚克力/密胺牌）。 */
+function drawFaceTactileFinish(
+  ctx: WxCanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+  alpha: number,
+): void {
+  ctx.save();
+  roundRect(ctx, x, y, w, h, r);
+  ctx.clip();
+  ctx.globalAlpha = alpha;
+  const sweep = ctx.createLinearGradient(x, y, x + w * 0.72, y + h * 0.78);
+  sweep.addColorStop(0, 'rgba(255,255,255,0.38)');
+  sweep.addColorStop(0.45, 'rgba(255,255,255,0.06)');
+  sweep.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sweep;
+  ctx.fillRect(x, y, w, h);
+  const ao = ctx.createRadialGradient(
+    x + w * 0.9,
+    y + h * 0.92,
+    0,
+    x + w * 0.9,
+    y + h * 0.92,
+    w * 0.62,
+  );
+  ao.addColorStop(0, 'rgba(45, 38, 28, 0.14)');
+  ao.addColorStop(1, 'rgba(45, 38, 28, 0)');
+  ctx.fillStyle = ao;
+  ctx.fillRect(x, y, w, h);
+  const spec = ctx.createRadialGradient(
+    x + w * 0.2,
+    y + h * 0.16,
+    0,
+    x + w * 0.2,
+    y + h * 0.16,
+    w * 0.14,
+  );
+  spec.addColorStop(0, 'rgba(255,255,255,0.65)');
+  spec.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = spec;
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
 }
 
 function drawWhiteTopFace(
@@ -179,17 +332,33 @@ function drawWhiteTopFace(
   h: number,
   r: number,
 ): void {
-  const face = ctx.createLinearGradient(x, y, x + w * 0.3, y + h);
+  const face = ctx.createLinearGradient(x, y, x + w * 0.38, y + h);
   face.addColorStop(0, C.faceTop);
-  face.addColorStop(1, C.faceBottom);
+  face.addColorStop(0.65, C.faceBottom);
+  face.addColorStop(1, '#f2ebe0');
   ctx.fillStyle = face;
   roundRect(ctx, x, y, w, h, r);
   ctx.fill();
-  const gloss = ctx.createLinearGradient(x, y, x + w * 0.55, y + h * 0.55);
-  gloss.addColorStop(0, 'rgba(255,255,255,0.88)');
-  gloss.addColorStop(0.5, 'rgba(255,255,255,0.12)');
+  const gx = x + w * 0.28;
+  const gy = y + h * 0.22;
+  const gloss = ctx.createRadialGradient(gx, gy, 0, gx, gy, Math.max(w, h) * 0.68);
+  gloss.addColorStop(0, 'rgba(255,255,255,0.92)');
+  gloss.addColorStop(0.4, 'rgba(255,255,255,0.28)');
   gloss.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = gloss;
+  roundRect(ctx, x, y, w, h, r);
+  ctx.fill();
+  const spec2 = ctx.createRadialGradient(
+    x + w * 0.78,
+    y + h * 0.12,
+    0,
+    x + w * 0.78,
+    y + h * 0.12,
+    w * 0.2,
+  );
+  spec2.addColorStop(0, 'rgba(255,255,255,0.35)');
+  spec2.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = spec2;
   roundRect(ctx, x, y, w, h, r);
   ctx.fill();
 }
@@ -203,15 +372,18 @@ function drawTopFaceBevel(
   r: number,
   alpha: number,
 ): void {
-  const lw = Math.max(0.6, w * 0.02);
-  ctx.globalAlpha = alpha * 0.9;
-  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
-  ctx.lineWidth = lw;
-  roundRect(ctx, x + lw, y + lw, w - lw * 2, h - lw * 2, r - lw);
-  ctx.stroke();
+  const lw = Math.max(0.75, w * 0.032);
+  const bevel = ctx.createLinearGradient(x, y, x + w * 0.75, y + h);
+  bevel.addColorStop(0, 'rgba(255,255,255,0.96)');
+  bevel.addColorStop(0.45, 'rgba(255,255,255,0.45)');
+  bevel.addColorStop(1, 'rgba(130, 115, 88, 0.35)');
   ctx.globalAlpha = alpha;
-  ctx.strokeStyle = 'rgba(150, 140, 115, 0.18)';
-  ctx.lineWidth = Math.max(0.5, w * 0.012);
+  ctx.strokeStyle = bevel;
+  ctx.lineWidth = lw;
+  roundRect(ctx, x + lw / 2, y + lw / 2, w - lw, h - lw, r - lw / 2);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(120, 108, 82, 0.22)';
+  ctx.lineWidth = Math.max(0.55, w * 0.013);
   roundRect(ctx, x, y, w, h, r);
   ctx.stroke();
 }
@@ -239,11 +411,15 @@ function drawGreenBackTop(
     drawPawEmblem(ctx, x + w / 2, y + h * 0.53, u * 0.2);
   }
 
-  const gloss = ctx.createLinearGradient(x, y, x + w * 0.5, y + h * 0.45);
-  gloss.addColorStop(0, 'rgba(255,255,255,0.52)');
+  const gx = x + w * 0.3;
+  const gy = y + h * 0.2;
+  const gloss = ctx.createRadialGradient(gx, gy, 0, gx, gy, Math.max(w, h) * 0.65);
+  gloss.addColorStop(0, 'rgba(255,255,255,0.58)');
+  gloss.addColorStop(0.55, 'rgba(255,255,255,0.12)');
   gloss.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = gloss;
-  ctx.fillRect(x, y, w, h * 0.5);
+  ctx.fillRect(x, y, w, h);
+  drawFaceTactileFinish(ctx, x, y, w, h, r, 1);
   ctx.restore();
 }
 
@@ -288,10 +464,25 @@ function drawFaceUpBlock(
     drawBlockBody(ctx, x, y, w, topH, ext, r, 0, 0.45);
     drawGreenBackTop(ctx, x, y, w, topH, r);
   } else {
-    drawBlockBody(ctx, x, y, w, topH, ext, r, 0.7, 1);
+    drawBlockBody(ctx, x, y, w, topH, ext, r, 0.06, 1, 'jade');
     drawWhiteTopFace(ctx, x, y, w, topH, r);
-    const pad = w * 0.12;
-    drawPetOrSwatch(ctx, lookup, type, x + pad, y + pad, w - pad * 2, topH - pad * 2);
+    drawFaceTactileFinish(ctx, x, y, w, topH, r, alpha);
+    drawFaceThicknessLedge(ctx, x, y, w, topH, ext, r);
+    const pad = w * 0.118;
+    ctx.save();
+    roundRect(ctx, x + pad, y + pad, w - pad * 2, topH - pad * 2, r - pad);
+    ctx.clip();
+    drawPetOrSwatch(
+      ctx,
+      lookup,
+      type,
+      x + pad,
+      y + pad,
+      w - pad * 2,
+      topH - pad * 2,
+      'cover',
+    );
+    ctx.restore();
   }
   drawTopFaceBevel(ctx, x, y, w, topH, r, alpha);
 }
@@ -341,11 +532,12 @@ function drawEdgeShortBlock(
   if (faceDown) {
     drawGreenBackTop(ctx, x, y, faceStripW, topH, r);
   } else {
-    ctx.save();
-    roundRect(ctx, x, y, faceStripW + r, topH, r);
-    ctx.clip();
-    drawWhiteTopFace(ctx, x, y, faceStripW + r, topH, r);
-    ctx.restore();
+    const fx = x;
+    const fy = y;
+    const fw = faceStripW + r;
+    drawWhiteTopFace(ctx, fx, fy, fw, topH, r);
+    drawFaceTactileFinish(ctx, fx, fy, fw, topH, r, alpha);
+    drawFaceThicknessLedge(ctx, x, y, w, topH, ext, r);
     const img = petImage(lookup, type);
     if (img) {
       ctx.save();
@@ -484,12 +676,13 @@ export function drawStandingMahjongTile(
   const faceDown = opts.faceDown === true;
 
   if (mahjongTileRasterEligible(opts)) {
+    const rasterFaceW = quantizeMahjongTileFaceW(opts.rasterFaceW ?? faceW);
     const blit = getMahjongTileRasterBlit(
       opts.rasterThemeKey!,
       type,
       stand,
       faceDown,
-      faceW,
+      rasterFaceW,
       lookup,
       (offCtx, t, st, fd, fw, lu) =>
         drawStandingMahjongTileBlocks(offCtx, t, lu, st, fw, fd, 1),
@@ -504,8 +697,11 @@ export function drawStandingMahjongTile(
       if (quality !== undefined) {
         (ctx as { imageSmoothingQuality?: string }).imageSmoothingQuality = 'high';
       }
+      const k = faceW / rasterFaceW;
+      const bw = blit.w * k;
+      const bh = blit.h * k;
       try {
-        ctx.drawImage(blit.canvas, -blit.w / 2, -blit.h / 2, blit.w, blit.h);
+        ctx.drawImage(blit.canvas, -bw / 2, -bh / 2, bw, bh);
       } catch {
         drawStandingMahjongTileBlocks(ctx, type, lookup, stand, faceW, faceDown, alpha);
       }

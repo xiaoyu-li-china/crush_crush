@@ -26,6 +26,14 @@ export enum TileKind {
   ColorBomb = 7,
   /** 洞格：菱形等异形棋盘的挖空，不落子、不填充 */
   Hole = 8,
+  /** 棕熊（远关解锁） */
+  Bear = 9,
+  /** 小猪 */
+  Pig = 10,
+  /** 熊猫 */
+  Panda = 11,
+  /** 柴犬 */
+  Corgi = 12,
 }
 
 /**
@@ -46,6 +54,10 @@ export const BASIC_TILE_KINDS: readonly TileKind[] = [
   TileKind.Green,
   TileKind.Yellow,
   TileKind.Purple,
+  TileKind.Bear,
+  TileKind.Pig,
+  TileKind.Panda,
+  TileKind.Corgi,
 ] as const;
 
 /**
@@ -54,7 +66,7 @@ export const BASIC_TILE_KINDS: readonly TileKind[] = [
  * @returns 是否为 Red~Purple
  */
 export function isBasicTile(kind: TileKind): boolean {
-  return kind >= TileKind.Red && kind <= TileKind.Purple;
+  return BASIC_TILE_KINDS.includes(kind);
 }
 
 /**

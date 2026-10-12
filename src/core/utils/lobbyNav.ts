@@ -15,6 +15,17 @@ export const LOBBY_SIDE_ACTION_GAP = 5;
 export const LOBBY_SIDE_ACTION_X = 10;
 export const LOBBY_SIDE_ACTION_MIN_W = 72;
 export const LOBBY_SIDE_ACTION_MAX_W = 86;
+/** 左下萌宠麻将馆入口（单行五字 caption；纵轴锚在音效钮上，可轻叠关卡条） */
+export const LOBBY_MAHJONG_ENTRY_ABS_MIN_PX = 48;
+export const LOBBY_MAHJONG_ENTRY_TARGET_PX = 104;
+export const LOBBY_MAHJONG_ENTRY_MAX_PX = 126;
+export const LOBBY_MAHJONG_ENTRY_WIDTH_OF_SCREEN = 0.3;
+/** 估算左侧可用宽度：梯子左缘与入口 x 的间距 */
+export const LOBBY_MAHJONG_ENTRY_LADDER_GAP = 5;
+/** 可用宽度余量（像素） */
+export const LOBBY_MAHJONG_ENTRY_WIDTH_BOOST_PX = 6;
+/** 与左下音效钮的间距 */
+export const LOBBY_MAHJONG_ENTRY_ABOVE_SETTINGS_GAP = 6;
 /** 侧栏文案字号 */
 export const LOBBY_SIDE_ACTION_FONT = 11;
 /** 左上角列表：相对状态栏再上移，尽量贴顶 */

@@ -2,6 +2,7 @@ import {
   formatMahjongGlobalCoinAmount,
   formatMahjongGlobalCoinCostLabel,
   mahjongLobbyLevelRange,
+  isMahjongCoinPaymentsEnabled,
   MAHJONG_REPLAY_COIN_COST,
   MAHJONG_SLOT_FULL_AD_MOVE_COUNT,
   MAHJONG_TOOL_LABELS,
@@ -11,6 +12,8 @@ import type { MahjongGame } from '../../logic/mahjong/MahjongGame';
 import type { MahjongHallProgressData } from '../../logic/mahjong/MahjongProgress';
 import { pilePosesToHitsCached, type MahjongTileHit } from './MahjongPileLayout';
 import {
+  mahjongPlayBackHomeFrame,
+  mahjongPlayHeaderLeftReserve,
   mahjongPlayMetrics,
   mahjongSlotTileRect,
   mahjongToolButtonLayout,
@@ -23,7 +26,6 @@ import {
   drawMahjongModalFooterBand,
   drawMahjongModalCardFace,
   drawMahjongModalFooterReadableBand,
-  drawMahjongModalPanelImage,
   drawMahjongModalVeil,
   drawMahjongPanelCloseOrb,
   drawMahjongPrimaryCapsuleButton,
@@ -39,8 +41,11 @@ import {
   type MahjongPileSway,
   type MahjongTileJitter,
 } from './MahjongPileSway';
-import type { MahjongFlyAnim } from './MahjongTileFlyAnim';
-import { sampleMahjongFlyAnim } from './MahjongTileFlyAnim';
+import {
+  mahjongSlotsForDisplay,
+  sampleMahjongFlyAnim,
+  type MahjongSlotFlight,
+} from './MahjongTileFlyAnim';
 import type { MahjongToolIconLookup } from './MahjongToolIcons';
 import { drawMahjongPlaySceneBackgroundCached } from './MahjongPlaySceneBgCache';
 
@@ -101,7 +106,6 @@ function drawMahjongPlayBackground(
   pileTop: number,
   pileBottom: number,
   chrome: Pick<MahjongPlayChrome, 'background' | 'playBgImage'>,
-  slotY?: number,
   pileSway?: MahjongPileSway,
 ): void {
   const bgShift = pileSway ? mahjongPileSwayBackgroundShift(pileSway) : { dx: 0, dy: 0 };
@@ -128,11 +132,12 @@ function drawMahjongPlayHeader(
   ctx: WxCanvasRenderingContext2D,
   width: number,
   game: MahjongGame,
-  globalCoins: number,
+  ladderCoins: number,
+  mahjongRunCoins: number,
   safeTop: number,
 ): void {
-  const leftReserve = 54;
-  const rightReserve = Math.max(88, width * 0.22);
+  const leftReserve = mahjongPlayHeaderLeftReserve();
+  const rightReserve = Math.max(118, width * 0.3);
   const bx = leftReserve;
   const bannerW = Math.max(160, width - leftReserve - rightReserve);
   const by = safeTop + 4;
@@ -154,13 +159,17 @@ function drawMahjongPlayHeader(
   ctx.fillStyle = P.textPrimary;
   ctx.textAlign = 'left';
   ctx.font = 'bold 14px sans-serif';
-  ctx.fillText(`关卡 ${game.level}`, bx + 14, midY);
-  ctx.textAlign = 'center';
+  const levelLabel = `关卡 ${game.level}`;
+  const levelX = bx + 12;
+  ctx.fillText(levelLabel, levelX, midY);
+  const levelW = ctx.measureText(levelLabel).width;
   ctx.font = 'bold 13px sans-serif';
-  ctx.fillText(`⏱ ${formatTime(game.remainingMs)}`, bx + bannerW / 2, midY);
+  const timerLabel = `⏱ ${formatTime(game.remainingMs)}`;
+  ctx.fillText(timerLabel, levelX + levelW + 10, midY);
   ctx.textAlign = 'right';
-  ctx.font = 'bold 15px sans-serif';
-  ctx.fillText(formatMahjongGlobalCoinAmount(globalCoins), bx + bannerW - 14, midY);
+  ctx.font = 'bold 11px sans-serif';
+  const coinLine = `梯子${formatMahjongGlobalCoinAmount(ladderCoins)} 本局${formatMahjongGlobalCoinAmount(mahjongRunCoins)}`;
+  ctx.fillText(coinLine, bx + bannerW - 8, midY);
   ctx.restore();
 }
 
@@ -302,13 +311,14 @@ export function layoutMahjongPlay(
 ): number {
   tileHits.length = 0;
   const m = mahjongPlayMetrics(width, height);
+  const backHome = mahjongPlayBackHomeFrame(m.safeTop);
   pushBtn(buttons, {
     id: 'mahjong_back_lobby',
-    x: 12,
-    y: m.safeTop,
-    w: 46,
-    h: 46,
-    label: '暂停',
+    x: backHome.x,
+    y: backHome.y,
+    w: backHome.w,
+    h: backHome.h,
+    label: '回首页',
   });
 
   const pileLayout = pilePosesToHitsCached(
@@ -355,11 +365,11 @@ export function drawMahjongPlay(
   width: number,
   height: number,
   game: MahjongGame,
-  globalCoins: number,
+  ladderCoins: number,
   tileHits: MahjongTileHit[],
   buttons: MahjongUiButton[],
   chrome: MahjongPlayChrome = {},
-  flyAnims: readonly MahjongFlyAnim[] = [],
+  slotFlight?: MahjongSlotFlight,
   nowMs = 0,
 ): void {
   buttons.length = 0;
@@ -373,11 +383,9 @@ export function drawMahjongPlay(
     m.pileTop,
     m.pileBottom,
     chrome,
-    m.slotY,
     chrome.pileSway,
   );
-  const hudCoins = globalCoins + game.coinsThisRun;
-  drawMahjongPlayHeader(ctx, width, game, hudCoins, m.safeTop);
+  drawMahjongPlayHeader(ctx, width, game, ladderCoins, game.coinsThisRun, m.safeTop);
 
   const pileZMax = layoutMahjongPlay(width, height, game, tileHits, buttons);
   const tileDrawOptsBase = {
@@ -405,25 +413,6 @@ export function drawMahjongPlay(
     });
   }
 
-  for (const anim of flyAnims) {
-    const s = sampleMahjongFlyAnim(anim, nowMs);
-    drawStandingMahjongTile(
-      ctx,
-      s.x,
-      s.y,
-      s.w,
-      s.h,
-      s.rot,
-      anim.type,
-      chrome.tileImage,
-      {
-        alpha: s.alpha,
-        lift: s.lift,
-        mahjongLevel: game.level,
-      },
-    );
-  }
-
   drawMahjongSlotBar(ctx, width, m.slotY, m.slotW, m.slotH, m.pad);
 
   for (let i = 0; i < 7; i += 1) {
@@ -444,11 +433,15 @@ export function drawMahjongPlay(
     }
   }
 
-  game.slots.forEach((type, idx) => {
+  const shownSlots = slotFlight
+    ? mahjongSlotsForDisplay(game.slots, slotFlight, nowMs, (slots, tile) =>
+        game.slotsAfterAppend(slots, tile),
+      )
+    : game.slots;
+  shownSlots.forEach((type, idx) => {
     if (idx >= game.maxSlots()) {
       return;
     }
-    const x = m.pad + idx * (m.slotW + 5);
     const sr = mahjongSlotTileRect(width, height, idx);
     drawStandingMahjongTile(ctx, sr.x, sr.y, sr.w, sr.h, 0, type, chrome.tileImage, {
       layerDepth: 1,
@@ -456,6 +449,19 @@ export function drawMahjongPlay(
       rasterThemeKey: chrome.tileRasterThemeKey,
     });
   });
+
+  for (const anim of slotFlight?.anims ?? []) {
+    const s = sampleMahjongFlyAnim(anim, nowMs);
+    if (s.done) {
+      continue;
+    }
+    drawStandingMahjongTile(ctx, s.x, s.y, s.w, s.h, s.rot, anim.type, chrome.tileImage, {
+      layerDepth: 1,
+      mahjongLevel: game.level,
+      rasterThemeKey: chrome.tileRasterThemeKey,
+      rasterFaceW: anim.fromW,
+    });
+  }
 
   if (game.level === 1 && !game.guideShown) {
     const gy = m.headerBottom - 4;
@@ -502,19 +508,18 @@ export function drawMahjongPlay(
       drawMahjongToolNameLabel(ctx, btn.label, cx, btn.y + btn.h + 8);
       drawMahjongToolCountBadge(ctx, game.tools[tool], btn.x + btn.w - 2, btn.y + 8);
     } else if (btn.id === 'mahjong_back_lobby') {
-      const cx = btn.x + btn.w / 2;
-      const cy = btn.y + btn.h / 2;
-      ctx.fillStyle = P.glassDeep;
-      ctx.beginPath();
-      ctx.arc(cx, cy, btn.w / 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = P.glassStroke;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.fillStyle = P.textPrimary;
-      ctx.font = 'bold 14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Ⅱ', cx, cy + 5);
+      drawMahjongPrimaryCapsuleButton(
+        ctx,
+        btn.x,
+        btn.y,
+        btn.w,
+        btn.h,
+        btn.label,
+        '#a5d8ff',
+        '#339af0',
+        '#ffffff',
+        12,
+      );
     }
   }
   ctx.textAlign = 'left';
@@ -627,9 +632,10 @@ export function drawMahjongToolOfferModal(
   const btnGap = 8;
   const contentTop = 24;
   const iconSize = Math.min(88, cardW * 0.26);
-  const btnBlockH = btnH * 2 + btnGap;
+  const coinPay = isMahjongCoinPaymentsEnabled();
+  const btnBlockH = coinPay ? btnH * 2 + btnGap : btnH;
   const cardH = Math.min(
-    Math.max(contentTop + iconSize + 16 + 22 + btnBlockH + 22, 248),
+    Math.max(contentTop + iconSize + 16 + 22 + btnBlockH + 22, coinPay ? 248 : 220),
     height - 88,
   );
   const footerH = btnBlockH + 22;
@@ -696,36 +702,38 @@ export function drawMahjongToolOfferModal(
     h: btnH,
     label: '免费获得',
   });
-  pushBtn(buttons, {
-    id: 'mahjong_tool_modal_coin',
-    x: card.x + pad,
-    y: coinY,
-    w: btnW,
-    h: btnH,
-    label: '金币兑换',
-  });
   drawMahjongPrimaryCapsuleButton(
     ctx,
     card.x + pad,
     adY,
     btnW,
     btnH,
-    '↗  免费获得',
+    '▶  看广告获得',
     '#ffe066',
     '#fab005',
     '#5c3d00',
   );
-  drawMahjongPrimaryCapsuleButton(
-    ctx,
-    card.x + pad,
-    coinY,
-    btnW,
-    btnH,
-    `🪙  ${formatMahjongGlobalCoinAmount(coinCost)}`,
-    '#69db7c',
-    '#37b24d',
-    '#ffffff',
-  );
+  if (coinPay) {
+    pushBtn(buttons, {
+      id: 'mahjong_tool_modal_coin',
+      x: card.x + pad,
+      y: coinY,
+      w: btnW,
+      h: btnH,
+      label: '金币兑换',
+    });
+    drawMahjongPrimaryCapsuleButton(
+      ctx,
+      card.x + pad,
+      coinY,
+      btnW,
+      btnH,
+      `🪙  ${formatMahjongGlobalCoinAmount(coinCost)}`,
+      '#69db7c',
+      '#37b24d',
+      '#ffffff',
+    );
+  }
 }
 
 /** 关闭「牌槽已满」后：重玩 / 看广告复活（底图与「牌槽已满」一致，无庆祝图与顶栏文案）。 */
@@ -776,14 +784,15 @@ function drawMahjongSlotFullChallengeFailed(
   const btnH = 46;
   const btnY = card.y + card.h - footerH + 26;
   const bw = (card.w - pad * 2 - 10) / 2;
+  const coinPay = isMahjongCoinPaymentsEnabled();
   const replayCost = MAHJONG_REPLAY_COIN_COST;
   pushBtn(buttons, {
-    id: 'mahjong_fail_replay',
+    id: coinPay ? 'mahjong_fail_replay' : 'mahjong_replay_ad',
     x: card.x + pad,
     y: btnY,
     w: bw,
     h: btnH,
-    label: '重玩',
+    label: coinPay ? '重玩' : '看广告重开',
   });
   pushBtn(buttons, {
     id: 'mahjong_fail_revive',
@@ -793,21 +802,35 @@ function drawMahjongSlotFullChallengeFailed(
     h: btnH,
     label: '复活',
   });
-  drawMahjongPrimaryCapsuleButton(
-    ctx,
-    card.x + pad,
-    btnY,
-    bw,
-    btnH,
-    `重玩 ${formatMahjongGlobalCoinCostLabel(replayCost)}`,
-  );
+  if (coinPay) {
+    drawMahjongPrimaryCapsuleButton(
+      ctx,
+      card.x + pad,
+      btnY,
+      bw,
+      btnH,
+      `重玩 ${formatMahjongGlobalCoinCostLabel(replayCost)}`,
+    );
+  } else {
+    drawMahjongPrimaryCapsuleButton(
+      ctx,
+      card.x + pad,
+      btnY,
+      bw,
+      btnH,
+      '▶ 看广告重开',
+      '#74c0fc',
+      '#339af0',
+      '#ffffff',
+    );
+  }
   drawMahjongPrimaryCapsuleButton(
     ctx,
     card.x + pad + bw + 10,
     btnY,
     bw,
     btnH,
-    '▶ 复活',
+    '▶ 看广告复活',
     '#69db7c',
     '#37b24d',
     '#ffffff',
@@ -1025,13 +1048,16 @@ export function drawMahjongResult(
       label: '返回首页',
     });
   } else {
+    const coinPay = isMahjongCoinPaymentsEnabled();
     pushBtn(buttons, {
-      id: 'mahjong_replay_coin',
+      id: coinPay ? 'mahjong_replay_coin' : 'mahjong_replay_ad',
       x: pad,
       y: by,
       w: bw,
       h: 44,
-      label: `重玩 ${formatMahjongGlobalCoinCostLabel(MAHJONG_REPLAY_COIN_COST)}`,
+      label: coinPay
+        ? `重玩 ${formatMahjongGlobalCoinCostLabel(MAHJONG_REPLAY_COIN_COST)}`
+        : '看广告重玩',
     });
     pushBtn(buttons, {
       id: 'mahjong_back_lobby',
@@ -1087,6 +1113,109 @@ export function hitMahjongTile(
     }
   }
   return null;
+}
+
+/** 大厅入口：重开本关 — 馆馆金币或看广告二选一。 */
+export function drawMahjongLadderCoinGateModal(
+  ctx: WxCanvasRenderingContext2D,
+  width: number,
+  height: number,
+  ladderCoins: number,
+  replayCost: number,
+  buttons: MahjongUiButton[],
+): void {
+  buttons.length = 0;
+  const shortOnCoins = ladderCoins < replayCost;
+  const pad = 22;
+  const btnH = 44;
+  const btnGap = 10;
+  const footerH = btnH + 28;
+  drawMahjongModalVeil(ctx, width, height, 0.52);
+  const cardW = Math.min(width * 0.88, 320);
+  const cardH = Math.min(232, height * 0.38);
+  const card = layoutMahjongModalCard(width, height, cardW, cardH, footerH);
+  drawMahjongCuteCard(ctx, card.x, card.y, card.w, card.h, {
+    radius: 20,
+    border: 'rgba(255, 190, 120, 0.95)',
+    fillTop: 'rgba(255,255,255,0.98)',
+    fillBottom: 'rgba(255,248,235,0.98)',
+  });
+
+  drawMahjongCenterText(
+    ctx,
+    shortOnCoins ? '馆馆金币不够啦' : '继续本关',
+    card.cx,
+    card.y + 32,
+    'bold 19px sans-serif',
+    shortOnCoins ? '#c92a2a' : '#1864ab',
+  );
+  drawMahjongCenterText(
+    ctx,
+    formatMahjongGlobalCoinAmount(ladderCoins),
+    card.cx,
+    card.y + 58,
+    'bold 22px sans-serif',
+    '#1864ab',
+  );
+  drawMahjongCenterText(
+    ctx,
+    shortOnCoins ? '快去糖果梯子闯关赚金币吧' : '用金币或看广告，任选一种重开',
+    card.cx,
+    card.y + 88,
+    '14px sans-serif',
+    '#495057',
+  );
+
+  const innerW = card.w - pad * 2;
+  const halfW = (innerW - btnGap) / 2;
+  const y0 = card.y + card.h - footerH + 20;
+  pushBtn(buttons, {
+    id: 'mahjong_gate_coin',
+    x: card.x + pad,
+    y: y0,
+    w: halfW,
+    h: btnH,
+    label: '金币重开',
+  });
+  pushBtn(buttons, {
+    id: 'mahjong_gate_ad',
+    x: card.x + pad + halfW + btnGap,
+    y: y0,
+    w: halfW,
+    h: btnH,
+    label: '复活',
+  });
+  drawMahjongPrimaryCapsuleButton(
+    ctx,
+    card.x + pad,
+    y0,
+    halfW,
+    btnH,
+    formatMahjongGlobalCoinAmount(replayCost),
+  );
+  drawMahjongPrimaryCapsuleButton(
+    ctx,
+    card.x + pad + halfW + btnGap,
+    y0,
+    halfW,
+    btnH,
+    '▶ 复活',
+    '#69db7c',
+    '#37b24d',
+    '#ffffff',
+  );
+
+  const closeX = card.x + card.w - 28;
+  const closeY = card.y + 16;
+  pushBtn(buttons, {
+    id: 'mahjong_gate_close',
+    x: closeX - 18,
+    y: closeY - 18,
+    w: 36,
+    h: 36,
+    label: '×',
+  });
+  drawMahjongPanelCloseOrb(ctx, closeX, closeY, 18);
 }
 
 export function hitMahjongButton(

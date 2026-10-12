@@ -64,7 +64,9 @@ export type GameEvent =
       col?: number;
       movesGranted?: number;
     }
-  | { type: 'InviteReward'; kind: 'invitee' | 'inviter'; hammers: number };
+  | { type: 'InviteReward'; kind: 'invitee' | 'inviter'; hammers: number }
+  /** 通关公告文案更新（如好友排行提示异步返回） */
+  | { type: 'PostClearAnnouncement' };
 
 export type GameEventListener = (event: GameEvent) => void;
 

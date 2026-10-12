@@ -9,6 +9,8 @@ export interface MahjongHallProgressData {
   tools: Record<MahjongToolId, number>;
   guideSeen: boolean;
   savedRun: MahjongGameSnapshot | null;
+  /** 本关已失败且未付费/广告复活时，禁止免费再开同一关 */
+  blockedReplayLevel: number | null;
 }
 
 export const EMPTY_MAHJONG_TOOLS: Record<MahjongToolId, number> = {
@@ -26,6 +28,7 @@ export function emptyMahjongProgress(): MahjongHallProgressData {
     tools: { ...EMPTY_MAHJONG_TOOLS },
     guideSeen: false,
     savedRun: null,
+    blockedReplayLevel: null,
   };
 }
 
@@ -56,6 +59,16 @@ export function normalizeMahjongProgress(raw: unknown): MahjongHallProgressData 
   if (o.savedRun && typeof o.savedRun === 'object') {
     base.savedRun = o.savedRun as MahjongGameSnapshot;
   }
+  if (typeof o.blockedReplayLevel === 'number' && Number.isFinite(o.blockedReplayLevel)) {
+    base.blockedReplayLevel = Math.max(1, Math.floor(o.blockedReplayLevel));
+  }
+  if (
+    base.blockedReplayLevel != null &&
+    base.savedRun?.phase === 'playing' &&
+    base.savedRun.level === base.blockedReplayLevel
+  ) {
+    base.savedRun = null;
+  }
   return base;
 }
 
@@ -74,5 +87,6 @@ export function recordMahjongClear(
     starsByLevel: { ...data.starsByLevel, [key]: nextStars },
     highestUnlocked: Math.max(data.highestUnlocked, level + 1),
     savedRun: null,
+    blockedReplayLevel: null,
   };
 }

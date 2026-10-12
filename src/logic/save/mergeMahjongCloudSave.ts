@@ -45,11 +45,20 @@ export function mergeMahjongSavedRun(
   }
   const localPlaying = local.phase === 'playing';
   const remotePlaying = remote.phase === 'playing';
+  if (local.phase === 'lost' && remote.phase === 'playing') {
+    return local;
+  }
+  if (remote.phase === 'lost' && local.phase === 'playing') {
+    return remote;
+  }
   if (localPlaying && !remotePlaying) {
     return local;
   }
   if (remotePlaying && !localPlaying) {
     return remote;
+  }
+  if (local.phase === 'lost' && remote.phase === 'lost') {
+    return local;
   }
   if (localPlaying && remotePlaying) {
     const leftLocal = tilesRemaining(local);
@@ -78,5 +87,7 @@ export function mergeMahjongProgress(
     tools: mergeTools(a.tools, b.tools),
     guideSeen: a.guideSeen || b.guideSeen,
     savedRun: mergeMahjongSavedRun(a.savedRun, b.savedRun),
+    blockedReplayLevel:
+      a.blockedReplayLevel ?? b.blockedReplayLevel ?? null,
   });
 }

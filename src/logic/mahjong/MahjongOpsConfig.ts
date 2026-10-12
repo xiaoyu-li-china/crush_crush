@@ -202,13 +202,19 @@ export function mahjongTypeCountForGeneration(level: number, rng: () => number):
   if (override?.typeCount != null) {
     return override.typeCount;
   }
+  let base: number;
   /** 第 2 关模板：固定种类数；第 3 关牌面随机；第 4 关起与第 2 关同规则，仅主题变化（PRD 5.9）。 */
   if (level <= 2 || level >= 4) {
-    return ops.generation.typeCountLevel2;
+    base = ops.generation.typeCountLevel2;
+  } else {
+    const { min, maxInclusive } = ops.generation.typeCountFromLevel3;
+    const span = maxInclusive - min + 1;
+    base = min + Math.floor(rng() * span);
   }
-  const { min, maxInclusive } = ops.generation.typeCountFromLevel3;
-  const span = maxInclusive - min + 1;
-  return min + Math.floor(rng() * span);
+  /** 远关加牌种（与梯子「解锁新萌宠」区分：麻将馆靠槽位压力 + 更多同图种类）。 */
+  const bonus =
+    level >= 4 ? Math.min(2, Math.floor((Math.max(4, level) - 4) / 25)) : 0;
+  return Math.min(10, base + bonus);
 }
 
 export function shouldMahjongOpsSampleLevel(level: number): boolean {

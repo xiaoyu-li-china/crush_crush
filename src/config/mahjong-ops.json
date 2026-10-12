@@ -13,8 +13,8 @@
     "maxAttempts": 16,
     "level1Tiles": 9,
     "standardTiles": 105,
-    "typeCountLevel2": 6,
-    "typeCountFromLevel3": { "min": 6, "maxInclusive": 8 }
+    "typeCountLevel2": 7,
+    "typeCountFromLevel3": { "min": 8, "maxInclusive": 10 }
   },
   "theme": {
     "level1ThemeId": "default",

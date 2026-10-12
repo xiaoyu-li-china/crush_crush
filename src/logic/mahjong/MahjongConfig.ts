@@ -24,6 +24,16 @@ export const MAHJONG_SLOT_FULL_AD_MOVE_COUNT = 3;
 /** 任意「重玩本关/重玩」消耗金币（固定 300，与道具兑换价独立）。 */
 export const MAHJONG_REPLAY_COIN_COST = 300;
 
+/** 梯子累计金币达到该值可解锁萌宠麻将馆（与通关第 20 关二选一）。 */
+export const MAHJONG_HALL_UNLOCK_LADDER_COINS = 300;
+
+/** 暂不开通金币付费时，重开/道具仅走激励视频。 */
+export const MAHJONG_COIN_PAYMENTS_ENABLED = false;
+
+export function isMahjongCoinPaymentsEnabled(): boolean {
+  return MAHJONG_COIN_PAYMENTS_ENABLED;
+}
+
 /** 第 2 关起标准关（105 张）可无限递增的关卡号上限（主题在此后循环，生成仍用真实关卡号作种子）。 */
 export const MAHJONG_INFINITE_LEVEL_CAP = 50_000;
 
@@ -71,3 +81,6 @@ export const MAHJONG_TOOL_DESCRIPTIONS: Record<MahjongToolId, string> = {
   shuffle: '打乱牌堆摆放',
   reveal: '翻开最上层一张扣牌',
 };
+
+/** 大厅左下角入口 caption（Canvas 矢量字；贴图不含文字） */
+export const MAHJONG_HALL_LOBBY_CAPTION = '萌宠麻将馆';

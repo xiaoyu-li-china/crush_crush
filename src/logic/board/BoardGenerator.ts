@@ -7,10 +7,17 @@ import { BASIC_TILE_KINDS, isHole, TileKind } from './TileType';
  * @param board - 空棋盘或将被覆盖的棋盘
  * @param seed - 关卡种子
  */
-export function generatePlayableBoard(board: BoardModel, seed: number): void {
+export function generatePlayableBoard(
+  board: BoardModel,
+  seed: number,
+  basicKindCount = BASIC_TILE_KINDS.length,
+): void {
   const random = createSeededRandom(seed);
   const { rows, cols } = board.size;
-  const kindCount = BASIC_TILE_KINDS.length;
+  const kindCount = Math.min(
+    BASIC_TILE_KINDS.length,
+    Math.max(1, Math.floor(basicKindCount)),
+  );
 
   for (let r = 0; r < rows; r += 1) {
     for (let c = 0; c < cols; c += 1) {
