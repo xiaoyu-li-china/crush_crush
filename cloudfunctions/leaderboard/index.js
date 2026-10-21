@@ -1,58 +1,30 @@
 const cloud = require('wx-server-sdk');
+const {
+  asNonNegInt,
+  trimStr,
+  isoWeekOf,
+  previousWeekOf,
+  nextSettleAt,
+  isPlaceholderName,
+  rollSelfDoc,
+  scoreForWeek,
+  rowFromBoardDoc,
+  rowFromSaveDoc,
+  mergeByOpenid,
+  compareLevel,
+  compareWeek,
+  toClientRow,
+} = require('./rank');
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
+/**
+ * 每人一条记录，文档 _id 就是 openid（旧版用 add 会重复插入，v:2 之前的旧记录不再参与排名）。
+ * 建议索引：v + maxLevel(desc) + totalScore(desc)；v + weekKey + weekScore(desc)。
+ */
 const LEADERBOARD = 'leaderboard';
 const PLAYER_SAVES = 'player_saves';
 const LIMIT = 50;
-
-function asNonNegInt(value, fallback = 0) {
-  const n = Math.floor(Number(value));
-  if (!Number.isFinite(n) || n < 0) {
-    return fallback;
-  }
-  return n;
-}
-
-function trimStr(value, max) {
-  return String(value || '')
-    .trim()
-    .slice(0, max);
-}
-
-function maxClearedFromProgress(progress) {
-  if (!progress || typeof progress !== 'object') {
-    return 0;
-  }
-  const fromHighest = Math.max(0, asNonNegInt(progress.highestLevelId, 1) - 1);
-  const scores = progress.levelScores;
-  if (!scores || typeof scores !== 'object') {
-    return fromHighest;
-  }
-  let fromScores = 0;
-  for (const key of Object.keys(scores)) {
-    const id = Math.floor(Number(key));
-    if (Number.isFinite(id) && id > fromScores) {
-      fromScores = id;
-    }
-  }
-  return Math.max(fromHighest, fromScores);
-}
-
-function isPlaceholderName(name) {
-  const n = String(name || '').trim();
-  return !n || n === '微信玩家' || n === '我';
-}
-
-/** 没有昵称时用 openId 尾号区分，避免所有人同名。 */
-function displayName(nickName, openid, userId) {
-  if (!isPlaceholderName(nickName)) {
-    return trimStr(nickName, 32);
-  }
-  const seed = String(openid || userId || '').replace(/[^A-Za-z0-9]/g, '');
-  const tail = seed.slice(-4).toUpperCase() || '????';
-  return `玩家${tail}`;
-}
 
 async function ensureCollection(db, name) {
   try {
@@ -62,182 +34,57 @@ async function ensureCollection(db, name) {
   }
 }
 
-async function upsertSelf(db, openid, payload) {
-  const col = db.collection(LEADERBOARD);
-  const found = await col.where({ _openid: openid }).limit(1).get();
-  const row = found.data && found.data[0];
-  const nickName = isPlaceholderName(payload.nickName) ? '' : payload.nickName;
-  const avatarUrl = payload.avatarUrl || '';
-  if (row && row._id) {
-    const nextMax = Math.max(asNonNegInt(row.maxLevel), payload.maxLevel);
-    const nextScore = Math.max(asNonNegInt(row.score), payload.score);
-    await col.doc(row._id).update({
-      data: {
-        userId: payload.userId || row.userId,
-        wxId: payload.wxId || row.wxId,
-        openid,
-        maxLevel: nextMax,
-        score: nextScore,
-        nickName: nickName || row.nickName || '',
-        avatarUrl: avatarUrl || row.avatarUrl || '',
-        updatedAt: Date.now(),
-      },
-    });
+async function readSelfDoc(col, openid) {
+  try {
+    const res = await col.doc(openid).get();
+    return res && res.data ? res.data : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * 上周结算：先用条件更新抢占 rewardWeek，抢到的那次调用才返回奖励，避免并发双发。
+ */
+async function settleLastWeek(db, col, openid, prevDoc, rolled, nowMs) {
+  const settleWeek = previousWeekOf(nowMs);
+  if (!prevDoc || rolled.rewardWeek === settleWeek) {
+    rolled.rewardWeek = settleWeek;
+    return null;
+  }
+  const myScore = scoreForWeek(rolled, settleWeek);
+  let reward = null;
+  if (myScore > 0) {
+    const _ = db.command;
+    const claim = await col
+      .where({ _id: openid, rewardWeek: _.neq(settleWeek) })
+      .update({ data: { rewardWeek: settleWeek } });
+    const updated = claim && claim.stats ? claim.stats.updated : 0;
+    if (updated > 0) {
+      const higher = await col
+        .where(_.and([
+          { v: 2 },
+          _.or([
+            { weekKey: settleWeek, weekScore: _.gt(myScore) },
+            { prevWeekKey: settleWeek, prevWeekScore: _.gt(myScore) },
+          ]),
+        ]))
+        .count();
+      reward = { week: settleWeek, rank: (higher.total || 0) + 1, score: myScore };
+    }
+  }
+  rolled.rewardWeek = settleWeek;
+  return reward;
+}
+
+async function syncProfileToSave(db, openid, nickName, avatarUrl) {
+  if (isPlaceholderName(nickName) && !avatarUrl) {
     return;
   }
-  await col.add({
-    data: {
-      userId: payload.userId,
-      wxId: payload.wxId,
-      openid,
-      maxLevel: payload.maxLevel,
-      score: payload.score,
-      nickName,
-      avatarUrl,
-      updatedAt: Date.now(),
-    },
-  });
-}
-
-function normalizeRow(doc, openid, source) {
-  const docOpenid = trimStr(doc._openid || doc.openid || '', 64);
-  const maxLevel = source === 'save'
-    ? maxClearedFromProgress(doc.progress)
-    : asNonNegInt(doc.maxLevel);
-  const score = source === 'save'
-    ? maxLevel
-    : asNonNegInt(doc.score, maxLevel);
-  const invite = doc.invite && typeof doc.invite === 'object' ? doc.invite : {};
-  const code = trimStr(
-    (source === 'save' ? invite.code : doc.wxId || doc.userId) || '',
-    48,
-  );
-  const profile = doc.profile && typeof doc.profile === 'object' ? doc.profile : {};
-  const nickRaw = trimStr(
-    source === 'save'
-      ? (profile.nickName || doc.nickName)
-      : doc.nickName,
-    32,
-  );
-  const avatarUrl = trimStr(
-    source === 'save'
-      ? (profile.avatarUrl || doc.avatarUrl)
-      : doc.avatarUrl,
-    512,
-  );
-  const userId = code || docOpenid || trimStr(doc._id, 48);
-  return {
-    _openid: docOpenid,
-    _docId: trimStr(doc._id, 64),
-    userId,
-    maxLevel,
-    score,
-    bestTimeMs: null,
-    completed: false,
-    isSelf: !!(openid && docOpenid && docOpenid === openid),
-    nickName: nickRaw,
-    avatarUrl,
-    wxId: code || docOpenid.slice(-8) || userId,
-  };
-}
-
-/** 同一人只留一行：先按 openid，再按邀请码，取最高关。 */
-function dedupePlayers(rows) {
-  const byOpenid = new Map();
-  const noOpenid = [];
-
-  for (const row of rows) {
-    if (row._openid) {
-      const prev = byOpenid.get(row._openid);
-      if (!prev) {
-        byOpenid.set(row._openid, row);
-        continue;
-      }
-      byOpenid.set(row._openid, pickBetter(prev, row));
-    } else {
-      noOpenid.push(row);
-    }
-  }
-
-  const byWxId = new Map();
-  for (const row of byOpenid.values()) {
-    const key = row.wxId || row.userId;
-    const prev = byWxId.get(key);
-    if (!prev) {
-      byWxId.set(key, row);
-      continue;
-    }
-    // 同邀请码多 openid：保留分数更高者（异常数据）
-    byWxId.set(key, pickBetter(prev, row));
-  }
-
-  for (const row of noOpenid) {
-    const key = row.wxId || row.userId || row._docId;
-    if (!key) {
-      continue;
-    }
-    const prev = byWxId.get(key);
-    if (!prev) {
-      byWxId.set(key, row);
-      continue;
-    }
-    byWxId.set(key, pickBetter(prev, row));
-  }
-
-  return Array.from(byWxId.values());
-}
-
-function pickBetter(a, b) {
-  const scoreA = Math.max(a.score, a.maxLevel);
-  const scoreB = Math.max(b.score, b.maxLevel);
-  const better = scoreB > scoreA ? b : a;
-  const other = better === a ? b : a;
-  return {
-    ...better,
-    nickName: better.nickName || other.nickName,
-    avatarUrl: better.avatarUrl || other.avatarUrl,
-    wxId: better.wxId || other.wxId,
-    userId: better.userId || other.userId,
-    isSelf: better.isSelf || other.isSelf,
-    _openid: better._openid || other._openid,
-    maxLevel: Math.max(a.maxLevel, b.maxLevel),
-    score: Math.max(scoreA, scoreB),
-  };
-}
-
-exports.main = async (event) => {
-  const { OPENID } = cloud.getWXContext();
-  if (!OPENID) {
-    return { ok: false, reason: 'no_openid' };
-  }
-
-  const maxLevel = asNonNegInt(event && event.maxLevel);
-  const nickName = trimStr(event && event.nickName, 32);
-  const avatarUrl = trimStr(event && event.avatarUrl, 512);
-  const userId = trimStr((event && event.userId) || OPENID, 48) || OPENID;
-  const wxId = trimStr((event && event.wxId) || userId, 48) || userId;
-  const limit = Math.min(100, Math.max(1, asNonNegInt(event && event.limit, LIMIT) || LIMIT));
-
-  const db = cloud.database();
-  await ensureCollection(db, LEADERBOARD);
-
-  await upsertSelf(db, OPENID, {
-    userId,
-    wxId,
-    maxLevel,
-    score: maxLevel,
-    nickName,
-    avatarUrl,
-  });
-
   try {
-    const saves = await db
-      .collection(PLAYER_SAVES)
-      .where({ _openid: OPENID })
-      .limit(1)
-      .get();
+    const saves = await db.collection(PLAYER_SAVES).where({ _openid: openid }).limit(1).get();
     const selfSave = (saves.data || [])[0];
-    if (selfSave && selfSave._id && (!isPlaceholderName(nickName) || avatarUrl)) {
+    if (selfSave && selfSave._id) {
       await db.collection(PLAYER_SAVES).doc(selfSave._id).update({
         data: {
           'profile.nickName': isPlaceholderName(nickName) ? '' : nickName,
@@ -249,53 +96,165 @@ exports.main = async (event) => {
   } catch (err) {
     // ignore
   }
+}
 
-  let boardDocs = [];
+async function loadLevelBoard(db, col, openid, self, limit) {
+  let boardRows = [];
   try {
-    const boardRes = await db.collection(LEADERBOARD).limit(100).get();
-    boardDocs = (boardRes.data || []).map((doc) => normalizeRow(doc, OPENID, 'board'));
+    const res = await col
+      .where({ v: 2 })
+      .orderBy('maxLevel', 'desc')
+      .orderBy('totalScore', 'desc')
+      .limit(limit)
+      .get();
+    boardRows = (res.data || []).map((doc) => rowFromBoardDoc(doc, openid));
   } catch (err) {
-    boardDocs = [];
+    boardRows = [];
   }
-
-  let saveDocs = [];
+  // 早期玩家可能只有存档、没有排行记录
+  let saveRows = [];
   try {
-    const saveRes = await db.collection(PLAYER_SAVES).limit(100).get();
-    saveDocs = (saveRes.data || []).map((doc) => normalizeRow(doc, OPENID, 'save'));
+    const res = await db
+      .collection(PLAYER_SAVES)
+      .orderBy('progress.highestLevelId', 'desc')
+      .limit(limit)
+      .get();
+    saveRows = (res.data || []).map((doc) => rowFromSaveDoc(doc, openid));
   } catch (err) {
-    saveDocs = [];
+    saveRows = [];
   }
-
-  const merged = dedupePlayers(boardDocs.concat(saveDocs))
+  const merged = mergeByOpenid(boardRows.concat(saveRows, [self]))
     .filter((row) => row.maxLevel > 0 || row.isSelf)
-    .sort((a, b) => {
-      if (a.score !== b.score) {
-        return b.score - a.score;
-      }
-      if (a.maxLevel !== b.maxLevel) {
-        return b.maxLevel - a.maxLevel;
-      }
-      return String(a.userId).localeCompare(String(b.userId));
-    });
+    .sort(compareLevel);
+  const top = merged.slice(0, limit);
+  const index = top.findIndex((row) => row.isSelf);
+  if (index >= 0) {
+    return {
+      rows: top.map((row, i) => toClientRow(row, i + 1, 'level')),
+      selfRank: index + 1,
+      self: null,
+    };
+  }
+  let selfRank = 0;
+  try {
+    const _ = db.command;
+    const higher = await col
+      .where(_.and([
+        { v: 2 },
+        _.or([
+          { maxLevel: _.gt(self.maxLevel) },
+          { maxLevel: self.maxLevel, totalScore: _.gt(self.totalScore) },
+        ]),
+      ]))
+      .count();
+    selfRank = (higher.total || 0) + 1;
+  } catch (err) {
+    selfRank = 0;
+  }
+  return {
+    rows: top.map((row, i) => toClientRow(row, i + 1, 'level')),
+    selfRank,
+    self: toClientRow(self, selfRank, 'level'),
+  };
+}
 
-  const rows = merged.slice(0, limit).map((row, index) => ({
-    rank: index + 1,
-    userId: row.userId,
-    maxLevel: row.maxLevel,
-    bestTimeMs: null,
-    completed: false,
-    isSelf: !!row.isSelf,
-    nickName: displayName(row.nickName, row._openid, row.userId),
-    avatarUrl: row.avatarUrl || undefined,
-    wxId: row.wxId || row.userId,
-    score: row.score,
-  }));
+async function loadWeekBoard(db, col, openid, self, week, limit) {
+  const _ = db.command;
+  let rows = [];
+  try {
+    const res = await col
+      .where({ v: 2, weekKey: week, weekScore: _.gt(0) })
+      .orderBy('weekScore', 'desc')
+      .orderBy('maxLevel', 'desc')
+      .limit(limit)
+      .get();
+    rows = (res.data || []).map((doc) => rowFromBoardDoc(doc, openid));
+  } catch (err) {
+    rows = [];
+  }
+  if (self.weekScore > 0) {
+    rows = mergeByOpenid(rows.concat([self]));
+  }
+  rows.sort(compareWeek);
+  const top = rows.slice(0, limit);
+  const index = top.findIndex((row) => row.isSelf);
+  if (index >= 0) {
+    return {
+      rows: top.map((row, i) => toClientRow(row, i + 1, 'week')),
+      selfRank: index + 1,
+      self: null,
+    };
+  }
+  let selfRank = 0;
+  if (self.weekScore > 0) {
+    try {
+      const higher = await col
+        .where({ v: 2, weekKey: week, weekScore: _.gt(self.weekScore) })
+        .count();
+      selfRank = (higher.total || 0) + 1;
+    } catch (err) {
+      selfRank = 0;
+    }
+  }
+  return {
+    rows: top.map((row, i) => toClientRow(row, i + 1, 'week')),
+    selfRank,
+    self: toClientRow(self, selfRank, 'week'),
+  };
+}
 
-  const self = rows.find((row) => row.isSelf);
+exports.main = async (event) => {
+  const { OPENID } = cloud.getWXContext();
+  if (!OPENID) {
+    return { ok: false, reason: 'no_openid' };
+  }
+  const nowMs = Date.now();
+  const payload = {
+    openid: OPENID,
+    userId: trimStr((event && event.userId) || OPENID, 48) || OPENID,
+    wxId: trimStr((event && (event.wxId || event.userId)) || OPENID, 48) || OPENID,
+    maxLevel: asNonNegInt(event && event.maxLevel),
+    totalScore: asNonNegInt(event && event.totalScore),
+    weekKey: trimStr(event && event.weekKey, 16),
+    weekScore: asNonNegInt(event && event.weekScore),
+    nickName: trimStr(event && event.nickName, 32),
+    avatarUrl: trimStr(event && event.avatarUrl, 512),
+  };
+  const limit = Math.min(100, Math.max(1, asNonNegInt(event && event.limit, LIMIT) || LIMIT));
+
+  const db = cloud.database();
+  await ensureCollection(db, LEADERBOARD);
+  const col = db.collection(LEADERBOARD);
+
+  const prevDoc = await readSelfDoc(col, OPENID);
+  const rolled = rollSelfDoc(prevDoc, payload, nowMs);
+  let weeklyReward = null;
+  try {
+    weeklyReward = await settleLastWeek(db, col, OPENID, prevDoc, rolled, nowMs);
+  } catch (err) {
+    weeklyReward = null;
+  }
+  await col.doc(OPENID).set({ data: rolled });
+  await syncProfileToSave(db, OPENID, payload.nickName, payload.avatarUrl);
+
+  const week = isoWeekOf(nowMs);
+  const self = rowFromBoardDoc({ ...rolled, _id: OPENID }, OPENID);
+  const [level, weekly] = await Promise.all([
+    loadLevelBoard(db, col, OPENID, self, limit),
+    loadWeekBoard(db, col, OPENID, self, week, limit),
+  ]);
+
   return {
     ok: true,
-    selfRank: self ? self.rank : 0,
-    rows,
+    week,
+    settleAt: nextSettleAt(nowMs),
+    selfWeekScore: rolled.weekScore,
+    weeklyReward,
+    level,
+    weekly,
+    // 旧客户端只认 rows / selfRank
+    rows: level.rows,
+    selfRank: level.selfRank,
     hint: '',
   };
 };

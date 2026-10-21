@@ -1,145 +1,253 @@
 /**
- * 好友排行面板：排名、头像、昵称、邀请码、关卡。
- * 标题/奖励固定，玩家列表在视口内可滑动。
+ * 排行面板：标题、关卡榜/本周榜切换、规则与结算说明、可滑动名单、底部固定的「我的排名」、邀请按钮。
+ * 只算位置，不画。
  */
-import type { LeaderboardLine } from '../../logic/economy/FriendLeaderboard';
+import type { LeaderboardLine, LeaderboardTab, LeaderboardTabId } from '../../logic/economy/FriendLeaderboard';
+import { leaderboardRewardTierLines } from '../../logic/economy/FriendLeaderboard';
 import noticeJson from '../../config/notice.json';
-import { panelCloseButton, type CanvasButtonSpec } from './PanelChrome';
+import { panelCloseButton } from './PanelChrome';
+
+export interface LeaderboardPanelButton {
+  id: 'resume' | 'lb_tab_level' | 'lb_tab_week' | 'invite';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label: string;
+  active?: boolean;
+}
 
 export interface LeaderboardPanelLayout {
   panel: { x: number; y: number; w: number; h: number };
   title: string;
-  /** 固定在顶部的提示 / 奖励行 */
-  headerRows: LeaderboardLine[];
-  /** 可滑动的玩家行 */
+  activeTab: LeaderboardTabId;
+  tabs: LeaderboardPanelButton[];
+  /** 规则说明（灰字） */
+  ruleLines: string[];
+  /** @deprecated 用 settleLines + rewardTierLines */
+  rewardLines: string[];
+  /** 本周榜：距结算倒计时（分行） */
+  settleLines: string[];
+  /** 本周榜：结算说明（小字一行） */
+  settleNoteLines: string[];
+  /** 本周榜：「周奖励」小标题，无奖励档时为 null */
+  rewardTitle: string | null;
+  /** 本周榜：各名次奖励，每档一行 */
+  rewardTierLines: string[];
+  infoTop: number;
+  infoLineH: number;
+  gapHint: string;
+  gapY: number;
   playerRows: LeaderboardLine[];
+  /** 名单为空时的提示 */
+  emptyText: string;
   textWidth: number;
   tagX: number;
   avatarX: number;
   avatarR: number;
   textX: number;
   scoreX: number;
-  bodyTop: number;
-  bodyBottom: number;
-  /** 可滑动列表视口 */
   listTop: number;
   listBottom: number;
+  /** 整个名单区高度（含领奖台） */
   listViewportH: number;
-  /** 玩家列表内容总高度（不含视口裁剪） */
+  /** 可滚动行内容高度（不含前三名领奖台） */
   listContentH: number;
+  /** 前三名领奖台高度，0 表示不展示 */
+  podiumH: number;
+  /** 可滚动名单顶边（领奖台下方） */
+  listScrollTop: number;
+  /** 可滚动视口高度 */
+  listScrollViewportH: number;
   rowH: number;
-  metaRowH: number;
-  buttons: CanvasButtonSpec[];
+  rowGap: number;
+  selfRow: LeaderboardLine | null;
+  selfBar: { x: number; y: number; w: number; h: number };
+  buttons: LeaderboardPanelButton[];
 }
 
 const PLAYER_ROW_H = 52;
 const PLAYER_ROW_GAP = 6;
-const META_ROW_H = 28;
 const AVATAR_R = 16;
-/** 弹窗内大约可见的玩家行数（含间距），超出可滑 */
-const VISIBLE_PLAYER_ROWS = 4;
+const INFO_LINE_H = 16;
+const MAX_VISIBLE_ROWS = 5;
+const MIN_VISIBLE_ROWS = 2;
+/** 前三名领奖台占用高度（与绘制一致） */
+export const LEADERBOARD_PODIUM_H = 56;
 
 export function playerRowStride(): number {
   return PLAYER_ROW_H + PLAYER_ROW_GAP;
 }
 
+export function leaderboardShowPodium(playerCount: number, listViewportH: number): boolean {
+  return playerCount >= 3 && listViewportH > LEADERBOARD_PODIUM_H + playerRowStride();
+}
+
 export function layoutLeaderboardPanel(input: {
   width: number;
   height: number;
-  hint: string;
-  rewardText: string;
-  rows: LeaderboardLine[];
+  activeTab: LeaderboardTabId;
+  tab: LeaderboardTab | null;
+  settleText?: string;
+  rewardText?: string;
   wrap: (text: string, maxWidth: number) => string[];
 }): LeaderboardPanelLayout {
   const panelW = Math.min(360, input.width - 24);
   const padX = 14;
-  const tagW = 28;
-  const avatarGap = 10;
-  const scoreColW = 56;
+  const tagW = 30;
+  const avatarGap = 8;
+  const scoreColW = 78;
+  const innerW = panelW - padX * 2;
+  const tab = input.tab;
+  const isWeek = input.activeTab === 'week';
 
-  const headerRows: LeaderboardLine[] = [];
-  if (input.hint) {
-    headerRows.push({ tag: '提醒', text: input.hint, kind: 'meta' });
-  }
-  if (input.rewardText) {
-    headerRows.push({ tag: '', text: input.rewardText, kind: 'reward' });
-  }
-
-  let playerRows: LeaderboardLine[] = [];
-  if (input.rows.length > 0) {
-    playerRows = input.rows.map((row) => ({
-      ...row,
-      kind: row.kind ?? (row.nickName || row.score != null ? 'player' : 'meta'),
-    }));
-  } else {
-    headerRows.push({
-      tag: '提示',
-      text: noticeJson.leaderboard?.unavailable ?? '好友排行暂时打不开',
-      kind: 'meta',
-    });
-  }
-
-  const avatarR = AVATAR_R;
-  const textWidth = panelW - padX * 2 - tagW - avatarGap - avatarR * 2 - avatarGap - scoreColW;
-
-  let headerH = 8;
-  for (const row of headerRows) {
-    if (row.kind === 'reward') {
-      headerH += Math.max(META_ROW_H, input.wrap(row.text, panelW - padX * 2).length * 16 + 8) + 6;
-    } else {
-      headerH += Math.max(META_ROW_H, input.wrap(row.text, textWidth + scoreColW).length * 16 + 10) + 6;
-    }
-  }
-
-  const listContentH = playerRows.length > 0
-    ? playerRows.length * playerRowStride()
-    : 0;
-  const listViewportH = Math.min(
-    listContentH || playerRowStride(),
-    VISIBLE_PLAYER_ROWS * playerRowStride(),
-  );
+  const ruleLines = tab?.rule ? input.wrap(tab.rule, innerW) : [];
+  const rawTiers = isWeek ? leaderboardRewardTierLines() : [];
+  const settleLines =
+    isWeek && input.settleText?.trim()
+      ? input.wrap(input.settleText.trim(), innerW)
+      : [];
+  const settleNote =
+    isWeek && (settleLines.length > 0 || rawTiers.length > 0)
+      ? ((noticeJson.leaderboard as { settleNote?: string }).settleNote ?? '')
+      : '';
+  const settleNoteLines = settleNote ? input.wrap(settleNote, innerW) : [];
+  const rewardTierLines = rawTiers.flatMap((line) => input.wrap(line, innerW));
+  const rewardTitle =
+    isWeek && rewardTierLines.length > 0
+      ? ((noticeJson.leaderboard as { rewardTitle?: string }).rewardTitle ?? '周奖励')
+      : null;
+  const rewardLines: string[] = [];
+  const playerRows = (tab?.rows ?? []).filter((row) => (row.kind ?? 'player') === 'player');
+  const selfRow = tab?.self ?? null;
+  const gapHint = tab?.gapHint ?? '';
 
   const titleH = 46;
-  const footH = 20;
-  const desiredH = titleH + headerH + listViewportH + footH;
-  const panelH = Math.min(input.height * 0.88, Math.max(desiredH, titleH + footH + 80));
+  const tabsH = 34;
+  const rewardBlockPad = rewardTierLines.length > 0 ? 10 : 0;
+  const infoLineCount =
+    ruleLines.length
+    + settleLines.length
+    + settleNoteLines.length
+    + (rewardTitle ? 1 : 0)
+    + rewardTierLines.length;
+  const infoH = infoLineCount * INFO_LINE_H + rewardBlockPad + 8;
+  const gapH = gapHint ? 22 : 0;
+  const selfBarH = selfRow ? PLAYER_ROW_H + 8 : 0;
+  const inviteH = 40;
+  const footH = 14;
+  const fixedH = titleH + tabsH + 8 + infoH + gapH + 6 + selfBarH + 8 + inviteH + footH;
+
+  const stride = playerRowStride();
+  const podiumEstimate = playerRows.length >= 3 ? LEADERBOARD_PODIUM_H : 0;
+  const scrollEstimate = playerRows.length >= 3
+    ? Math.max(0, playerRows.length - 3)
+    : playerRows.length;
+  const wantRows = Math.max(
+    MIN_VISIBLE_ROWS,
+    Math.min(MAX_VISIBLE_ROWS, scrollEstimate || playerRows.length),
+  );
+  const desiredH = fixedH + podiumEstimate + wantRows * stride;
+  const panelH = Math.min(input.height * 0.9, desiredH);
   const x = (input.width - panelW) / 2;
   const y = Math.max(12, (input.height - panelH) / 2);
+
+  const tabsY = y + titleH;
+  const tabGap = 8;
+  const tabW = (innerW - tabGap) / 2;
+  const tabs: LeaderboardPanelButton[] = [
+    {
+      id: 'lb_tab_level',
+      x: x + padX,
+      y: tabsY,
+      w: tabW,
+      h: tabsH,
+      label: noticeJson.leaderboard.tabLevel,
+      active: !isWeek,
+    },
+    {
+      id: 'lb_tab_week',
+      x: x + padX + tabW + tabGap,
+      y: tabsY,
+      w: tabW,
+      h: tabsH,
+      label: noticeJson.leaderboard.tabWeek,
+      active: isWeek,
+    },
+  ];
+
+  const infoTop = tabsY + tabsH + 8;
+  const gapY = infoTop + infoH;
+  const listTop = gapY + gapH + 6;
+  const inviteY = y + panelH - footH - inviteH;
+  const selfBarY = inviteY - 8 - selfBarH;
+  const listBottom = selfRow ? selfBarY - 4 : inviteY - 8;
+
+  const listViewportH = Math.max(0, listBottom - listTop);
+  const showPodium = leaderboardShowPodium(playerRows.length, listViewportH);
+  const podiumH = showPodium ? LEADERBOARD_PODIUM_H : 0;
+  const scrollRowCount = showPodium ? Math.max(0, playerRows.length - 3) : playerRows.length;
+  const listContentH = scrollRowCount * stride;
+
   const tagX = x + padX;
-  const avatarX = tagX + tagW + avatarGap + avatarR;
-  const textX = avatarX + avatarR + avatarGap;
-  const scoreX = x + panelW - padX;
-  const bodyTop = y + titleH;
-  const bodyBottom = y + panelH - footH;
-  const listTop = bodyTop + headerH;
-  const listBottom = bodyBottom;
-  const fittedViewportH = Math.max(0, listBottom - listTop);
+  const avatarX = tagX + tagW + avatarGap + AVATAR_R;
+  const textX = avatarX + AVATAR_R + avatarGap;
+  const scoreX = x + panelW - padX - 4;
+  const textWidth = Math.max(60, scoreX - scoreColW - textX);
+
+  const invite: LeaderboardPanelButton = {
+    id: 'invite',
+    x: x + padX + 20,
+    y: inviteY,
+    w: innerW - 40,
+    h: inviteH,
+    label: noticeJson.leaderboard.invite,
+  };
+  const close = panelCloseButton({ x, y, w: panelW });
 
   return {
     panel: { x, y, w: panelW, h: panelH },
-    title: noticeJson.leaderboard?.title ?? '好友排行',
-    headerRows,
+    title: noticeJson.leaderboard.title,
+    activeTab: input.activeTab,
+    tabs,
+    ruleLines,
+    rewardLines,
+    settleLines,
+    settleNoteLines,
+    rewardTitle,
+    rewardTierLines,
+    infoTop,
+    infoLineH: INFO_LINE_H,
+    gapHint,
+    gapY,
     playerRows,
-    textWidth: Math.max(80, textWidth),
+    emptyText: tab
+      ? isWeek ? noticeJson.leaderboard.weekEmpty : noticeJson.leaderboard.empty
+      : noticeJson.leaderboard.unavailable,
+    textWidth,
     tagX,
     avatarX,
-    avatarR,
+    avatarR: AVATAR_R,
     textX,
     scoreX,
-    bodyTop,
-    bodyBottom,
     listTop,
     listBottom,
-    listViewportH: fittedViewportH,
+    listViewportH,
     listContentH,
+    podiumH,
+    listScrollTop: listTop + podiumH,
+    listScrollViewportH: Math.max(0, listBottom - listTop - podiumH),
     rowH: PLAYER_ROW_H,
-    metaRowH: META_ROW_H,
-    buttons: [panelCloseButton({ x, y, w: panelW })],
+    rowGap: PLAYER_ROW_GAP,
+    selfRow,
+    selfBar: { x: x + 8, y: selfBarY, w: panelW - 16, h: selfBarH },
+    buttons: [{ ...close }, ...tabs, invite],
   };
 }
 
 export function clampLeaderboardScroll(scrollY: number, layout: LeaderboardPanelLayout): number {
-  const maxScroll = Math.max(0, layout.listContentH - layout.listViewportH);
+  const viewport = layout.listScrollViewportH > 0 ? layout.listScrollViewportH : layout.listViewportH;
+  const maxScroll = Math.max(0, layout.listContentH - viewport);
   if (!Number.isFinite(scrollY) || scrollY < 0) {
     return 0;
   }
@@ -147,4 +255,19 @@ export function clampLeaderboardScroll(scrollY: number, layout: LeaderboardPanel
     return maxScroll;
   }
   return scrollY;
+}
+
+export type LeaderboardMedal = 'gold' | 'silver' | 'bronze' | null;
+
+export function leaderboardMedal(tag: string): LeaderboardMedal {
+  if (tag === '1') {
+    return 'gold';
+  }
+  if (tag === '2') {
+    return 'silver';
+  }
+  if (tag === '3') {
+    return 'bronze';
+  }
+  return null;
 }

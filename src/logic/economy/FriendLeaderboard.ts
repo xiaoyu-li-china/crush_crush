@@ -1,9 +1,11 @@
 /**
- * 玩家周榜的排序和提示。
- * 名单由服务端返回：所有玩过本小游戏的用户，不再依赖下战书关系。
+ * 排行榜的排序、文案和提示。
+ * 名单由服务端返回：所有玩过本小游戏的用户。分「关卡榜」（总进度）和「本周榜」（本周通关得分，周一结算）。
  */
-import { readLeaderboardConfig } from './ChallengeGrants';
+import { readLeaderboardConfig, type ChallengeGrantSpec } from './ChallengeGrants';
 import noticeJson from '../../config/notice.json';
+
+export type LeaderboardTabId = 'level' | 'week';
 
 export interface FriendRankInput {
   userId: string;
@@ -15,6 +17,10 @@ export interface FriendRankInput {
   avatarUrl?: string;
   wxId?: string;
   score?: number;
+  /** 各关最高分之和 */
+  totalScore?: number;
+  /** 本周通关累计分 */
+  weekScore?: number;
 }
 
 export interface FriendRankRow extends FriendRankInput {
@@ -36,17 +42,40 @@ export interface LeaderboardLine {
   wxId?: string;
   /** 玩家行：分数 */
   score?: number;
+  /** 玩家行右侧大字（如「第 12 关」「2,340」） */
+  scoreText?: string;
+  /** 右侧大字下方的单位 */
+  scoreUnit?: string;
+  /** 昵称下方的小字 */
+  sub?: string;
   /** 区分提示行、奖励说明行与玩家行 */
   kind?: 'meta' | 'reward' | 'player';
 }
 
-/** 好友排行面板数据 */
+export interface LeaderboardTab {
+  id: LeaderboardTabId;
+  label: string;
+  /** 标签下的规则说明 */
+  rule: string;
+  rows: LeaderboardLine[];
+  /** 底部固定的「我」；未上榜时 tag 为「未上榜」 */
+  self: LeaderboardLine | null;
+  selfRank: number;
+  /** 离上一名还差多少 */
+  gapHint: string;
+}
+
+/** 排行面板数据 */
 export interface LeaderboardView {
   title: string;
   hint: string;
   rewardText: string;
   selfRank: number;
+  /** 关卡榜行（兼容旧面板） */
   rows: LeaderboardLine[];
+  tabs?: Record<LeaderboardTabId, LeaderboardTab>;
+  /** 本周榜结算倒计时 */
+  settleText?: string;
 }
 
 /**
@@ -153,12 +182,22 @@ export function formatWxIdDisplay(raw: string, max = 12): string {
   return `${text.slice(0, Math.max(4, max - 3))}…`;
 }
 
-export function formatLeaderboardLine(row: FriendRankRow): LeaderboardLine {
+/** 千分位，微信里 toLocaleString 不一定可用。 */
+export function formatScoreNumber(value: number): string {
+  const n = Math.max(0, Math.floor(Number(value) || 0));
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+export function formatLeaderboardLine(row: FriendRankRow, tab: LeaderboardTabId = 'level'): LeaderboardLine {
   const nickName = (row.nickName || '').trim() || '微信玩家';
   const wxId = formatWxIdDisplay(row.wxId || row.userId);
   const score = Math.max(0, Math.floor(row.score ?? row.maxLevel));
+  const maxLevel = Math.max(0, Math.floor(row.maxLevel));
+  const isWeek = tab === 'week';
+  const weekScore = Math.max(0, Math.floor(row.weekScore ?? (isWeek ? score : 0)));
+  const totalScore = Math.max(0, Math.floor(row.totalScore ?? 0));
   return {
-    tag: String(row.rank),
+    tag: row.rank > 0 ? String(row.rank) : '未上榜',
     text: '',
     highlight: row.isSelf,
     badge: nickName.slice(0, 1) || '玩',
@@ -167,7 +206,48 @@ export function formatLeaderboardLine(row: FriendRankRow): LeaderboardLine {
     nickName,
     wxId,
     score,
+    scoreText: isWeek ? formatScoreNumber(weekScore) : `第 ${maxLevel} 关`,
+    scoreUnit: isWeek ? '本周分' : '最高通关',
+    sub: isWeek
+      ? `已通关 ${maxLevel} 关`
+      : totalScore > 0 ? `累计 ${formatScoreNumber(totalScore)} 分` : '',
   };
+}
+
+/**
+ * 我和上一名的差距。关卡榜同关时比累计分，本周榜直接比分。
+ * 已经第一或没有上一名时返回空串。
+ */
+export function leaderboardGapHint(input: {
+  tab: LeaderboardTabId;
+  selfRank: number;
+  self: { maxLevel: number; totalScore?: number; weekScore?: number } | null;
+  above: { nickName?: string; maxLevel: number; totalScore?: number; weekScore?: number } | null;
+}): string {
+  if (input.selfRank === 1) {
+    return input.tab === 'week' ? '本周第一！守住它，周一领大奖' : '你是全服第一！';
+  }
+  if (!input.self || !input.above) {
+    if (input.tab === 'week') {
+      const mine = Math.max(0, Math.floor(input.self?.weekScore ?? 0));
+      if (mine > 0) {
+        return `你本周 ${formatScoreNumber(mine)} 分，邀请好友一起冲榜`;
+      }
+      return '';
+    }
+    return '';
+  }
+  const name = (input.above.nickName || '上一名').slice(0, 8);
+  if (input.tab === 'week') {
+    const gap = Math.max(0, Math.floor(input.above.weekScore ?? 0) - Math.floor(input.self.weekScore ?? 0)) + 1;
+    return `再得 ${formatScoreNumber(gap)} 分就能超过 ${name}`;
+  }
+  const levelGap = Math.floor(input.above.maxLevel) - Math.floor(input.self.maxLevel);
+  if (levelGap > 0) {
+    return `再通关 ${levelGap} 关就能追上 ${name}`;
+  }
+  const scoreGap = Math.max(0, Math.floor(input.above.totalScore ?? 0) - Math.floor(input.self.totalScore ?? 0)) + 1;
+  return `同关比累计分，再多 ${formatScoreNumber(scoreGap)} 分超过 ${name}`;
 }
 
 function fill(template: string, vars: Record<string, string | number>): string {
@@ -221,15 +301,75 @@ export function buildLeaderboardHint(input: {
   return '';
 }
 
-export function leaderboardRewardText(): string {
-  const config = readLeaderboardConfig();
-  const hammer = config.rewards.find((item) => item.id === 'hammer')?.amount ?? 0;
-  const shuffle = config.rewards.find((item) => item.id === 'shuffle')?.amount ?? 0;
-  return fill(noticeJson.leaderboard.reward, { hammer, shuffle });
+const GRANT_NAME: Record<ChallengeGrantSpec['id'], string> = {
+  hammer: '锤子',
+  shuffle: '重排',
+  extraMoves: '加步',
+};
+
+export function formatGrantList(grants: readonly ChallengeGrantSpec[]): string {
+  return grants
+    .filter((item) => item.amount > 0)
+    .map((item) => `${GRANT_NAME[item.id]}x${item.amount}`)
+    .join(' ');
 }
 
-export function leaderboardRewardedText(hammer: number, shuffle: number): string {
-  return fill(noticeJson.leaderboard.rewarded, { hammer, shuffle });
+/** 本周榜分档奖励，例如「第1名 锤子x3 重排x2 · 2-3名 …」 */
+export function leaderboardRewardText(): string {
+  const tiers = leaderboardRewardTierLines();
+  return tiers.length > 0 ? fill(noticeJson.leaderboard.reward, { tiers: tiers.join(' · ') }) : '';
+}
+
+/** 本周榜奖励分档，每档一行（用于面板排版）。 */
+export function leaderboardRewardTierLines(): string[] {
+  return readLeaderboardConfig().tiers.map((tier) => {
+    const range =
+      tier.minRank === tier.maxRank ? `第${tier.minRank}名` : `第${tier.minRank}-${tier.maxRank}名`;
+    const grants = formatGrantList(tier.rewards);
+    return grants ? `${range}  ${grants}` : range;
+  });
+}
+
+/**
+ * 上周结算到账提示。tierMatched=false 表示名次不在奖励档内。
+ */
+export function leaderboardRewardedText(
+  rank: number,
+  grants: readonly ChallengeGrantSpec[],
+  tierMatched = true,
+): string {
+  if (!tierMatched) {
+    const tiers = readLeaderboardConfig().tiers;
+    const top = tiers.length > 0 ? tiers[tiers.length - 1]!.maxRank : 0;
+    return fill(noticeJson.leaderboard.rewardedNone, { rank, top });
+  }
+  const list = formatGrantList(grants);
+  if (!list) {
+    return fill(noticeJson.leaderboard.rewardedFull, { rank });
+  }
+  return fill(noticeJson.leaderboard.rewarded, { rank, rewards: list });
+}
+
+/** 下一个结算点：本地时间下周一 0 点（和 localIsoWeek 同一个钟）。 */
+export function nextWeeklySettleMs(nowMs: number): number {
+  const date = new Date(nowMs);
+  const dow = date.getDay() || 7;
+  const midnight = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  return midnight + (8 - dow) * 86400000;
+}
+
+export function weeklySettleCountdownText(nowMs: number, settleAtMs = nextWeeklySettleMs(nowMs)): string {
+  const left = Math.max(0, settleAtMs - nowMs);
+  const days = Math.floor(left / 86400000);
+  const hours = Math.floor((left % 86400000) / 3600000);
+  const minutes = Math.max(1, Math.floor((left % 3600000) / 60000));
+  if (days > 0) {
+    return `距结算 ${days}天${hours}小时`;
+  }
+  if (hours > 0) {
+    return `距结算 ${hours}小时${minutes}分`;
+  }
+  return `距结算 ${minutes}分钟`;
 }
 
 /**

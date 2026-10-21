@@ -28,6 +28,7 @@ import {
   isWxDesktopIdeHost,
   shouldUnlockAllLevelsForPreview,
 } from '../core/utils/wxHost';
+import { isDouyinMiniGameHost } from '../core/utils/miniGameHost';
 import {
   applyDailyLogin,
   claimDailyShuffle,
@@ -95,14 +96,39 @@ import balanceJson from '../config/balance.json';
 import itemsJson from '../config/items.json';
 import noticeJson from '../config/notice.json';
 import type { IChallengeApi } from '../core/ports/IChallengeApi';
+import type {
+  LeaderboardBoardDto,
+  LeaderboardResponse,
+  LeaderboardRowDto,
+} from '../core/ports/IChallengeApi';
 import {
   buildLeaderboardHint,
   findPasser,
   formatLeaderboardLine,
   hintFromNotify,
+  leaderboardGapHint,
+  leaderboardRewardedText,
   leaderboardRewardText,
+  localIsoWeek,
   rankFriends,
+  weeklySettleCountdownText,
+  type FriendRankRow,
+  type LeaderboardTab,
+  type LeaderboardTabId,
 } from '../logic/economy/FriendLeaderboard';
+import { leaderboardTierForRank, planLeaderboardGrants } from '../logic/economy/ChallengeGrants';
+import {
+  claimDailyChest,
+  claimDailyTask,
+  formatDailyReward,
+  recordDailyTaskStats,
+  viewDailyTasks,
+  type DailyTaskKind,
+  type DailyTaskReward,
+  type DailyTaskStatsPatch,
+  type DailyTasksView,
+} from '../logic/economy/DailyTasks';
+import { starsForClear, type LevelStarCount } from '../logic/level/LevelStars';
 import { buildPostClearAnnouncement } from '../logic/economy/postClearAnnouncement';
 import type { LeaderboardView } from '../logic/economy/FriendLeaderboard';
 import {
@@ -171,6 +197,15 @@ export class GameSession {
   /** 大厅麻将馆 NEW 角标：点过入口后不再展示 */
   private mahjongHallNewDismissed = false;
   private readonly extraMovesGrant = itemsJson.extraMoves.moves;
+  /** 本周榜：本地累计的通关分，跨周清零 */
+  private weekly: { week: string; score: number } = { week: '', score: 0 };
+  /** 上周榜结算到账提示，大厅取一次 */
+  private leaderboardRewardToast: string | null = null;
+  /** 每日任务计数已改但还没落盘（逐步记，关末再写，避免每步都推云） */
+  private dailyTasksDirty = false;
+  /** 本关额外拿到的步数（加步 / 看广告 / 复活），算星级时扣掉 */
+  private movesGrantedThisLevel = 0;
+  private lastStars: LevelStarCount | 0 = 0;
 
   private board: BoardModel | null = null;
   private level: LevelConfig | null = null;
@@ -270,6 +305,10 @@ export class GameSession {
     this.dailyGrantPending = daily.grantedHammer;
     const savedWallet = await this.deps.storage.get<BoosterStock>(StorageKeys.Boosters);
     this.boosters.loadStock(clampBoosterWallet(savedWallet ?? EMPTY_BOOSTER_WALLET));
+    const savedWeekly = await this.deps.storage.get<{ week?: string; score?: number }>(
+      StorageKeys.Weekly,
+    );
+    this.weekly = this.alignWeekly(savedWeekly);
     const savedInvite = await this.deps.storage.get<InviteState>(StorageKeys.Invite);
     this.invite = ensureInviteCode(parseInviteState(savedInvite));
     const savedNotices = await this.deps.storage.get<string[]>(StorageKeys.NoticeSeen);
@@ -307,8 +346,8 @@ export class GameSession {
         clampBoosterWallet(this.boosters.getStock()),
       );
     }
-    if (isWxDesktopIdeHost()) {
-      // 模拟器不拉云，避免 cloud.init 堵死开发者工具。
+    if (isWxDesktopIdeHost() || isDouyinMiniGameHost()) {
+      // 模拟器 / 抖音侧不拉微信云，避免 init 卡住。
       this.cloudHydrated = true;
     } else {
       await this.syncCloudSave();
@@ -321,6 +360,10 @@ export class GameSession {
     }
     this.deps.analytics.track('app_boot');
     this.fsm.transitionTo('Lobby');
+    // 静默拉一次排行：上周结算奖励在这里到账
+    if (this.deps.challengeApi && !isWxDesktopIdeHost()) {
+      void this.loadFriendLeaderboard();
+    }
   }
 
   /**
@@ -363,6 +406,8 @@ export class GameSession {
     this.clean = null;
     this.cleaningUsedThisSettle = false;
     this.pendingMovesBonus = false;
+    this.movesGrantedThisLevel = 0;
+    this.lastStars = 0;
     this.buriedNotified.clear();
     this.revivePolicy.resetForLevel();
     this.revivePolicy.setMaxPerLevel(Number.POSITIVE_INFINITY);
@@ -541,73 +586,193 @@ export class GameSession {
     const userId = this.getInviteCode() || 'me';
     const maxLevel = this.getMaxClearedLevelId();
     const profile = this.readWxProfile();
-    const selfInput = {
+    const nowMs = Date.now();
+    this.weekly = this.alignWeekly(this.weekly, nowMs);
+    const totalScore = Math.max(0, Math.floor(this.progress.getData().totalScore || 0));
+    const selfInput: FriendRankRow = {
+      rank: 0,
       userId,
       maxLevel,
-      bestTimeMs: null as number | null,
+      bestTimeMs: null,
       completed: false,
       isSelf: true,
       nickName: profile.nickName || '微信玩家',
       avatarUrl: profile.avatarUrl,
       wxId: profile.wxId || userId,
       score: maxLevel,
+      totalScore,
+      weekScore: this.weekly.score,
     };
 
     const api = this.deps.challengeApi;
     if (api) {
       try {
         const res = await api.leaderboard(userId, maxLevel, {
-          nickName:
-            profile.nickName && profile.nickName !== '微信玩家'
-              ? profile.nickName
-              : undefined,
-          avatarUrl: profile.avatarUrl || undefined,
+          ...this.leaderboardProfileExtra(profile),
+          totalScore,
+          weekKey: this.weekly.week,
+          weekScore: this.weekly.score,
         });
-        if (res.ok && res.rows && res.rows.length > 0) {
-          this.syncLeaderboardRankSnapshot(res.rows);
-          const rows = res.rows.map((row) =>
-            formatLeaderboardLine({
-              ...row,
-              nickName:
-                row.nickName
-                || (row.isSelf ? profile.nickName || '微信玩家' : undefined),
-              avatarUrl: row.avatarUrl || (row.isSelf ? profile.avatarUrl : undefined),
-              wxId: row.wxId || row.userId,
-              score: row.score ?? row.maxLevel,
-            }),
-          );
-          return {
-            title: noticeJson.leaderboard.title,
-            hint: res.hint ?? '',
-            rewardText: res.rewardText ?? leaderboardRewardText(),
-            selfRank: res.selfRank ?? res.rows.find((r) => r.isSelf)?.rank ?? 0,
-            rows,
-          };
-        }
         if (res.ok) {
-          return {
-            title: noticeJson.leaderboard.title,
-            hint: res.hint ?? '',
-            rewardText: res.rewardText ?? leaderboardRewardText(),
-            selfRank: res.selfRank ?? 1,
-            rows: [
-              ...rankFriends([selfInput]).map(formatLeaderboardLine),
-              { tag: '提示', text: noticeJson.leaderboard.empty, kind: 'meta' },
-            ],
-          };
+          this.absorbLeaderboardResponse(res);
+          selfInput.weekScore = this.weekly.score;
+          return this.buildLeaderboardView(res, selfInput, profile, nowMs);
         }
       } catch {
         // 走本地兜底
       }
     }
+    return this.buildLeaderboardView(null, selfInput, profile, nowMs);
+  }
 
-    const ranked = rankFriends([selfInput]);
+  /** 上周结算到账提示（大厅弹一次）。 */
+  public takeLeaderboardRewardToast(): string | null {
+    const text = this.leaderboardRewardToast;
+    this.leaderboardRewardToast = null;
+    return text;
+  }
+
+  public getWeeklyScore(): number {
+    this.weekly = this.alignWeekly(this.weekly);
+    return this.weekly.score;
+  }
+
+  private alignWeekly(
+    raw: { week?: string; score?: number } | null | undefined,
+    nowMs = Date.now(),
+  ): { week: string; score: number } {
+    const week = localIsoWeek(nowMs);
+    if (!raw || raw.week !== week) {
+      return { week, score: 0 };
+    }
+    return { week, score: Math.max(0, Math.floor(Number(raw.score) || 0)) };
+  }
+
+  private addWeeklyScore(points: number): void {
+    this.weekly = this.alignWeekly(this.weekly);
+    const add = Math.max(0, Math.floor(points));
+    if (add <= 0) {
+      return;
+    }
+    this.weekly = { ...this.weekly, score: this.weekly.score + add };
+    void this.deps.storage.set(StorageKeys.Weekly, this.weekly);
+  }
+
+  private leaderboardProfileExtra(profile: { nickName: string; avatarUrl?: string }): {
+    nickName?: string;
+    avatarUrl?: string;
+  } {
+    return {
+      nickName:
+        profile.nickName && profile.nickName !== '微信玩家' ? profile.nickName : undefined,
+      avatarUrl: profile.avatarUrl || undefined,
+    };
+  }
+
+  /** 服务端回包里的本周分补本地（换机）和上周结算奖励。 */
+  private absorbLeaderboardResponse(res: LeaderboardResponse): void {
+    const serverWeekly = Math.max(0, Math.floor(res.selfWeekScore ?? 0));
+    if (res.week && res.week === this.weekly.week && serverWeekly > this.weekly.score) {
+      this.weekly = { ...this.weekly, score: serverWeekly };
+      void this.deps.storage.set(StorageKeys.Weekly, this.weekly);
+    }
+    const reward = res.weeklyReward;
+    if (!reward || !(reward.rank >= 1)) {
+      return;
+    }
+    const tier = leaderboardTierForRank(reward.rank);
+    const plan = planLeaderboardGrants(this.boosters.getStock(), reward.rank);
+    if (tier) {
+      this.boosters.loadStock(plan.wallet);
+      void this.persistBoosters();
+    }
+    this.leaderboardRewardToast = leaderboardRewardedText(reward.rank, plan.grants, !!tier);
+    this.deps.analytics.track('leaderboard_reward', {
+      week: reward.week,
+      rank: reward.rank,
+      score: reward.score,
+    });
+    this.events.emit({ type: 'LeaderboardReward' });
+  }
+
+  private leaderboardRowInput(
+    row: LeaderboardRowDto,
+    profile: { nickName: string; avatarUrl?: string },
+  ): FriendRankRow {
+    return {
+      ...row,
+      rank: Math.max(0, Math.floor(row.rank ?? 0)),
+      nickName: row.nickName || (row.isSelf ? profile.nickName || '微信玩家' : undefined),
+      avatarUrl: row.avatarUrl || (row.isSelf ? profile.avatarUrl : undefined),
+      wxId: row.wxId || row.userId,
+      score: row.score ?? row.maxLevel,
+    };
+  }
+
+  private buildLeaderboardTab(
+    id: LeaderboardTabId,
+    board: LeaderboardBoardDto | null,
+    selfInput: FriendRankRow,
+    profile: { nickName: string; avatarUrl?: string },
+  ): LeaderboardTab {
+    const rows = (board?.rows ?? []).map((row) => this.leaderboardRowInput(row, profile));
+    const listed = rows.find((row) => row.isSelf);
+    const selfRank = Math.max(0, Math.floor(board?.selfRank ?? listed?.rank ?? 0));
+    const selfRow: FriendRankRow = listed
+      ?? (board?.self ? this.leaderboardRowInput(board.self, profile) : null)
+      ?? { ...selfInput, rank: selfRank };
+    // 服务端的本周分可能落后于刚通关的本地分
+    if (id === 'week') {
+      selfRow.weekScore = Math.max(selfRow.weekScore ?? 0, selfInput.weekScore ?? 0);
+    }
+    const above = selfRank > 1 ? rows.find((row) => row.rank === selfRank - 1) ?? null : null;
+    return {
+      id,
+      label: id === 'week' ? noticeJson.leaderboard.tabWeek : noticeJson.leaderboard.tabLevel,
+      rule: id === 'week' ? noticeJson.leaderboard.ruleWeek : noticeJson.leaderboard.ruleLevel,
+      rows: rows.map((row) => formatLeaderboardLine(row, id)),
+      self: formatLeaderboardLine({ ...selfRow, rank: selfRank, isSelf: true }, id),
+      selfRank,
+      gapHint: leaderboardGapHint({ tab: id, selfRank, self: selfRow, above }),
+    };
+  }
+
+  private buildLeaderboardView(
+    res: LeaderboardResponse | null,
+    selfInput: FriendRankRow,
+    profile: { nickName: string; avatarUrl?: string },
+    nowMs: number,
+  ): LeaderboardView {
+    const levelBoard: LeaderboardBoardDto | null = res
+      ? res.level ?? { rows: res.rows ?? [], selfRank: res.selfRank ?? 0 }
+      : null;
+    if (levelBoard?.rows.length) {
+      this.syncLeaderboardRankSnapshot(levelBoard.rows);
+    }
+    const levelTab = levelBoard?.rows.length
+      ? this.buildLeaderboardTab('level', levelBoard, selfInput, profile)
+      : this.buildLeaderboardTab(
+        'level',
+        { rows: rankFriends([selfInput]), selfRank: 1 },
+        selfInput,
+        profile,
+      );
+    let weekBoard = res?.weekly ?? null;
+    if (!(weekBoard?.rows?.length) && (selfInput.weekScore ?? 0) > 0) {
+      weekBoard = {
+        rows: rankFriends([selfInput]),
+        selfRank: 1,
+      };
+    }
+    const weekTab = this.buildLeaderboardTab('week', weekBoard, selfInput, profile);
     return {
       title: noticeJson.leaderboard.title,
-      hint: '',
-      rewardText: leaderboardRewardText(),
-      selfRank: 1,
-      rows: ranked.map(formatLeaderboardLine),
+      hint: res?.hint ?? '',
+      rewardText: res?.rewardText ?? leaderboardRewardText(),
+      selfRank: levelTab.selfRank,
+      rows: levelTab.rows,
+      tabs: { level: levelTab, week: weekTab },
+      settleText: weeklySettleCountdownText(nowMs, res?.settleAt),
     };
   }
 
@@ -818,14 +983,139 @@ export class GameSession {
     return true;
   }
 
+  /** 每日任务面板数据；跨天先对齐到今天。 */
+  public getDailyTasksView(): DailyTasksView {
+    const aligned = applyDailyLogin(this.daily, Date.now());
+    if (aligned.data.ymd !== this.daily.ymd) {
+      this.daily = aligned.data;
+      if (aligned.grantedHammer) {
+        this.boosters.loadStock(addBoosterToWallet(this.boosters.getStock(), 'hammer', 1));
+        this.daily = { ...this.daily, bonusHammer: 0 };
+        this.dailyGrantPending = true;
+        void this.persistBoosters();
+      }
+      void this.persistDaily();
+    }
+    return viewDailyTasks(this.daily);
+  }
+
+  /** 领取单个每日任务奖励；返回到账文案，未完成或已领返回 null。 */
+  public claimDailyTask(id: DailyTaskKind): string | null {
+    this.getDailyTasksView();
+    const claimed = claimDailyTask(this.daily, id);
+    if (!claimed.reward) {
+      return null;
+    }
+    this.daily = claimed.data;
+    const text = this.grantDailyRewards([claimed.reward]);
+    void this.persistDaily();
+    this.deps.analytics.track('daily_task_claim', { task: id });
+    return text;
+  }
+
+  /** 4 个任务都领完后开宝箱；doubled 时先看激励视频，没看完不发。 */
+  public async claimDailyChest(doubled: boolean): Promise<string | null> {
+    if (!this.getDailyTasksView().chestReady) {
+      return null;
+    }
+    if (doubled) {
+      this.deps.analytics.track('ad_show', { placement: 'rewarded_revive', reason: 'daily_chest' });
+      const result = await this.deps.ads.show('rewarded_revive');
+      if (result !== 'completed') {
+        return null;
+      }
+      this.deps.analytics.track('ad_complete', { placement: 'rewarded_revive', reason: 'daily_chest' });
+    }
+    const claimed = claimDailyChest(this.daily, doubled);
+    if (!claimed.rewards) {
+      return null;
+    }
+    this.daily = claimed.data;
+    const text = this.grantDailyRewards(claimed.rewards);
+    void this.persistDaily();
+    this.deps.analytics.track('daily_chest_claim', { doubled });
+    return text;
+  }
+
+  /** 道具入包（9 个封顶），返回实际到账文案。 */
+  private grantDailyRewards(rewards: readonly DailyTaskReward[]): string {
+    let wallet = this.boosters.getStock();
+    const granted: DailyTaskReward[] = [];
+    for (const item of rewards) {
+      const next = addBoosterToWallet(wallet, item.id, item.amount);
+      granted.push({ id: item.id, amount: Math.max(0, next[item.id] - wallet[item.id]) });
+      wallet = next;
+    }
+    this.boosters.loadStock(wallet);
+    void this.persistBoosters();
+    const text = formatDailyReward(granted);
+    return text ? `领取成功：${text}` : '道具已满 9 个，先用掉一些再来领吧';
+  }
+
+  /** 局内逐步记任务进度，关末统一落盘。 */
+  private noteDailyTaskStats(patch: DailyTaskStatsPatch): void {
+    const recorded = recordDailyTaskStats(this.daily, patch, Date.now());
+    this.daily = recorded.data;
+    this.dailyTasksDirty = true;
+    for (const task of recorded.completed) {
+      this.events.emit({ type: 'DailyTaskCompleted', title: task.title });
+    }
+  }
+
+  private flushDailyTasks(): void {
+    if (!this.dailyTasksDirty) {
+      return;
+    }
+    this.dailyTasksDirty = false;
+    void this.persistDaily();
+  }
+
+  /** 交换 / 锤子 / 步数加成这类消除结算后记任务进度。 */
+  private noteResolveForDailyTasks(result: {
+    cleared: number;
+    cascadeDepth: number;
+    clearedKinds: readonly TileKind[];
+    waves: ReadonlyArray<{ specialSpawns: readonly unknown[] }>;
+  }, countChain: boolean): void {
+    let specials = 0;
+    for (const wave of result.waves) {
+      specials += wave.specialSpawns.length;
+    }
+    this.noteDailyTaskStats({
+      tiles: result.cleared,
+      specials,
+      chain: countChain ? result.cascadeDepth : 0,
+      collectedKinds: result.clearedKinds.filter((kind) => isBasicTile(kind)),
+    });
+  }
+
+  /** 最近一次通关的星级（结算页用），未通关为 0。 */
+  public getLastStars(): LevelStarCount | 0 {
+    return this.lastStars;
+  }
+
+  public getLevelStars(levelId: number): number {
+    return this.progress.getStars(levelId);
+  }
+
   private commitLevelCleared(): void {
     if (!this.level) {
       return;
     }
     const clearedLevelId = this.level.id;
     const firstClear = isFreshPlayer(this.progress.getData());
-    this.progress.markLevelCleared(clearedLevelId, this.score);
+    const stars = this.lastStars || 1;
+    this.progress.markLevelCleared(clearedLevelId, this.score, stars);
+    this.addWeeklyScore(this.score);
+    this.noteDailyTaskStats({ threeStar: stars === 3 });
+    this.dailyTasksDirty = false;
+    const before = viewDailyTasks(this.daily).tasks;
     this.noteDailyClear();
+    viewDailyTasks(this.daily).tasks.forEach((task, i) => {
+      if (task.done && !task.claimed && !before[i]?.done) {
+        this.events.emit({ type: 'DailyTaskCompleted', title: task.title });
+      }
+    });
     if (firstClear) {
       this.noteInviteFirstClear();
     }
@@ -854,13 +1144,16 @@ export class GameSession {
     const oldRank = this.lastLeaderboardSelfRank;
     const oldRanks = new Map(this.lastLeaderboardRanks);
     try {
+      this.weekly = this.alignWeekly(this.weekly);
       const res = await api.leaderboard(userId, this.getMaxClearedLevelId(), {
-        nickName:
-          profile.nickName && profile.nickName !== '微信玩家'
-            ? profile.nickName
-            : undefined,
-        avatarUrl: profile.avatarUrl || undefined,
+        ...this.leaderboardProfileExtra(profile),
+        totalScore: Math.max(0, Math.floor(this.progress.getData().totalScore || 0)),
+        weekKey: this.weekly.week,
+        weekScore: this.weekly.score,
       });
+      if (res.ok) {
+        this.absorbLeaderboardResponse(res);
+      }
       if (!res.ok || !res.rows?.length) {
         return;
       }
@@ -1046,6 +1339,8 @@ export class GameSession {
     this.goals.applyClearedKinds(result.clearedKinds);
     this.goals.syncScore(this.score);
     this.emitGoalProgress();
+    this.noteDailyTaskStats({ boosterUsed: true });
+    this.noteResolveForDailyTasks(result, false);
     this.events.emit({ type: 'CascadeDone', depth: result.cascadeDepth });
     this.events.emit({ type: 'BoardChanged', version: this.board.version });
     this.evaluateLevelOutcome();
@@ -1070,6 +1365,7 @@ export class GameSession {
       true,
     );
     this.playSfx('sfx_shuffle');
+    this.noteDailyTaskStats({ boosterUsed: true });
     this.events.emit({
       type: 'BoosterUsed',
       boosterId: 'shuffle',
@@ -1095,7 +1391,9 @@ export class GameSession {
     }
     void this.persistBoosters();
     this.movesLeft += this.extraMovesGrant;
+    this.movesGrantedThisLevel += this.extraMovesGrant;
     this.playSfx('sfx_extra');
+    this.noteDailyTaskStats({ boosterUsed: true });
     this.events.emit({
       type: 'BoosterUsed',
       boosterId: 'extraMoves',
@@ -1185,6 +1483,7 @@ export class GameSession {
   private applyBoosterRefill(id: BoosterId): void {
     if (id === 'extraMoves') {
       this.movesLeft += this.extraMovesGrant;
+      this.movesGrantedThisLevel += this.extraMovesGrant;
       this.playSfx('sfx_extra');
       this.events.emit({
         type: 'BoosterUsed',
@@ -1230,6 +1529,7 @@ export class GameSession {
   }
 
   public suspendForBackground(): void {
+    this.flushDailyTasks();
     this.deps.audio.suspendForBackground?.();
   }
 
@@ -1842,6 +2142,7 @@ export class GameSession {
     this.goals.applyClearedKinds(result.clearedKinds);
     this.goals.syncScore(this.score);
     this.emitGoalProgress();
+    this.noteResolveForDailyTasks(result, true);
 
     if (result.fell.length > 0) {
       this.events.emit({
@@ -2044,6 +2345,7 @@ export class GameSession {
         crushScore: this.crush.crushScore,
         tapCount: this.crush.tapCount,
       });
+      this.noteDailyTaskStats({ crushRound: true });
 
       if (this.level) {
         this.commitLevelCleared();
@@ -2108,6 +2410,7 @@ export class GameSession {
     if (result === 'completed') {
       this.revivePolicy.consume();
       this.movesLeft += offer.movesGranted;
+      this.movesGrantedThisLevel += offer.movesGranted;
       this.deps.analytics.track('ad_complete', {
         placement: 'rewarded_revive',
         movesGranted: offer.movesGranted,
@@ -2361,6 +2664,7 @@ export class GameSession {
    * 任意对局态中途退出回首页（放弃当前关）。
    */
   public quitToLobby(): boolean {
+    this.flushDailyTasks();
     const state = this.fsm.getCurrent();
     if (state === 'Lobby' || state === 'Boot') {
       return true;
@@ -2397,6 +2701,12 @@ export class GameSession {
         this.fsm.transitionTo('Resolving');
       }
       this.fsm.transitionTo('LevelWon');
+      // 星级按「靠自己省下的步数」算，必须在步数加成清零之前
+      this.lastStars = starsForClear({
+        movesLeft: this.movesLeft,
+        movesTotal: this.level.moves,
+        movesGranted: this.movesGrantedThisLevel,
+      });
       // 胜利音效改由结算页打开时播放，与庆祝动画对齐
       this.events.emit({
         type: 'LevelWon',
@@ -2429,6 +2739,7 @@ export class GameSession {
 
     if (this.movesLeft <= 0) {
       this.fsm.transitionTo('LevelFailed');
+      this.flushDailyTasks();
       this.playSfx('sfx_fail');
       this.events.emit({ type: 'LevelFailed', levelId: this.level.id });
       this.deps.analytics.track('level_fail', { levelId: this.level.id });
@@ -2518,6 +2829,7 @@ export class GameSession {
     this.goals?.applyClearedKinds(result.clearedKinds);
     this.goals?.syncScore(this.score);
     this.emitGoalProgress();
+    this.noteResolveForDailyTasks(result, false);
 
     this.events.emit({
       type: 'TilesCleared',

@@ -1,0 +1,6 @@
+{
+  "enabled": false,
+  "envId": "",
+  "collection": "player_saves",
+  "_comment": "抖音侧不使用微信云开发；进度仅本地存储。若后续接字节云服务，在此启用并替换适配器。"
+}

@@ -14,12 +14,12 @@
   },
   "leaderboard": {
     "limit": 50,
-    "rewardRanks": 3,
     "settleWeekday": 1,
     "settleHour": 0,
-    "rewards": [
-      { "id": "hammer", "amount": 1 },
-      { "id": "shuffle", "amount": 1 }
+    "tiers": [
+      { "minRank": 1, "maxRank": 1, "rewards": [{ "id": "hammer", "amount": 3 }, { "id": "shuffle", "amount": 2 }] },
+      { "minRank": 2, "maxRank": 3, "rewards": [{ "id": "hammer", "amount": 2 }, { "id": "shuffle", "amount": 1 }] },
+      { "minRank": 4, "maxRank": 10, "rewards": [{ "id": "hammer", "amount": 1 }] }
     ]
   }
 }

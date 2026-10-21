@@ -12,12 +12,80 @@
     MahjongHallNewDismissed: "crush.player.mahjongHallNewDismissed",
     MahjongHallProgress: "crush.player.mahjongHall",
     Invite: "crush.player.invite",
-    DeviceId: "crush.player.device"
+    DeviceId: "crush.player.device",
+    /** 本周榜累计分 { week, score } */
+    Weekly: "crush.player.weekly"
   };
+
+  // src/core/utils/miniGameHost.ts
+  function readMiniGameHost() {
+    const id = globalThis.__CRUSH_HOST__;
+    if (id === "douyin" || id === "wechat") {
+      return id;
+    }
+    if (typeof tt !== "undefined") {
+      return "douyin";
+    }
+    if (typeof wx !== "undefined") {
+      return "wechat";
+    }
+    return "unknown";
+  }
+  function isDouyinMiniGameHost() {
+    return readMiniGameHost() === "douyin";
+  }
+  function readMiniProgramEnvVersion() {
+    var _a, _b, _c, _d;
+    try {
+      if (typeof wx !== "undefined" && typeof wx.getAccountInfoSync === "function") {
+        const env = (_b = (_a = wx.getAccountInfoSync()) == null ? void 0 : _a.miniProgram) == null ? void 0 : _b.envVersion;
+        if (env === "develop" || env === "trial" || env === "release") {
+          return env;
+        }
+      }
+    } catch (e) {
+    }
+    try {
+      if (typeof tt !== "undefined" && typeof tt.getEnvInfoSync === "function") {
+        const envType = (_d = (_c = tt.getEnvInfoSync()) == null ? void 0 : _c.microapp) == null ? void 0 : _d.envType;
+        if (envType === "development" || envType === "develop") {
+          return "develop";
+        }
+        if (envType === "preview" || envType === "trial") {
+          return "trial";
+        }
+        if (envType === "production" || envType === "release") {
+          return "release";
+        }
+      }
+    } catch (e) {
+    }
+    return null;
+  }
 
   // src/core/adapters/WxStorageAdapter.ts
   var WxStorageAdapter = class {
+    useSyncStorage() {
+      if (isDouyinMiniGameHost() && typeof wx.getStorageSync === "function") {
+        return true;
+      }
+      return typeof wx.getStorageSync === "function" && typeof wx.getStorage !== "function";
+    }
+    readSync(key) {
+      try {
+        const data = wx.getStorageSync(key);
+        if (data === void 0 || data === "") {
+          return null;
+        }
+        return data;
+      } catch (e) {
+        return null;
+      }
+    }
     async get(key) {
+      if (this.useSyncStorage()) {
+        return this.readSync(key);
+      }
       return new Promise((resolve, reject) => {
         wx.getStorage({
           key,
@@ -40,6 +108,10 @@
       });
     }
     async set(key, value) {
+      if (this.useSyncStorage()) {
+        wx.setStorageSync(key, value);
+        return;
+      }
       return new Promise((resolve, reject) => {
         wx.setStorage({
           key,
@@ -50,6 +122,13 @@
       });
     }
     async remove(key) {
+      if (this.useSyncStorage()) {
+        try {
+          wx.removeStorageSync(key);
+        } catch (e) {
+        }
+        return;
+      }
       return new Promise((resolve, reject) => {
         wx.removeStorage({
           key,
@@ -65,6 +144,10 @@
       });
     }
     async clear() {
+      if (this.useSyncStorage()) {
+        wx.clearStorageSync();
+        return;
+      }
       return new Promise((resolve, reject) => {
         wx.clearStorage({
           success: () => resolve(),
@@ -675,6 +758,151 @@
     return Math.max(0, finitePx(windowHeight, 667) - style.top);
   }
 
+  // src/core/utils/canvas2dBinding.ts
+  function findExistingMainCanvas() {
+    var _a, _b;
+    const g = globalThis;
+    const candidates = [(_a = g.GameGlobal) == null ? void 0 : _a.canvas, g.canvas, (_b = g.window) == null ? void 0 : _b.canvas];
+    for (const item of candidates) {
+      if (item && typeof item.getContext === "function") {
+        return item;
+      }
+    }
+    return null;
+  }
+  function compileShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    if (!shader) {
+      return null;
+    }
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      console.warn("[crush-crush] shader compile", gl.getShaderInfoLog(shader));
+      gl.deleteShader(shader);
+      return null;
+    }
+    return shader;
+  }
+  function createWebglPresenter(screen, gl, source) {
+    const vs = compileShader(
+      gl,
+      gl.VERTEX_SHADER,
+      "attribute vec2 a_pos;varying vec2 v_uv;void main(){v_uv=a_pos*0.5+0.5;gl_Position=vec4(a_pos,0.0,1.0);}"
+    );
+    const fs = compileShader(
+      gl,
+      gl.FRAGMENT_SHADER,
+      "precision mediump float;varying vec2 v_uv;uniform sampler2D u_tex;void main(){gl_FragColor=texture2D(u_tex,vec2(v_uv.x,1.0-v_uv.y));}"
+    );
+    if (!vs || !fs) {
+      return null;
+    }
+    const prog = gl.createProgram();
+    if (!prog) {
+      return null;
+    }
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.warn("[crush-crush] program link", gl.getProgramInfoLog(prog));
+      return null;
+    }
+    const tex = gl.createTexture();
+    const buf = gl.createBuffer();
+    if (!tex || !buf) {
+      return null;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
+      gl.STATIC_DRAW
+    );
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const locPos = gl.getAttribLocation(prog, "a_pos");
+    const locTex = gl.getUniformLocation(prog, "u_tex");
+    return () => {
+      const w = screen.width || 1;
+      const h = screen.height || 1;
+      gl.viewport(0, 0, w, h);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      try {
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          source
+        );
+      } catch (err) {
+        console.warn("[crush-crush] texImage2D failed", err);
+        return;
+      }
+      gl.useProgram(prog);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.uniform1i(locTex, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.enableVertexAttribArray(locPos);
+      gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    };
+  }
+  var CANVAS_BINDING_CACHE_KEY = "__CRUSH_CANVAS_2D_BINDING__";
+  function bindMainCanvas2dOnce() {
+    if (typeof wx === "undefined") {
+      throw new Error("wx/tt runtime missing");
+    }
+    const screen = findExistingMainCanvas();
+    if (screen) {
+      const onScreen2d = screen.getContext("2d");
+      if (onScreen2d) {
+        return { canvas: screen, ctx: onScreen2d };
+      }
+    }
+    if (typeof wx.createCanvas !== "function") {
+      throw new Error("createCanvas unavailable");
+    }
+    const drawCanvas = wx.createCanvas();
+    const drawCtx = drawCanvas.getContext("2d");
+    if (!drawCtx) {
+      throw new Error("2d context unavailable on createCanvas");
+    }
+    if (!screen || screen === drawCanvas) {
+      return { canvas: drawCanvas, ctx: drawCtx };
+    }
+    if (isDouyinMiniGameHost()) {
+      const gl = screen.getContext("webgl") || screen.getContext("webgl2");
+      if (gl) {
+        const present = createWebglPresenter(screen, gl, drawCanvas);
+        if (present) {
+          console.info("[crush-crush] douyin helium: offscreen 2d + webgl present");
+          return { canvas: drawCanvas, ctx: drawCtx, present };
+        }
+      }
+    }
+    console.warn("[crush-crush] using secondary 2d canvas without presenter");
+    return { canvas: drawCanvas, ctx: drawCtx };
+  }
+  function bindMainCanvas2d() {
+    const g = globalThis;
+    if (g[CANVAS_BINDING_CACHE_KEY]) {
+      return g[CANVAS_BINDING_CACHE_KEY];
+    }
+    const binding = bindMainCanvas2dOnce();
+    g[CANVAS_BINDING_CACHE_KEY] = binding;
+    if (isDouyinMiniGameHost() && !binding.present) {
+      console.warn("[crush-crush] douyin: no canvas presenter \u2014 screen may stay on splash");
+    }
+    return binding;
+  }
+
   // src/core/utils/wxHost.ts
   var FALLBACK_WX_INFO = {
     brand: "",
@@ -778,6 +1006,16 @@
   }
   function isWxDevtoolsHost() {
     var _a;
+    if (isDouyinMiniGameHost()) {
+      try {
+        const nav = globalThis.navigator;
+        const ua = (nav == null ? void 0 : nav.userAgent) || "";
+        if (/bytedance|devtools|ide/i.test(ua)) {
+          return true;
+        }
+      } catch (e) {
+      }
+    }
     const info = readWxInfo();
     const platform = platformOf(info);
     if (platform === "devtools") {
@@ -802,18 +1040,7 @@
     return isWxDevtoolsHost() || isWxDesktopClient();
   }
   function readWxMiniProgramEnvVersion() {
-    var _a, _b;
-    try {
-      if (typeof wx === "undefined" || typeof wx.getAccountInfoSync !== "function") {
-        return null;
-      }
-      const env = (_b = (_a = wx.getAccountInfoSync()) == null ? void 0 : _a.miniProgram) == null ? void 0 : _b.envVersion;
-      if (env === "develop" || env === "trial" || env === "release") {
-        return env;
-      }
-    } catch (e) {
-    }
-    return null;
+    return readMiniProgramEnvVersion();
   }
   function shouldUnlockAllLevelsForPreview() {
     const env = readWxMiniProgramEnvVersion();
@@ -824,15 +1051,6 @@
       return true;
     }
     return isWxDevtoolsHost();
-  }
-  function resolveWxMainCanvas() {
-    var _a, _b;
-    const g = globalThis;
-    const existing = (_b = (_a = g.GameGlobal) == null ? void 0 : _a.canvas) != null ? _b : g.canvas;
-    if (existing && typeof existing.getContext === "function") {
-      return existing;
-    }
-    return wx.createCanvas();
   }
   function isWxCustomAdHostSupported(platform) {
     const value = platform.toLowerCase();
@@ -2137,7 +2355,9 @@
           ymd: today,
           bonusHammer: DAILY_HAMMER_GRANT,
           clearsToday: 0,
-          ...EMPTY_BOOSTER_DAILY
+          ...EMPTY_BOOSTER_DAILY,
+          // 跨天清空每日任务计数（任务表由日期重新生成）
+          tasks: void 0
         },
         grantedHammer: true
       };
@@ -2147,7 +2367,8 @@
         ymd: prev.ymd,
         bonusHammer: prev.bonusHammer,
         clearsToday: prev.clearsToday,
-        ...flags
+        ...flags,
+        ...prev.tasks ? { tasks: prev.tasks } : {}
       },
       grantedHammer: false
     };
@@ -2157,16 +2378,6 @@
     return {
       ...aligned,
       clearsToday: aligned.clearsToday + 1
-    };
-  }
-  function lobbyDailyProgress(clearsToday, shuffleGranted) {
-    const done = Math.max(0, Math.min(DAILY_GOAL_CLEARS, Math.floor(clearsToday) || 0));
-    return {
-      done,
-      goal: DAILY_GOAL_CLEARS,
-      label: `\u4ECA\u65E5\u901A\u5173\u8FDB\u5EA6 [${done}/${DAILY_GOAL_CLEARS}]`,
-      readyToClaim: done >= DAILY_GOAL_CLEARS && !shuffleGranted,
-      claimed: shuffleGranted && done >= DAILY_GOAL_CLEARS
     };
   }
   function claimDailyShuffle(data) {
@@ -2179,8 +2390,298 @@
     };
   }
 
+  // src/logic/board/TileType.ts
+  var BASIC_TILE_KINDS = [
+    1 /* Red */,
+    2 /* Blue */,
+    3 /* Green */,
+    4 /* Yellow */,
+    5 /* Purple */,
+    9 /* Bear */,
+    10 /* Pig */,
+    11 /* Panda */,
+    12 /* Corgi */
+  ];
+  function isBasicTile(kind) {
+    return BASIC_TILE_KINDS.includes(kind);
+  }
+  function isSpecialTile(kind) {
+    return kind === 6 /* Bomb */ || kind === 7 /* ColorBomb */;
+  }
+  function isMatchable(kind) {
+    return isBasicTile(kind);
+  }
+  function isHole(kind) {
+    return kind === 8 /* Hole */;
+  }
+
+  // src/logic/economy/DailyTasks.ts
+  var DAILY_TASK_COUNT = 4;
+  var DAILY_CHEST_REWARDS = [{ id: "hammer", amount: 1 }];
+  var EMPTY_DAILY_TASK_COUNTERS = {
+    tiles: 0,
+    specials: 0,
+    maxChain: 0,
+    crushRounds: 0,
+    collected: {},
+    threeStars: 0,
+    boostersUsed: 0,
+    claimed: [],
+    chestClaimed: false
+  };
+  var FIXED_TASK = {
+    id: "clear_levels",
+    target: DAILY_GOAL_CLEARS,
+    reward: { id: "shuffle", amount: 1 }
+  };
+  var POOL = [
+    { id: "clear_tiles", targets: [220, 260, 300], reward: { id: "hammer", amount: 1 } },
+    { id: "make_specials", targets: [4, 5, 6], reward: { id: "extraMoves", amount: 1 } },
+    { id: "combo_chain", targets: [4], reward: { id: "extraMoves", amount: 1 } },
+    { id: "crush_rounds", targets: [1], reward: { id: "extraMoves", amount: 1 } },
+    { id: "collect_kind", targets: [55, 75], reward: { id: "hammer", amount: 1 } },
+    { id: "three_star", targets: [2, 3], reward: { id: "hammer", amount: 1 } },
+    { id: "use_boosters", targets: [2, 3], reward: { id: "shuffle", amount: 1 } }
+  ];
+  var COLLECT_KINDS = [
+    1 /* Red */,
+    2 /* Blue */,
+    3 /* Green */,
+    4 /* Yellow */
+  ];
+  var KIND_NAME = {
+    [1 /* Red */]: "\u7EA2\u72D0",
+    [2 /* Blue */]: "\u84DD\u5154",
+    [3 /* Green */]: "\u7EFF\u86D9",
+    [4 /* Yellow */]: "\u9EC4\u9E21"
+  };
+  var VALID_KINDS = /* @__PURE__ */ new Set([FIXED_TASK.id, ...POOL.map((item) => item.id)]);
+  function hashYmd(ymd) {
+    let h = 2166136261;
+    for (let i = 0; i < ymd.length; i += 1) {
+      h ^= ymd.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+  function nextRand(state) {
+    state.s = Math.imul(state.s, 1664525) + 1013904223 >>> 0;
+    return state.s / 4294967296;
+  }
+  function dailyTasksFor(ymd) {
+    const rand = { s: hashYmd(ymd || "none") || 1 };
+    const pool = POOL.slice();
+    for (let i = pool.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(nextRand(rand) * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const picked = pool.slice(0, DAILY_TASK_COUNT - 1).map((item) => {
+      const target = item.targets[Math.floor(nextRand(rand) * item.targets.length)];
+      const def = { id: item.id, target, reward: { ...item.reward } };
+      if (item.id === "collect_kind") {
+        def.tileKind = COLLECT_KINDS[Math.floor(nextRand(rand) * COLLECT_KINDS.length)];
+      }
+      return def;
+    });
+    return [{ ...FIXED_TASK, reward: { ...FIXED_TASK.reward } }, ...picked];
+  }
+  function dailyTaskTitle(def) {
+    var _a, _b;
+    const t = def.target;
+    switch (def.id) {
+      case "clear_levels":
+        return `\u901A\u5173 ${t} \u5173`;
+      case "clear_tiles":
+        return `\u6D88\u9664\u840C\u5BA0${t}\u53EA`;
+      case "make_specials":
+        return `\u5408\u6210 ${t} \u4E2A\u95EA\u5149\u6216\u732B\u5934\u9E70`;
+      case "combo_chain":
+        return `\u4E00\u6B65\u6253\u51FA ${t} \u8FDE\u51FB`;
+      case "crush_rounds":
+        return t <= 1 ? "\u7C89\u788E1\u5C40" : `\u7C89\u788E${t}\u5C40`;
+      case "collect_kind":
+        return `\u6536\u96C6 ${t} \u53EA${(_b = KIND_NAME[(_a = def.tileKind) != null ? _a : 1 /* Red */]) != null ? _b : "\u840C\u5BA0"}`;
+      case "three_star":
+        return `\u4E09\u661F\u901A\u5173 ${t} \u6B21`;
+      case "use_boosters":
+        return `\u4F7F\u7528\u9053\u5177 ${t} \u6B21`;
+      default:
+        return "\u6BCF\u65E5\u4EFB\u52A1";
+    }
+  }
+  function nonNeg(value) {
+    const n = Math.floor(Number(value));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+  function parseDailyTaskCounters(raw) {
+    if (!raw || typeof raw !== "object") {
+      return { ...EMPTY_DAILY_TASK_COUNTERS, collected: {}, claimed: [] };
+    }
+    const data = raw;
+    const collected = {};
+    if (data.collected && typeof data.collected === "object") {
+      for (const [key, value] of Object.entries(data.collected)) {
+        const n = nonNeg(value);
+        if (n > 0) {
+          collected[key] = n;
+        }
+      }
+    }
+    const claimed = Array.isArray(data.claimed) ? data.claimed.filter((id) => typeof id === "string" && VALID_KINDS.has(id)) : [];
+    return {
+      tiles: nonNeg(data.tiles),
+      specials: nonNeg(data.specials),
+      maxChain: nonNeg(data.maxChain),
+      crushRounds: nonNeg(data.crushRounds),
+      collected,
+      threeStars: nonNeg(data.threeStars),
+      boostersUsed: nonNeg(data.boostersUsed),
+      claimed: [...new Set(claimed)],
+      chestClaimed: !!data.chestClaimed
+    };
+  }
+  function mergeDailyTaskCounters(a, b) {
+    var _a;
+    const x = parseDailyTaskCounters(a);
+    const y = parseDailyTaskCounters(b);
+    const collected = { ...x.collected };
+    for (const [key, value] of Object.entries(y.collected)) {
+      collected[key] = Math.max((_a = collected[key]) != null ? _a : 0, value);
+    }
+    return {
+      tiles: Math.max(x.tiles, y.tiles),
+      specials: Math.max(x.specials, y.specials),
+      maxChain: Math.max(x.maxChain, y.maxChain),
+      crushRounds: Math.max(x.crushRounds, y.crushRounds),
+      collected,
+      threeStars: Math.max(x.threeStars, y.threeStars),
+      boostersUsed: Math.max(x.boostersUsed, y.boostersUsed),
+      claimed: [.../* @__PURE__ */ new Set([...x.claimed, ...y.claimed])],
+      chestClaimed: x.chestClaimed || y.chestClaimed
+    };
+  }
+  function progressOf(def, data, c) {
+    var _a, _b;
+    switch (def.id) {
+      case "clear_levels":
+        return data.clearsToday;
+      case "clear_tiles":
+        return c.tiles;
+      case "make_specials":
+        return c.specials;
+      case "combo_chain":
+        return c.maxChain;
+      case "crush_rounds":
+        return c.crushRounds;
+      case "collect_kind":
+        return (_b = c.collected[String((_a = def.tileKind) != null ? _a : 1 /* Red */)]) != null ? _b : 0;
+      case "three_star":
+        return c.threeStars;
+      case "use_boosters":
+        return c.boostersUsed;
+      default:
+        return 0;
+    }
+  }
+  function isClaimed(def, data, c) {
+    if (c.claimed.includes(def.id)) {
+      return true;
+    }
+    return def.id === "clear_levels" && !!data.playShuffleGranted;
+  }
+  function viewDailyTasks(data) {
+    const counters = parseDailyTaskCounters(data.tasks);
+    const tasks = dailyTasksFor(data.ymd).map((def) => {
+      const progress = Math.min(def.target, progressOf(def, data, counters));
+      return {
+        ...def,
+        title: dailyTaskTitle(def),
+        progress,
+        done: progress >= def.target,
+        claimed: isClaimed(def, data, counters)
+      };
+    });
+    const allClaimed = tasks.every((task) => task.claimed);
+    const chestReady = allClaimed && !counters.chestClaimed;
+    const claimable = tasks.filter((task) => task.done && !task.claimed).length + (chestReady ? 1 : 0);
+    return {
+      tasks,
+      claimable,
+      chestReady,
+      chestClaimed: counters.chestClaimed,
+      chest: DAILY_CHEST_REWARDS.map((item) => ({ ...item }))
+    };
+  }
+  function recordDailyTaskStats(data, patch, nowMs) {
+    var _a;
+    const aligned = applyDailyLogin(data, nowMs).data;
+    const before = viewDailyTasks(aligned).tasks;
+    const c = parseDailyTaskCounters(aligned.tasks);
+    c.tiles += nonNeg(patch.tiles);
+    c.specials += nonNeg(patch.specials);
+    c.maxChain = Math.max(c.maxChain, nonNeg(patch.chain));
+    if (patch.crushRound) {
+      c.crushRounds += 1;
+    }
+    if (patch.collectedKinds) {
+      for (const kind of patch.collectedKinds) {
+        const key = String(kind);
+        c.collected[key] = ((_a = c.collected[key]) != null ? _a : 0) + 1;
+      }
+    }
+    if (patch.threeStar) {
+      c.threeStars += 1;
+    }
+    if (patch.boosterUsed) {
+      c.boostersUsed += 1;
+    }
+    const next = { ...aligned, tasks: c };
+    const after = viewDailyTasks(next).tasks;
+    const completed = after.filter((task, i) => task.done && !task.claimed && !before[i].done);
+    return { data: next, completed };
+  }
+  function claimDailyTask(data, taskId) {
+    const view = viewDailyTasks(data);
+    const task = view.tasks.find((item) => item.id === taskId);
+    if (!task || !task.done || task.claimed) {
+      return { data, reward: null };
+    }
+    const c = parseDailyTaskCounters(data.tasks);
+    c.claimed = [...c.claimed, task.id];
+    const next = {
+      ...data,
+      tasks: c,
+      playShuffleGranted: task.id === "clear_levels" ? true : data.playShuffleGranted
+    };
+    return { data: next, reward: { ...task.reward } };
+  }
+  function claimDailyChest(data, doubled) {
+    if (!viewDailyTasks(data).chestReady) {
+      return { data, rewards: null };
+    }
+    const c = parseDailyTaskCounters(data.tasks);
+    c.chestClaimed = true;
+    const factor = doubled ? 2 : 1;
+    return {
+      data: { ...data, tasks: c },
+      rewards: DAILY_CHEST_REWARDS.map((item) => ({ id: item.id, amount: item.amount * factor }))
+    };
+  }
+  var BOOSTER_NAME = {
+    hammer: "\u9524\u5B50",
+    shuffle: "\u91CD\u6392",
+    extraMoves: "\u52A0\u6B65"
+  };
+  function formatDailyReward(rewards) {
+    return rewards.filter((item) => item.amount > 0).map((item) => `${BOOSTER_NAME[item.id]} x${item.amount}`).join("\u3001");
+  }
+
   // src/logic/economy/ladderCoins.ts
   var LADDER_SCORE_PER_COIN = 100;
+  function formatLadderCoinChip(coins) {
+    const n = Math.max(0, Math.floor(coins));
+    return n > 0 ? `\u9986${n}` : "\u99860";
+  }
   function ladderCoinsFromScore(score) {
     if (!Number.isFinite(score) || score <= 0) {
       return 0;
@@ -2252,6 +2753,18 @@
         scores[String(Math.floor(id))] = score;
       }
     }
+    const stars = {};
+    const rawStars = data.levelStars;
+    if (rawStars && typeof rawStars === "object") {
+      for (const [key, value] of Object.entries(rawStars)) {
+        const id = Number(key);
+        const n = Math.floor(Number(value));
+        if (!Number.isFinite(id) || id < 1 || !Number.isFinite(n) || n < 1) {
+          continue;
+        }
+        stars[String(Math.floor(id))] = Math.min(3, n);
+      }
+    }
     const scoreIds = Object.keys(scores).map((k) => Number(k));
     const maxScored = scoreIds.length > 0 ? Math.max(...scoreIds) : 0;
     let highest = asPositiveInt(data.highestLevelId, 1);
@@ -2265,6 +2778,7 @@
       totalScore: asNonNegInt(data.totalScore, 0),
       lastPlayedLevelId: lastPlayed,
       levelScores: scores,
+      levelStars: stars,
       ladderCoinsSpent: asNonNegInt(data.ladderCoinsSpent, 0)
     };
   }
@@ -2276,11 +2790,17 @@
       this.data = normalizeLevelProgressData(data);
     }
     getData() {
-      var _a;
+      var _a, _b;
       return {
         ...this.data,
-        levelScores: { ...(_a = this.data.levelScores) != null ? _a : {} }
+        levelScores: { ...(_a = this.data.levelScores) != null ? _a : {} },
+        levelStars: { ...(_b = this.data.levelStars) != null ? _b : {} }
       };
+    }
+    /** 该关历史最高星级；没记录返回 0 */
+    getStars(levelId) {
+      var _a, _b;
+      return (_b = (_a = this.data.levelStars) == null ? void 0 : _a[String(levelId)]) != null ? _b : 0;
     }
     getHighestLevelId() {
       return this.data.highestLevelId;
@@ -2317,12 +2837,17 @@
     /**
      * 通关记账：刷新该关最高分，并推进可挑战关卡。
      */
-    markLevelCleared(levelId, score) {
-      var _a, _b;
+    markLevelCleared(levelId, score, stars = 0) {
+      var _a, _b, _c, _d;
       this.data.lastPlayedLevelId = levelId;
       const scores = (_a = this.data.levelScores) != null ? _a : this.data.levelScores = {};
       const key = String(levelId);
-      const prev = (_b = scores[key]) != null ? _b : 0;
+      const starCount = Math.min(3, Math.max(0, Math.floor(stars)));
+      if (starCount > 0) {
+        const starMap = (_b = this.data.levelStars) != null ? _b : this.data.levelStars = {};
+        starMap[key] = Math.max((_c = starMap[key]) != null ? _c : 0, starCount);
+      }
+      const prev = (_d = scores[key]) != null ? _d : 0;
       if (score > prev) {
         scores[key] = score;
         this.data.totalScore += score - prev;
@@ -2409,7 +2934,7 @@
 
   // src/logic/save/mergePlayerCloudSave.ts
   function mergeLevelProgress(local, remote) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f;
     const a = normalizeLevelProgressData(local);
     const b = normalizeLevelProgressData(remote);
     const scores = { ...(_a = a.levelScores) != null ? _a : {} };
@@ -2419,11 +2944,16 @@
         scores[key] = value;
       }
     }
+    const stars = { ...(_d = a.levelStars) != null ? _d : {} };
+    for (const [key, value] of Object.entries((_e = b.levelStars) != null ? _e : {})) {
+      stars[key] = Math.max((_f = stars[key]) != null ? _f : 0, value);
+    }
     return normalizeLevelProgressData({
       highestLevelId: Math.max(a.highestLevelId, b.highestLevelId),
       totalScore: Math.max(a.totalScore, b.totalScore),
       lastPlayedLevelId: a.highestLevelId >= b.highestLevelId ? a.lastPlayedLevelId : b.lastPlayedLevelId,
       levelScores: scores,
+      levelStars: stars,
       ladderCoinsSpent: Math.max(ladderCoinsSpent(a), ladderCoinsSpent(b))
     });
   }
@@ -2462,7 +2992,8 @@
       shareGroupShuffle: flagsA.shareGroupShuffle || flagsB.shareGroupShuffle,
       shareGroupExtra: flagsA.shareGroupExtra || flagsB.shareGroupExtra,
       playShuffleGranted: flagsA.playShuffleGranted || flagsB.playShuffleGranted,
-      playExtraGranted: flagsA.playExtraGranted || flagsB.playExtraGranted
+      playExtraGranted: flagsA.playExtraGranted || flagsB.playExtraGranted,
+      tasks: mergeDailyTaskCounters(a.tasks, b.tasks)
     };
   }
   function mergePlayerCloudSnapshots(local, remote) {
@@ -2492,31 +3023,6 @@
         remote.mahjong
       )
     };
-  }
-
-  // src/logic/board/TileType.ts
-  var BASIC_TILE_KINDS = [
-    1 /* Red */,
-    2 /* Blue */,
-    3 /* Green */,
-    4 /* Yellow */,
-    5 /* Purple */,
-    9 /* Bear */,
-    10 /* Pig */,
-    11 /* Panda */,
-    12 /* Corgi */
-  ];
-  function isBasicTile(kind) {
-    return BASIC_TILE_KINDS.includes(kind);
-  }
-  function isSpecialTile(kind) {
-    return kind === 6 /* Bomb */ || kind === 7 /* ColorBomb */;
-  }
-  function isMatchable(kind) {
-    return isBasicTile(kind);
-  }
-  function isHole(kind) {
-    return kind === 8 /* Hole */;
   }
 
   // src/logic/board/BoardModel.ts
@@ -5025,7 +5531,7 @@
       starPerTriple: 1
     },
     session: {
-      timeoutSec: 120
+      timeoutSec: 720
     },
     generation: {
       seedVersion: 1,
@@ -5083,7 +5589,7 @@
       level: Math.floor(o.level),
       themeId: typeof o.themeId === "string" ? o.themeId : void 0,
       typeCount: typeof o.typeCount === "number" ? clampInt(o.typeCount, 6, 3, 20) : void 0,
-      timeoutSec: typeof o.timeoutSec === "number" ? clampInt(o.timeoutSec, 120, 60, 3600) : void 0,
+      timeoutSec: typeof o.timeoutSec === "number" ? clampInt(o.timeoutSec, 720, 60, 3600) : void 0,
       note: typeof o.note === "string" ? o.note : void 0
     })) : [];
     return {
@@ -5094,7 +5600,7 @@
         starPerTriple: clampInt((_e = raw.economy) == null ? void 0 : _e.starPerTriple, 1, 0, 100)
       },
       session: {
-        timeoutSec: clampInt((_f = raw.session) == null ? void 0 : _f.timeoutSec, 120, 60, 3600)
+        timeoutSec: clampInt((_f = raw.session) == null ? void 0 : _f.timeoutSec, 720, 60, 3600)
       },
       generation: {
         seedVersion: clampInt(gen.seedVersion, 1, 1, 1e4),
@@ -6282,12 +6788,12 @@
     },
     leaderboard: {
       limit: 50,
-      rewardRanks: 3,
       settleWeekday: 1,
       settleHour: 0,
-      rewards: [
-        { id: "hammer", amount: 1 },
-        { id: "shuffle", amount: 1 }
+      tiers: [
+        { minRank: 1, maxRank: 1, rewards: [{ id: "hammer", amount: 3 }, { id: "shuffle", amount: 2 }] },
+        { minRank: 2, maxRank: 3, rewards: [{ id: "hammer", amount: 2 }, { id: "shuffle", amount: 1 }] },
+        { minRank: 4, maxRank: 10, rewards: [{ id: "hammer", amount: 1 }] }
       ]
     }
   };
@@ -6335,15 +6841,35 @@
     difficultyUpParty: "\u96BE\u5EA6\u63D0\u5347 \xB7 \u5F02\u5F62\u5173\u5361",
     difficultyUpIce: "\u96BE\u5EA6\u63D0\u5347 \xB7 \u51B0\u96EA\u57CB\u85CF",
     leaderboard: {
-      title: "\u597D\u53CB\u6392\u884C",
+      title: "\u6392\u884C\u699C",
+      tabLevel: "\u5173\u5361\u699C",
+      tabWeek: "\u672C\u5468\u699C",
+      ruleLevel: "\u6309\u6700\u9AD8\u901A\u5173\u5173\u5361\u6392\u540D\uFF0C\u540C\u5173\u6BD4\u5404\u5173\u6700\u9AD8\u5206\u4E4B\u548C",
+      ruleWeek: "\u672C\u5468\u6BCF\u6B21\u901A\u5173\u5F97\u5206\u7D2F\u8BA1\uFF08\u91CD\u73A9\u4E5F\u7B97\uFF09",
+      rewardTitle: "\u5468\u5956\u52B1",
+      settleNote: "\u6BCF\u5468\u4E00 0 \u70B9\u6309\u540D\u6B21\u53D1\u5956",
       passed: "\u4F60\u88AB {name} \u8D85\u8FC7\u4E86",
       closeGap: "\u8DDD\u79BB\u4E0A\u4E00\u540D\u53EA\u5DEE 1 \u5173\uFF0C\u52A0\u6CB9\uFF01",
       notify: "{name} \u8D85\u8FC7\u4E86\u4F60\u7684\u6392\u540D",
-      reward: "\u6BCF\u5468\u4E00\u7ED3\u7B97\uFF0C\u524D 3 \u540D\u5F97\u9524\u5B50 x{hammer}\u3001\u91CD\u6392 x{shuffle}",
-      rewarded: "\u4E0A\u5468\u524D 3 \u540D\u7ED3\u7B97\uFF1A\u9524\u5B50 x{hammer}\uFF0C\u91CD\u6392 x{shuffle}",
+      reward: "\u5468\u5956\u52B1\uFF1A{tiers}",
+      rewarded: "\u4E0A\u5468\u672C\u5468\u699C\u7B2C {rank} \u540D\uFF01\u5956\u52B1 {rewards} \u5DF2\u5230\u8D26",
+      rewardedFull: "\u4E0A\u5468\u672C\u5468\u699C\u7B2C {rank} \u540D\uFF01\u9053\u5177\u5DF2\u6EE1 9 \u4E2A\uFF0C\u672C\u6B21\u5956\u52B1\u672A\u80FD\u53D1\u653E",
+      rewardedNone: "\u4E0A\u5468\u672C\u5468\u699C\u7B2C {rank} \u540D\uFF0C\u524D {top} \u540D\u6709\u5956\u52B1\uFF0C\u672C\u5468\u7EE7\u7EED\u52A0\u6CB9\uFF01",
       empty: "\u6682\u65F6\u8FD8\u6CA1\u6709\u5176\u4ED6\u73A9\u5BB6\u4E0A\u699C\u3002",
+      weekEmpty: "\u672C\u5468\u8FD8\u6CA1\u4EBA\u4E0A\u699C\uFF0C\u901A\u5173\u4E00\u5173\u5C31\u80FD\u62FF\u7B2C\u4E00\uFF01",
       unavailable: "\u6392\u884C\u6682\u65F6\u6253\u4E0D\u5F00\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+      invite: "\u9080\u8BF7\u597D\u53CB\u6765\u6BD4\u62FC",
       stockFull: "{name}\u5DF2\u6709 9 \u4E2A\uFF0C\u8FD9\u6B21\u6CA1\u6709\u518D\u53D1\u653E"
+    },
+    dailyTasks: {
+      title: "\u6BCF\u65E5\u4EFB\u52A1",
+      refresh: "\u6BCF\u5929 0 \u70B9\u5237\u65B0",
+      chest: "\u6D3B\u8DC3\u5B9D\u7BB1",
+      chestHint: "\u9886\u5B8C 4 \u4E2A\u4EFB\u52A1\u5956\u52B1\u5373\u53EF\u5F00\u542F",
+      chestClaim: "\u76F4\u63A5\u9886\u53D6",
+      chestDouble: "\u770B\u89C6\u9891\u53CC\u500D",
+      lobbyBar: "\u6BCF\u65E5\u4EFB\u52A1 \xB7 {n} \u4E2A\u5956\u52B1\u5F85\u9886\u53D6",
+      taskDone: "\u6BCF\u65E5\u4EFB\u52A1\u5B8C\u6210\uFF1A{title}\uFF0C\u56DE\u5927\u5385\u9886\u5956"
     },
     profileWelcome: {
       title: "\u5C55\u793A\u5FAE\u4FE1\u5934\u50CF",
@@ -6356,6 +6882,11 @@
   };
 
   // src/logic/economy/ChallengeGrants.ts
+  var DEFAULT_TIERS = [
+    { minRank: 1, maxRank: 1, rewards: [{ id: "hammer", amount: 3 }, { id: "shuffle", amount: 2 }] },
+    { minRank: 2, maxRank: 3, rewards: [{ id: "hammer", amount: 2 }, { id: "shuffle", amount: 1 }] },
+    { minRank: 4, maxRank: 10, rewards: [{ id: "hammer", amount: 1 }] }
+  ];
   function readSpec(raw, fallback) {
     const id = (raw == null ? void 0 : raw.id) === "hammer" || (raw == null ? void 0 : raw.id) === "shuffle" || (raw == null ? void 0 : raw.id) === "extraMoves" ? raw.id : fallback;
     return {
@@ -6363,21 +6894,53 @@
       amount: Math.max(0, Math.floor(Number(raw == null ? void 0 : raw.amount) || 0))
     };
   }
+  function readTiers(raw) {
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return DEFAULT_TIERS.map((tier) => ({ ...tier, rewards: tier.rewards.map((r) => ({ ...r })) }));
+    }
+    const tiers = [];
+    for (const item of raw) {
+      const minRank = Math.max(1, Math.floor(Number(item == null ? void 0 : item.minRank) || 1));
+      const maxRank = Math.max(minRank, Math.floor(Number(item == null ? void 0 : item.maxRank) || minRank));
+      const rewards = Array.isArray(item == null ? void 0 : item.rewards) ? item.rewards.map((r) => readSpec(r, "hammer")) : [];
+      tiers.push({ minRank, maxRank, rewards: rewards.filter((r) => r.amount > 0) });
+    }
+    return tiers.sort((a, b) => a.minRank - b.minRank);
+  }
   function readLeaderboardConfig() {
     var _a;
     const raw = balance_default.leaderboard;
-    const listed = Array.isArray(raw == null ? void 0 : raw.rewards) ? raw.rewards : void 0;
-    const rewards = listed && listed.length > 0 ? listed.map((item) => readSpec(item, "hammer")) : [
-      readSpec({ id: "hammer", amount: 1 }, "hammer"),
-      readSpec({ id: "shuffle", amount: 1 }, "shuffle")
-    ];
     return {
       limit: Math.max(1, Math.floor(Number(raw == null ? void 0 : raw.limit) || 50)),
-      rewardRanks: Math.max(1, Math.floor(Number(raw == null ? void 0 : raw.rewardRanks) || 3)),
-      settleWeekday: Math.min(6, Math.max(0, Math.floor((_a = Number(raw == null ? void 0 : raw.settleWeekday)) != null ? _a : 1))),
+      settleWeekday: Math.min(6, Math.max(0, Math.floor(Number((_a = raw == null ? void 0 : raw.settleWeekday) != null ? _a : 1)))),
       settleHour: Math.min(23, Math.max(0, Math.floor(Number(raw == null ? void 0 : raw.settleHour) || 0))),
-      rewards
+      tiers: readTiers(raw == null ? void 0 : raw.tiers)
     };
+  }
+  function leaderboardTierForRank(rank) {
+    var _a;
+    const r = Math.floor(rank);
+    if (!Number.isFinite(r) || r < 1) {
+      return null;
+    }
+    return (_a = readLeaderboardConfig().tiers.find((tier) => r >= tier.minRank && r <= tier.maxRank)) != null ? _a : null;
+  }
+  function planLeaderboardGrants(wallet, rank) {
+    var _a;
+    const tier = leaderboardTierForRank(rank);
+    let next = wallet;
+    const grants = [];
+    const blocked = [];
+    for (const spec of (_a = tier == null ? void 0 : tier.rewards) != null ? _a : []) {
+      const after = addBoosterToWallet(next, spec.id, spec.amount);
+      const gained = after[spec.id] - next[spec.id];
+      next = after;
+      grants.push({ id: spec.id, amount: Math.max(0, gained) });
+      if (gained <= 0) {
+        blocked.push(spec.id);
+      }
+    }
+    return { grants, wallet: next, blocked };
   }
 
   // src/logic/economy/FriendLeaderboard.ts
@@ -6428,13 +6991,21 @@
     }
     return `${text.slice(0, Math.max(4, max - 3))}\u2026`;
   }
-  function formatLeaderboardLine(row) {
-    var _a;
+  function formatScoreNumber(value) {
+    const n = Math.max(0, Math.floor(Number(value) || 0));
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+  function formatLeaderboardLine(row, tab = "level") {
+    var _a, _b, _c;
     const nickName = (row.nickName || "").trim() || "\u5FAE\u4FE1\u73A9\u5BB6";
     const wxId = formatWxIdDisplay(row.wxId || row.userId);
     const score = Math.max(0, Math.floor((_a = row.score) != null ? _a : row.maxLevel));
+    const maxLevel = Math.max(0, Math.floor(row.maxLevel));
+    const isWeek = tab === "week";
+    const weekScore = Math.max(0, Math.floor((_b = row.weekScore) != null ? _b : isWeek ? score : 0));
+    const totalScore = Math.max(0, Math.floor((_c = row.totalScore) != null ? _c : 0));
     return {
-      tag: String(row.rank),
+      tag: row.rank > 0 ? String(row.rank) : "\u672A\u4E0A\u699C",
       text: "",
       highlight: row.isSelf,
       badge: nickName.slice(0, 1) || "\u73A9",
@@ -6442,8 +7013,38 @@
       avatarUrl: row.avatarUrl,
       nickName,
       wxId,
-      score
+      score,
+      scoreText: isWeek ? formatScoreNumber(weekScore) : `\u7B2C ${maxLevel} \u5173`,
+      scoreUnit: isWeek ? "\u672C\u5468\u5206" : "\u6700\u9AD8\u901A\u5173",
+      sub: isWeek ? `\u5DF2\u901A\u5173 ${maxLevel} \u5173` : totalScore > 0 ? `\u7D2F\u8BA1 ${formatScoreNumber(totalScore)} \u5206` : ""
     };
+  }
+  function leaderboardGapHint(input) {
+    var _a, _b, _c, _d, _e, _f;
+    if (input.selfRank === 1) {
+      return input.tab === "week" ? "\u672C\u5468\u7B2C\u4E00\uFF01\u5B88\u4F4F\u5B83\uFF0C\u5468\u4E00\u9886\u5927\u5956" : "\u4F60\u662F\u5168\u670D\u7B2C\u4E00\uFF01";
+    }
+    if (!input.self || !input.above) {
+      if (input.tab === "week") {
+        const mine = Math.max(0, Math.floor((_b = (_a = input.self) == null ? void 0 : _a.weekScore) != null ? _b : 0));
+        if (mine > 0) {
+          return `\u4F60\u672C\u5468 ${formatScoreNumber(mine)} \u5206\uFF0C\u9080\u8BF7\u597D\u53CB\u4E00\u8D77\u51B2\u699C`;
+        }
+        return "";
+      }
+      return "";
+    }
+    const name = (input.above.nickName || "\u4E0A\u4E00\u540D").slice(0, 8);
+    if (input.tab === "week") {
+      const gap = Math.max(0, Math.floor((_c = input.above.weekScore) != null ? _c : 0) - Math.floor((_d = input.self.weekScore) != null ? _d : 0)) + 1;
+      return `\u518D\u5F97 ${formatScoreNumber(gap)} \u5206\u5C31\u80FD\u8D85\u8FC7 ${name}`;
+    }
+    const levelGap = Math.floor(input.above.maxLevel) - Math.floor(input.self.maxLevel);
+    if (levelGap > 0) {
+      return `\u518D\u901A\u5173 ${levelGap} \u5173\u5C31\u80FD\u8FFD\u4E0A ${name}`;
+    }
+    const scoreGap = Math.max(0, Math.floor((_e = input.above.totalScore) != null ? _e : 0) - Math.floor((_f = input.self.totalScore) != null ? _f : 0)) + 1;
+    return `\u540C\u5173\u6BD4\u7D2F\u8BA1\u5206\uFF0C\u518D\u591A ${formatScoreNumber(scoreGap)} \u5206\u8D85\u8FC7 ${name}`;
   }
   function fill(template, vars) {
     return template.replace(/\{(\w+)\}/g, (_, key) => {
@@ -6482,12 +7083,93 @@
     }
     return "";
   }
+  var GRANT_NAME = {
+    hammer: "\u9524\u5B50",
+    shuffle: "\u91CD\u6392",
+    extraMoves: "\u52A0\u6B65"
+  };
+  function formatGrantList(grants) {
+    return grants.filter((item) => item.amount > 0).map((item) => `${GRANT_NAME[item.id]}x${item.amount}`).join(" ");
+  }
   function leaderboardRewardText() {
-    var _a, _b, _c, _d;
-    const config = readLeaderboardConfig();
-    const hammer = (_b = (_a = config.rewards.find((item) => item.id === "hammer")) == null ? void 0 : _a.amount) != null ? _b : 0;
-    const shuffle = (_d = (_c = config.rewards.find((item) => item.id === "shuffle")) == null ? void 0 : _c.amount) != null ? _d : 0;
-    return fill(notice_default.leaderboard.reward, { hammer, shuffle });
+    const tiers = leaderboardRewardTierLines();
+    return tiers.length > 0 ? fill(notice_default.leaderboard.reward, { tiers: tiers.join(" \xB7 ") }) : "";
+  }
+  function leaderboardRewardTierLines() {
+    return readLeaderboardConfig().tiers.map((tier) => {
+      const range = tier.minRank === tier.maxRank ? `\u7B2C${tier.minRank}\u540D` : `\u7B2C${tier.minRank}-${tier.maxRank}\u540D`;
+      const grants = formatGrantList(tier.rewards);
+      return grants ? `${range}  ${grants}` : range;
+    });
+  }
+  function leaderboardRewardedText(rank, grants, tierMatched = true) {
+    if (!tierMatched) {
+      const tiers = readLeaderboardConfig().tiers;
+      const top = tiers.length > 0 ? tiers[tiers.length - 1].maxRank : 0;
+      return fill(notice_default.leaderboard.rewardedNone, { rank, top });
+    }
+    const list = formatGrantList(grants);
+    if (!list) {
+      return fill(notice_default.leaderboard.rewardedFull, { rank });
+    }
+    return fill(notice_default.leaderboard.rewarded, { rank, rewards: list });
+  }
+  function nextWeeklySettleMs(nowMs) {
+    const date = new Date(nowMs);
+    const dow = date.getDay() || 7;
+    const midnight = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    return midnight + (8 - dow) * 864e5;
+  }
+  function weeklySettleCountdownText(nowMs, settleAtMs = nextWeeklySettleMs(nowMs)) {
+    const left = Math.max(0, settleAtMs - nowMs);
+    const days = Math.floor(left / 864e5);
+    const hours = Math.floor(left % 864e5 / 36e5);
+    const minutes = Math.max(1, Math.floor(left % 36e5 / 6e4));
+    if (days > 0) {
+      return `\u8DDD\u7ED3\u7B97 ${days}\u5929${hours}\u5C0F\u65F6`;
+    }
+    if (hours > 0) {
+      return `\u8DDD\u7ED3\u7B97 ${hours}\u5C0F\u65F6${minutes}\u5206`;
+    }
+    return `\u8DDD\u7ED3\u7B97 ${minutes}\u5206\u949F`;
+  }
+  function localIsoWeek(nowMs) {
+    const date = new Date(nowMs);
+    return isoWeekFromParts(date.getFullYear(), date.getMonth() + 1, date.getDate());
+  }
+  function isoWeekFromParts(year, month, day) {
+    const utc = new Date(Date.UTC(year, month - 1, day));
+    const dow = utc.getUTCDay() || 7;
+    utc.setUTCDate(utc.getUTCDate() + 4 - dow);
+    const isoYear = utc.getUTCFullYear();
+    const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+    const week = Math.ceil(((utc.getTime() - yearStart.getTime()) / 864e5 + 1) / 7);
+    return `${isoYear}-W${String(week).padStart(2, "0")}`;
+  }
+
+  // src/logic/level/LevelStars.ts
+  function starsForClear(input) {
+    const total = Math.max(1, Math.floor(input.movesTotal));
+    const left = Math.max(0, Math.floor(input.movesLeft) - Math.max(0, Math.floor(input.movesGranted)));
+    if (left >= Math.max(3, Math.ceil(total * 0.25))) {
+      return 3;
+    }
+    if (left >= Math.max(1, Math.ceil(total * 0.1))) {
+      return 2;
+    }
+    return 1;
+  }
+  function starClearLabel(stars) {
+    return `${stars} \u661F\u901A\u5173`;
+  }
+  function starsHint(stars) {
+    if (stars === 3) {
+      return "\u5B8C\u7F8E\u901A\u5173\uFF01";
+    }
+    if (stars === 2) {
+      return "\u518D\u7701\u51E0\u6B65\u5C31\u80FD\u62FF\u4E09\u661F";
+    }
+    return "\u7701\u4E0B\u66F4\u591A\u6B65\u6570\u53EF\u4EE5\u62FF\u66F4\u591A\u661F";
   }
 
   // src/logic/mahjong/mahjongHallUnlockCopy.ts
@@ -6512,6 +7194,22 @@
   function mahjongHallLockHint() {
     var _a;
     return (_a = COPY.mahjongHallLockHint) != null ? _a : `\u901A\u5173\u7B2C 20 \u5173\uFF0C\u6216\u68AF\u5B50\u7D2F\u8BA1 ${MAHJONG_HALL_UNLOCK_LADDER_COINS} \u91D1\u5E01\u2B50\uFF0C\u5373\u53EF\u89E3\u9501\u840C\u5BA0\u9EBB\u5C06\u9986`;
+  }
+  function mahjongHallLockPanelBody(maxClearedLevelId) {
+    const hint = mahjongHallLockHint().replace(/⭐/g, "");
+    if (maxClearedLevelId >= 20) {
+      return hint;
+    }
+    const cleared = Math.max(0, maxClearedLevelId);
+    return `\u4F60\u5DF2\u901A\u5173\u7B2C ${cleared} \u5173\u3002
+${hint}`;
+  }
+  function mahjongHallLockToastTitle(maxClearedLevelId) {
+    if (maxClearedLevelId >= 20) {
+      return "\u9EBB\u5C06\u9986\u672A\u89E3\u9501";
+    }
+    const need = Math.max(1, 20 - Math.max(0, maxClearedLevelId));
+    return `\u8FD8\u5DEE ${need} \u5173\u89E3\u9501\u9EBB\u5C06\u9986`;
   }
   function mahjongHallUnlockAnnouncement() {
     var _a, _b;
@@ -7875,20 +8573,50 @@
       return null;
     }
   }
+  var cloudReady = null;
+  function ensureCloudInit() {
+    if (cloudReady) {
+      return cloudReady;
+    }
+    cloudReady = (async () => {
+      if (cloud_default.enabled === false) {
+        return false;
+      }
+      const cloud = cloudApi2();
+      if (!cloud || typeof cloud.init !== "function") {
+        return false;
+      }
+      try {
+        const env = cloud_default.envId || cloud.DYNAMIC_CURRENT_ENV;
+        cloud.init(env ? { env, traceUser: true } : { traceUser: true });
+        return true;
+      } catch (e) {
+        return false;
+      }
+    })();
+    return cloudReady;
+  }
   async function fetchMahjongOpsViaCloudFunction() {
     if (cloud_default.enabled === false) {
+      return null;
+    }
+    if (!await ensureCloudInit()) {
       return null;
     }
     const cloud = cloudApi2();
     if (!cloud || typeof cloud.callFunction !== "function") {
       return null;
     }
-    const res = await cloud.callFunction({ name: "getMahjongOps", data: {} });
-    const payload = res.result;
-    if (!(payload == null ? void 0 : payload.ok) || !payload.config) {
+    try {
+      const res = await cloud.callFunction({ name: "getMahjongOps", data: {} });
+      const payload = res.result;
+      if (!(payload == null ? void 0 : payload.ok) || !payload.config) {
+        return null;
+      }
+      return payload.config;
+    } catch (e) {
       return null;
     }
-    return payload.config;
   }
 
   // src/services/GameSession.ts
@@ -7918,6 +8646,15 @@
       /** 大厅麻将馆 NEW 角标：点过入口后不再展示 */
       this.mahjongHallNewDismissed = false;
       this.extraMovesGrant = items_default.extraMoves.moves;
+      /** 本周榜：本地累计的通关分，跨周清零 */
+      this.weekly = { week: "", score: 0 };
+      /** 上周榜结算到账提示，大厅取一次 */
+      this.leaderboardRewardToast = null;
+      /** 每日任务计数已改但还没落盘（逐步记，关末再写，避免每步都推云） */
+      this.dailyTasksDirty = false;
+      /** 本关额外拿到的步数（加步 / 看广告 / 复活），算星级时扣掉 */
+      this.movesGrantedThisLevel = 0;
+      this.lastStars = 0;
       this.board = null;
       this.level = null;
       this.goals = null;
@@ -8024,6 +8761,10 @@
       this.dailyGrantPending = daily.grantedHammer;
       const savedWallet = await this.deps.storage.get(StorageKeys.Boosters);
       this.boosters.loadStock(clampBoosterWallet(savedWallet != null ? savedWallet : EMPTY_BOOSTER_WALLET));
+      const savedWeekly = await this.deps.storage.get(
+        StorageKeys.Weekly
+      );
+      this.weekly = this.alignWeekly(savedWeekly);
       const savedInvite = await this.deps.storage.get(StorageKeys.Invite);
       this.invite = ensureInviteCode(parseInviteState(savedInvite));
       const savedNotices = await this.deps.storage.get(StorageKeys.NoticeSeen);
@@ -8059,7 +8800,7 @@
           clampBoosterWallet(this.boosters.getStock())
         );
       }
-      if (isWxDesktopIdeHost()) {
+      if (isWxDesktopIdeHost() || isDouyinMiniGameHost()) {
         this.cloudHydrated = true;
       } else {
         await this.syncCloudSave();
@@ -8072,6 +8813,9 @@
       }
       this.deps.analytics.track("app_boot");
       this.fsm.transitionTo("Lobby");
+      if (this.deps.challengeApi && !isWxDesktopIdeHost()) {
+        void this.loadFriendLeaderboard();
+      }
     }
     /**
      * 覆盖关卡表（单测注入短关卡用）。
@@ -8110,6 +8854,8 @@
       this.clean = null;
       this.cleaningUsedThisSettle = false;
       this.pendingMovesBonus = false;
+      this.movesGrantedThisLevel = 0;
+      this.lastStars = 0;
       this.buriedNotified.clear();
       this.revivePolicy.resetForLevel();
       this.revivePolicy.setMaxPerLevel(Number.POSITIVE_INFINITY);
@@ -8254,11 +9000,14 @@
      * 展示排名、头像、昵称、微信号、分数；接口不可用时至少展示自己。
      */
     async loadFriendLeaderboard() {
-      var _a, _b, _c, _d, _e, _f, _g, _h;
       const userId = this.getInviteCode() || "me";
       const maxLevel = this.getMaxClearedLevelId();
       const profile = this.readWxProfile();
+      const nowMs = Date.now();
+      this.weekly = this.alignWeekly(this.weekly, nowMs);
+      const totalScore = Math.max(0, Math.floor(this.progress.getData().totalScore || 0));
       const selfInput = {
+        rank: 0,
         userId,
         maxLevel,
         bestTimeMs: null,
@@ -8267,59 +9016,146 @@
         nickName: profile.nickName || "\u5FAE\u4FE1\u73A9\u5BB6",
         avatarUrl: profile.avatarUrl,
         wxId: profile.wxId || userId,
-        score: maxLevel
+        score: maxLevel,
+        totalScore,
+        weekScore: this.weekly.score
       };
       const api = this.deps.challengeApi;
       if (api) {
         try {
           const res = await api.leaderboard(userId, maxLevel, {
-            nickName: profile.nickName && profile.nickName !== "\u5FAE\u4FE1\u73A9\u5BB6" ? profile.nickName : void 0,
-            avatarUrl: profile.avatarUrl || void 0
+            ...this.leaderboardProfileExtra(profile),
+            totalScore,
+            weekKey: this.weekly.week,
+            weekScore: this.weekly.score
           });
-          if (res.ok && res.rows && res.rows.length > 0) {
-            this.syncLeaderboardRankSnapshot(res.rows);
-            const rows = res.rows.map(
-              (row) => {
-                var _a2;
-                return formatLeaderboardLine({
-                  ...row,
-                  nickName: row.nickName || (row.isSelf ? profile.nickName || "\u5FAE\u4FE1\u73A9\u5BB6" : void 0),
-                  avatarUrl: row.avatarUrl || (row.isSelf ? profile.avatarUrl : void 0),
-                  wxId: row.wxId || row.userId,
-                  score: (_a2 = row.score) != null ? _a2 : row.maxLevel
-                });
-              }
-            );
-            return {
-              title: notice_default.leaderboard.title,
-              hint: (_a = res.hint) != null ? _a : "",
-              rewardText: (_b = res.rewardText) != null ? _b : leaderboardRewardText(),
-              selfRank: (_e = (_d = res.selfRank) != null ? _d : (_c = res.rows.find((r) => r.isSelf)) == null ? void 0 : _c.rank) != null ? _e : 0,
-              rows
-            };
-          }
           if (res.ok) {
-            return {
-              title: notice_default.leaderboard.title,
-              hint: (_f = res.hint) != null ? _f : "",
-              rewardText: (_g = res.rewardText) != null ? _g : leaderboardRewardText(),
-              selfRank: (_h = res.selfRank) != null ? _h : 1,
-              rows: [
-                ...rankFriends([selfInput]).map(formatLeaderboardLine),
-                { tag: "\u63D0\u793A", text: notice_default.leaderboard.empty, kind: "meta" }
-              ]
-            };
+            this.absorbLeaderboardResponse(res);
+            selfInput.weekScore = this.weekly.score;
+            return this.buildLeaderboardView(res, selfInput, profile, nowMs);
           }
         } catch (e) {
         }
       }
-      const ranked = rankFriends([selfInput]);
+      return this.buildLeaderboardView(null, selfInput, profile, nowMs);
+    }
+    /** 上周结算到账提示（大厅弹一次）。 */
+    takeLeaderboardRewardToast() {
+      const text = this.leaderboardRewardToast;
+      this.leaderboardRewardToast = null;
+      return text;
+    }
+    getWeeklyScore() {
+      this.weekly = this.alignWeekly(this.weekly);
+      return this.weekly.score;
+    }
+    alignWeekly(raw, nowMs = Date.now()) {
+      const week = localIsoWeek(nowMs);
+      if (!raw || raw.week !== week) {
+        return { week, score: 0 };
+      }
+      return { week, score: Math.max(0, Math.floor(Number(raw.score) || 0)) };
+    }
+    addWeeklyScore(points) {
+      this.weekly = this.alignWeekly(this.weekly);
+      const add = Math.max(0, Math.floor(points));
+      if (add <= 0) {
+        return;
+      }
+      this.weekly = { ...this.weekly, score: this.weekly.score + add };
+      void this.deps.storage.set(StorageKeys.Weekly, this.weekly);
+    }
+    leaderboardProfileExtra(profile) {
+      return {
+        nickName: profile.nickName && profile.nickName !== "\u5FAE\u4FE1\u73A9\u5BB6" ? profile.nickName : void 0,
+        avatarUrl: profile.avatarUrl || void 0
+      };
+    }
+    /** 服务端回包里的本周分补本地（换机）和上周结算奖励。 */
+    absorbLeaderboardResponse(res) {
+      var _a;
+      const serverWeekly = Math.max(0, Math.floor((_a = res.selfWeekScore) != null ? _a : 0));
+      if (res.week && res.week === this.weekly.week && serverWeekly > this.weekly.score) {
+        this.weekly = { ...this.weekly, score: serverWeekly };
+        void this.deps.storage.set(StorageKeys.Weekly, this.weekly);
+      }
+      const reward = res.weeklyReward;
+      if (!reward || !(reward.rank >= 1)) {
+        return;
+      }
+      const tier = leaderboardTierForRank(reward.rank);
+      const plan = planLeaderboardGrants(this.boosters.getStock(), reward.rank);
+      if (tier) {
+        this.boosters.loadStock(plan.wallet);
+        void this.persistBoosters();
+      }
+      this.leaderboardRewardToast = leaderboardRewardedText(reward.rank, plan.grants, !!tier);
+      this.deps.analytics.track("leaderboard_reward", {
+        week: reward.week,
+        rank: reward.rank,
+        score: reward.score
+      });
+      this.events.emit({ type: "LeaderboardReward" });
+    }
+    leaderboardRowInput(row, profile) {
+      var _a, _b;
+      return {
+        ...row,
+        rank: Math.max(0, Math.floor((_a = row.rank) != null ? _a : 0)),
+        nickName: row.nickName || (row.isSelf ? profile.nickName || "\u5FAE\u4FE1\u73A9\u5BB6" : void 0),
+        avatarUrl: row.avatarUrl || (row.isSelf ? profile.avatarUrl : void 0),
+        wxId: row.wxId || row.userId,
+        score: (_b = row.score) != null ? _b : row.maxLevel
+      };
+    }
+    buildLeaderboardTab(id, board, selfInput, profile) {
+      var _a, _b, _c, _d, _e, _f, _g;
+      const rows = ((_a = board == null ? void 0 : board.rows) != null ? _a : []).map((row) => this.leaderboardRowInput(row, profile));
+      const listed = rows.find((row) => row.isSelf);
+      const selfRank = Math.max(0, Math.floor((_c = (_b = board == null ? void 0 : board.selfRank) != null ? _b : listed == null ? void 0 : listed.rank) != null ? _c : 0));
+      const selfRow = (_d = listed != null ? listed : (board == null ? void 0 : board.self) ? this.leaderboardRowInput(board.self, profile) : null) != null ? _d : { ...selfInput, rank: selfRank };
+      if (id === "week") {
+        selfRow.weekScore = Math.max((_e = selfRow.weekScore) != null ? _e : 0, (_f = selfInput.weekScore) != null ? _f : 0);
+      }
+      const above = selfRank > 1 ? (_g = rows.find((row) => row.rank === selfRank - 1)) != null ? _g : null : null;
+      return {
+        id,
+        label: id === "week" ? notice_default.leaderboard.tabWeek : notice_default.leaderboard.tabLevel,
+        rule: id === "week" ? notice_default.leaderboard.ruleWeek : notice_default.leaderboard.ruleLevel,
+        rows: rows.map((row) => formatLeaderboardLine(row, id)),
+        self: formatLeaderboardLine({ ...selfRow, rank: selfRank, isSelf: true }, id),
+        selfRank,
+        gapHint: leaderboardGapHint({ tab: id, selfRank, self: selfRow, above })
+      };
+    }
+    buildLeaderboardView(res, selfInput, profile, nowMs) {
+      var _a, _b, _c, _d, _e, _f, _g, _h;
+      const levelBoard = res ? (_c = res.level) != null ? _c : { rows: (_a = res.rows) != null ? _a : [], selfRank: (_b = res.selfRank) != null ? _b : 0 } : null;
+      if (levelBoard == null ? void 0 : levelBoard.rows.length) {
+        this.syncLeaderboardRankSnapshot(levelBoard.rows);
+      }
+      const levelTab = (levelBoard == null ? void 0 : levelBoard.rows.length) ? this.buildLeaderboardTab("level", levelBoard, selfInput, profile) : this.buildLeaderboardTab(
+        "level",
+        { rows: rankFriends([selfInput]), selfRank: 1 },
+        selfInput,
+        profile
+      );
+      let weekBoard = (_d = res == null ? void 0 : res.weekly) != null ? _d : null;
+      if (!((_e = weekBoard == null ? void 0 : weekBoard.rows) == null ? void 0 : _e.length) && ((_f = selfInput.weekScore) != null ? _f : 0) > 0) {
+        weekBoard = {
+          rows: rankFriends([selfInput]),
+          selfRank: 1
+        };
+      }
+      const weekTab = this.buildLeaderboardTab("week", weekBoard, selfInput, profile);
       return {
         title: notice_default.leaderboard.title,
-        hint: "",
-        rewardText: leaderboardRewardText(),
-        selfRank: 1,
-        rows: ranked.map(formatLeaderboardLine)
+        hint: (_g = res == null ? void 0 : res.hint) != null ? _g : "",
+        rewardText: (_h = res == null ? void 0 : res.rewardText) != null ? _h : leaderboardRewardText(),
+        selfRank: levelTab.selfRank,
+        rows: levelTab.rows,
+        tabs: { level: levelTab, week: weekTab },
+        settleText: weeklySettleCountdownText(nowMs, res == null ? void 0 : res.settleAt)
       };
     }
     readWxProfile() {
@@ -8509,14 +9345,126 @@
       void this.persistBoosters();
       return true;
     }
+    /** 每日任务面板数据；跨天先对齐到今天。 */
+    getDailyTasksView() {
+      const aligned = applyDailyLogin(this.daily, Date.now());
+      if (aligned.data.ymd !== this.daily.ymd) {
+        this.daily = aligned.data;
+        if (aligned.grantedHammer) {
+          this.boosters.loadStock(addBoosterToWallet(this.boosters.getStock(), "hammer", 1));
+          this.daily = { ...this.daily, bonusHammer: 0 };
+          this.dailyGrantPending = true;
+          void this.persistBoosters();
+        }
+        void this.persistDaily();
+      }
+      return viewDailyTasks(this.daily);
+    }
+    /** 领取单个每日任务奖励；返回到账文案，未完成或已领返回 null。 */
+    claimDailyTask(id) {
+      this.getDailyTasksView();
+      const claimed = claimDailyTask(this.daily, id);
+      if (!claimed.reward) {
+        return null;
+      }
+      this.daily = claimed.data;
+      const text = this.grantDailyRewards([claimed.reward]);
+      void this.persistDaily();
+      this.deps.analytics.track("daily_task_claim", { task: id });
+      return text;
+    }
+    /** 4 个任务都领完后开宝箱；doubled 时先看激励视频，没看完不发。 */
+    async claimDailyChest(doubled) {
+      if (!this.getDailyTasksView().chestReady) {
+        return null;
+      }
+      if (doubled) {
+        this.deps.analytics.track("ad_show", { placement: "rewarded_revive", reason: "daily_chest" });
+        const result = await this.deps.ads.show("rewarded_revive");
+        if (result !== "completed") {
+          return null;
+        }
+        this.deps.analytics.track("ad_complete", { placement: "rewarded_revive", reason: "daily_chest" });
+      }
+      const claimed = claimDailyChest(this.daily, doubled);
+      if (!claimed.rewards) {
+        return null;
+      }
+      this.daily = claimed.data;
+      const text = this.grantDailyRewards(claimed.rewards);
+      void this.persistDaily();
+      this.deps.analytics.track("daily_chest_claim", { doubled });
+      return text;
+    }
+    /** 道具入包（9 个封顶），返回实际到账文案。 */
+    grantDailyRewards(rewards) {
+      let wallet = this.boosters.getStock();
+      const granted = [];
+      for (const item of rewards) {
+        const next = addBoosterToWallet(wallet, item.id, item.amount);
+        granted.push({ id: item.id, amount: Math.max(0, next[item.id] - wallet[item.id]) });
+        wallet = next;
+      }
+      this.boosters.loadStock(wallet);
+      void this.persistBoosters();
+      const text = formatDailyReward(granted);
+      return text ? `\u9886\u53D6\u6210\u529F\uFF1A${text}` : "\u9053\u5177\u5DF2\u6EE1 9 \u4E2A\uFF0C\u5148\u7528\u6389\u4E00\u4E9B\u518D\u6765\u9886\u5427";
+    }
+    /** 局内逐步记任务进度，关末统一落盘。 */
+    noteDailyTaskStats(patch) {
+      const recorded = recordDailyTaskStats(this.daily, patch, Date.now());
+      this.daily = recorded.data;
+      this.dailyTasksDirty = true;
+      for (const task of recorded.completed) {
+        this.events.emit({ type: "DailyTaskCompleted", title: task.title });
+      }
+    }
+    flushDailyTasks() {
+      if (!this.dailyTasksDirty) {
+        return;
+      }
+      this.dailyTasksDirty = false;
+      void this.persistDaily();
+    }
+    /** 交换 / 锤子 / 步数加成这类消除结算后记任务进度。 */
+    noteResolveForDailyTasks(result, countChain) {
+      let specials = 0;
+      for (const wave of result.waves) {
+        specials += wave.specialSpawns.length;
+      }
+      this.noteDailyTaskStats({
+        tiles: result.cleared,
+        specials,
+        chain: countChain ? result.cascadeDepth : 0,
+        collectedKinds: result.clearedKinds.filter((kind) => isBasicTile(kind))
+      });
+    }
+    /** 最近一次通关的星级（结算页用），未通关为 0。 */
+    getLastStars() {
+      return this.lastStars;
+    }
+    getLevelStars(levelId) {
+      return this.progress.getStars(levelId);
+    }
     commitLevelCleared() {
       if (!this.level) {
         return;
       }
       const clearedLevelId = this.level.id;
       const firstClear = isFreshPlayer(this.progress.getData());
-      this.progress.markLevelCleared(clearedLevelId, this.score);
+      const stars = this.lastStars || 1;
+      this.progress.markLevelCleared(clearedLevelId, this.score, stars);
+      this.addWeeklyScore(this.score);
+      this.noteDailyTaskStats({ threeStar: stars === 3 });
+      this.dailyTasksDirty = false;
+      const before = viewDailyTasks(this.daily).tasks;
       this.noteDailyClear();
+      viewDailyTasks(this.daily).tasks.forEach((task, i) => {
+        var _a;
+        if (task.done && !task.claimed && !((_a = before[i]) == null ? void 0 : _a.done)) {
+          this.events.emit({ type: "DailyTaskCompleted", title: task.title });
+        }
+      });
       if (firstClear) {
         this.noteInviteFirstClear();
       }
@@ -8546,10 +9494,16 @@
       const oldRank = this.lastLeaderboardSelfRank;
       const oldRanks = new Map(this.lastLeaderboardRanks);
       try {
+        this.weekly = this.alignWeekly(this.weekly);
         const res = await api.leaderboard(userId, this.getMaxClearedLevelId(), {
-          nickName: profile.nickName && profile.nickName !== "\u5FAE\u4FE1\u73A9\u5BB6" ? profile.nickName : void 0,
-          avatarUrl: profile.avatarUrl || void 0
+          ...this.leaderboardProfileExtra(profile),
+          totalScore: Math.max(0, Math.floor(this.progress.getData().totalScore || 0)),
+          weekKey: this.weekly.week,
+          weekScore: this.weekly.score
         });
+        if (res.ok) {
+          this.absorbLeaderboardResponse(res);
+        }
         if (!res.ok || !((_a = res.rows) == null ? void 0 : _a.length)) {
           return;
         }
@@ -8694,6 +9648,8 @@
       this.goals.applyClearedKinds(result.clearedKinds);
       this.goals.syncScore(this.score);
       this.emitGoalProgress();
+      this.noteDailyTaskStats({ boosterUsed: true });
+      this.noteResolveForDailyTasks(result, false);
       this.events.emit({ type: "CascadeDone", depth: result.cascadeDepth });
       this.events.emit({ type: "BoardChanged", version: this.board.version });
       this.evaluateLevelOutcome();
@@ -8717,6 +9673,7 @@
         true
       );
       this.playSfx("sfx_shuffle");
+      this.noteDailyTaskStats({ boosterUsed: true });
       this.events.emit({
         type: "BoosterUsed",
         boosterId: "shuffle",
@@ -8741,7 +9698,9 @@
       }
       void this.persistBoosters();
       this.movesLeft += this.extraMovesGrant;
+      this.movesGrantedThisLevel += this.extraMovesGrant;
       this.playSfx("sfx_extra");
+      this.noteDailyTaskStats({ boosterUsed: true });
       this.events.emit({
         type: "BoosterUsed",
         boosterId: "extraMoves",
@@ -8825,6 +9784,7 @@
     applyBoosterRefill(id) {
       if (id === "extraMoves") {
         this.movesLeft += this.extraMovesGrant;
+        this.movesGrantedThisLevel += this.extraMovesGrant;
         this.playSfx("sfx_extra");
         this.events.emit({
           type: "BoosterUsed",
@@ -8865,6 +9825,7 @@
     }
     suspendForBackground() {
       var _a, _b;
+      this.flushDailyTasks();
       (_b = (_a = this.deps.audio).suspendForBackground) == null ? void 0 : _b.call(_a);
     }
     resumeFromBackground() {
@@ -9387,6 +10348,7 @@
       this.goals.applyClearedKinds(result.clearedKinds);
       this.goals.syncScore(this.score);
       this.emitGoalProgress();
+      this.noteResolveForDailyTasks(result, true);
       if (result.fell.length > 0) {
         this.events.emit({
           type: "TilesFell",
@@ -9565,6 +10527,7 @@
           crushScore: this.crush.crushScore,
           tapCount: this.crush.tapCount
         });
+        this.noteDailyTaskStats({ crushRound: true });
         if (this.level) {
           this.commitLevelCleared();
         }
@@ -9622,6 +10585,7 @@
       if (result === "completed") {
         this.revivePolicy.consume();
         this.movesLeft += offer.movesGranted;
+        this.movesGrantedThisLevel += offer.movesGranted;
         this.deps.analytics.track("ad_complete", {
           placement: "rewarded_revive",
           movesGranted: offer.movesGranted
@@ -9849,6 +10813,7 @@
      * 任意对局态中途退出回首页（放弃当前关）。
      */
     quitToLobby() {
+      this.flushDailyTasks();
       const state = this.fsm.getCurrent();
       if (state === "Lobby" || state === "Boot") {
         return true;
@@ -9882,6 +10847,11 @@
           this.fsm.transitionTo("Resolving");
         }
         this.fsm.transitionTo("LevelWon");
+        this.lastStars = starsForClear({
+          movesLeft: this.movesLeft,
+          movesTotal: this.level.moves,
+          movesGranted: this.movesGrantedThisLevel
+        });
         this.events.emit({
           type: "LevelWon",
           levelId: this.level.id,
@@ -9908,6 +10878,7 @@
       }
       if (this.movesLeft <= 0) {
         this.fsm.transitionTo("LevelFailed");
+        this.flushDailyTasks();
         this.playSfx("sfx_fail");
         this.events.emit({ type: "LevelFailed", levelId: this.level.id });
         this.deps.analytics.track("level_fail", { levelId: this.level.id });
@@ -9986,6 +10957,7 @@
       (_a = this.goals) == null ? void 0 : _a.applyClearedKinds(result.clearedKinds);
       (_b = this.goals) == null ? void 0 : _b.syncScore(this.score);
       this.emitGoalProgress();
+      this.noteResolveForDailyTasks(result, false);
       this.events.emit({
         type: "TilesCleared",
         indices: clearIndices,
@@ -10367,17 +11339,23 @@
     async dailySubmit(body) {
       return this.post("/api/daily-challenge/complete", body);
     }
-    async leaderboard(userId, maxClearedLevel = 0, profile) {
+    async leaderboard(userId, maxClearedLevel = 0, extra) {
+      var _a, _b;
       const qs = [
         `user_id=${encodeURIComponent(userId)}`,
         `max_level=${Math.max(0, Math.floor(maxClearedLevel))}`,
+        `total_score=${Math.max(0, Math.floor((_a = extra == null ? void 0 : extra.totalScore) != null ? _a : 0))}`,
+        `week_score=${Math.max(0, Math.floor((_b = extra == null ? void 0 : extra.weekScore) != null ? _b : 0))}`,
         "scope=all"
       ];
-      if (profile == null ? void 0 : profile.nickName) {
-        qs.push(`nick_name=${encodeURIComponent(profile.nickName)}`);
+      if (extra == null ? void 0 : extra.weekKey) {
+        qs.push(`week_key=${encodeURIComponent(extra.weekKey)}`);
       }
-      if (profile == null ? void 0 : profile.avatarUrl) {
-        qs.push(`avatar_url=${encodeURIComponent(profile.avatarUrl)}`);
+      if (extra == null ? void 0 : extra.nickName) {
+        qs.push(`nick_name=${encodeURIComponent(extra.nickName)}`);
+      }
+      if (extra == null ? void 0 : extra.avatarUrl) {
+        qs.push(`avatar_url=${encodeURIComponent(extra.avatarUrl)}`);
       }
       const url = `${this.base()}/api/leaderboard?${qs.join("&")}`;
       if (!this.baseUrl) {
@@ -10410,12 +11388,12 @@
       return null;
     }
   }
-  var cloudReady = null;
+  var cloudReady2 = null;
   function ensureCloud() {
-    if (cloudReady) {
-      return cloudReady;
+    if (cloudReady2) {
+      return cloudReady2;
     }
-    cloudReady = (async () => {
+    cloudReady2 = (async () => {
       const cloud = cloudApi3();
       if (!cloud || typeof cloud.callFunction !== "function") {
         return false;
@@ -10428,7 +11406,7 @@
         return false;
       }
     })();
-    return cloudReady;
+    return cloudReady2;
   }
   var NO_API = { ok: false, reason: "no_api" };
   var WxCloudChallengeApi = class {
@@ -10450,8 +11428,8 @@
     async dailySubmit(_body) {
       return NO_API;
     }
-    async leaderboard(userId, maxClearedLevel = 0, profile) {
-      var _a;
+    async leaderboard(userId, maxClearedLevel = 0, extra) {
+      var _a, _b, _c;
       if (!await ensureCloud()) {
         return { ok: false, reason: "cloud_unavailable" };
       }
@@ -10466,11 +11444,14 @@
             userId,
             wxId: userId,
             maxLevel: Math.max(0, Math.floor(maxClearedLevel)),
-            nickName: (profile == null ? void 0 : profile.nickName) || "",
-            avatarUrl: (profile == null ? void 0 : profile.avatarUrl) || ""
+            totalScore: Math.max(0, Math.floor((_a = extra == null ? void 0 : extra.totalScore) != null ? _a : 0)),
+            weekKey: (extra == null ? void 0 : extra.weekKey) || "",
+            weekScore: Math.max(0, Math.floor((_b = extra == null ? void 0 : extra.weekScore) != null ? _b : 0)),
+            nickName: (extra == null ? void 0 : extra.nickName) || "",
+            avatarUrl: (extra == null ? void 0 : extra.avatarUrl) || ""
           }
         });
-        const result = (_a = res.result) != null ? _a : {};
+        const result = (_c = res.result) != null ? _c : {};
         if (result && result.ok) {
           return result;
         }
@@ -12021,6 +13002,35 @@
     return 2 ** (-10 * t) * Math.sin((t * 10 - 0.75) * (2 * Math.PI / 3)) + 1;
   }
 
+  // src/presentation/fx/ResultSceneBackdrop.ts
+  function drawResultSceneBackdrop(ctx, width, height, opts) {
+    const { veilAlpha, tone, isFail = false } = opts;
+    const strength = Math.min(1, veilAlpha * (isFail ? 1 : 0.96));
+    const cx = width / 2;
+    const focusY = height * 0.38;
+    ctx.fillStyle = `rgba(18, 12, 28, ${0.58 + strength * 0.32})`;
+    ctx.fillRect(0, 0, width, height);
+    const radial = ctx.createRadialGradient(cx, focusY, width * 0.06, cx, focusY, width * 0.92);
+    if (tone === "pink") {
+      radial.addColorStop(0, `rgba(255, 215, 235, ${0.28 * strength})`);
+      radial.addColorStop(0.42, `rgba(100, 48, 88, ${0.4 * strength})`);
+      radial.addColorStop(1, `rgba(8, 6, 18, ${0.72 * strength})`);
+    } else {
+      radial.addColorStop(0, `rgba(190, 240, 225, ${0.22 * strength})`);
+      radial.addColorStop(0.48, `rgba(28, 72, 64, ${0.44 * strength})`);
+      radial.addColorStop(1, `rgba(6, 14, 18, ${0.68 * strength})`);
+    }
+    ctx.fillStyle = radial;
+    ctx.fillRect(0, 0, width, height);
+    const edge = ctx.createLinearGradient(0, 0, 0, height);
+    edge.addColorStop(0, `rgba(0,0,0,${0.14 * strength})`);
+    edge.addColorStop(0.22, "rgba(0,0,0,0)");
+    edge.addColorStop(0.78, "rgba(0,0,0,0)");
+    edge.addColorStop(1, `rgba(0,0,0,${0.2 * strength})`);
+    ctx.fillStyle = edge;
+    ctx.fillRect(0, 0, width, height);
+  }
+
   // src/config/share-images.json
   var share_images_default = {
     lobby: {
@@ -12605,7 +13615,7 @@
   };
 
   // src/presentation/ui/HudGoalText.ts
-  var KIND_NAME = {
+  var KIND_NAME2 = {
     [1 /* Red */]: "\u7EA2\u72D0",
     [2 /* Blue */]: "\u84DD\u5154",
     [3 /* Green */]: "\u7EFF\u86D9",
@@ -12621,7 +13631,7 @@
     const n = `${goal.current}/${goal.target}`;
     switch (goal.goal.type) {
       case "collect": {
-        const name = (_a = KIND_NAME[goal.goal.kind]) != null ? _a : "\u840C\u5BA0";
+        const name = (_a = KIND_NAME2[goal.goal.kind]) != null ? _a : "\u840C\u5BA0";
         return compact ? `${name} ${n}` : `\u6536\u96C6${name} ${n}`;
       }
       case "clear_ice":
@@ -12745,96 +13755,150 @@
   // src/presentation/ui/LeaderboardPanel.ts
   var PLAYER_ROW_H = 52;
   var PLAYER_ROW_GAP = 6;
-  var META_ROW_H = 28;
   var AVATAR_R = 16;
-  var VISIBLE_PLAYER_ROWS = 4;
+  var INFO_LINE_H = 16;
+  var MAX_VISIBLE_ROWS = 5;
+  var MIN_VISIBLE_ROWS = 2;
+  var LEADERBOARD_PODIUM_H = 56;
   function playerRowStride() {
     return PLAYER_ROW_H + PLAYER_ROW_GAP;
   }
+  function leaderboardShowPodium(playerCount, listViewportH) {
+    return playerCount >= 3 && listViewportH > LEADERBOARD_PODIUM_H + playerRowStride();
+  }
   function layoutLeaderboardPanel(input) {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f;
     const panelW = Math.min(360, input.width - 24);
     const padX = 14;
-    const tagW = 28;
-    const avatarGap = 10;
-    const scoreColW = 56;
-    const headerRows = [];
-    if (input.hint) {
-      headerRows.push({ tag: "\u63D0\u9192", text: input.hint, kind: "meta" });
-    }
-    if (input.rewardText) {
-      headerRows.push({ tag: "", text: input.rewardText, kind: "reward" });
-    }
-    let playerRows = [];
-    if (input.rows.length > 0) {
-      playerRows = input.rows.map((row) => {
-        var _a2;
-        return {
-          ...row,
-          kind: (_a2 = row.kind) != null ? _a2 : row.nickName || row.score != null ? "player" : "meta"
-        };
-      });
-    } else {
-      headerRows.push({
-        tag: "\u63D0\u793A",
-        text: (_b = (_a = notice_default.leaderboard) == null ? void 0 : _a.unavailable) != null ? _b : "\u597D\u53CB\u6392\u884C\u6682\u65F6\u6253\u4E0D\u5F00",
-        kind: "meta"
-      });
-    }
-    const avatarR = AVATAR_R;
-    const textWidth = panelW - padX * 2 - tagW - avatarGap - avatarR * 2 - avatarGap - scoreColW;
-    let headerH = 8;
-    for (const row of headerRows) {
-      if (row.kind === "reward") {
-        headerH += Math.max(META_ROW_H, input.wrap(row.text, panelW - padX * 2).length * 16 + 8) + 6;
-      } else {
-        headerH += Math.max(META_ROW_H, input.wrap(row.text, textWidth + scoreColW).length * 16 + 10) + 6;
-      }
-    }
-    const listContentH = playerRows.length > 0 ? playerRows.length * playerRowStride() : 0;
-    const listViewportH = Math.min(
-      listContentH || playerRowStride(),
-      VISIBLE_PLAYER_ROWS * playerRowStride()
-    );
+    const tagW = 30;
+    const avatarGap = 8;
+    const scoreColW = 78;
+    const innerW = panelW - padX * 2;
+    const tab = input.tab;
+    const isWeek = input.activeTab === "week";
+    const ruleLines = (tab == null ? void 0 : tab.rule) ? input.wrap(tab.rule, innerW) : [];
+    const rawTiers = isWeek ? leaderboardRewardTierLines() : [];
+    const settleLines = isWeek && ((_a = input.settleText) == null ? void 0 : _a.trim()) ? input.wrap(input.settleText.trim(), innerW) : [];
+    const settleNote = isWeek && (settleLines.length > 0 || rawTiers.length > 0) ? (_b = notice_default.leaderboard.settleNote) != null ? _b : "" : "";
+    const settleNoteLines = settleNote ? input.wrap(settleNote, innerW) : [];
+    const rewardTierLines = rawTiers.flatMap((line) => input.wrap(line, innerW));
+    const rewardTitle = isWeek && rewardTierLines.length > 0 ? (_c = notice_default.leaderboard.rewardTitle) != null ? _c : "\u5468\u5956\u52B1" : null;
+    const rewardLines = [];
+    const playerRows = ((_d = tab == null ? void 0 : tab.rows) != null ? _d : []).filter((row) => {
+      var _a2;
+      return ((_a2 = row.kind) != null ? _a2 : "player") === "player";
+    });
+    const selfRow = (_e = tab == null ? void 0 : tab.self) != null ? _e : null;
+    const gapHint = (_f = tab == null ? void 0 : tab.gapHint) != null ? _f : "";
     const titleH = 46;
-    const footH = 20;
-    const desiredH = titleH + headerH + listViewportH + footH;
-    const panelH = Math.min(input.height * 0.88, Math.max(desiredH, titleH + footH + 80));
+    const tabsH = 34;
+    const rewardBlockPad = rewardTierLines.length > 0 ? 10 : 0;
+    const infoLineCount = ruleLines.length + settleLines.length + settleNoteLines.length + (rewardTitle ? 1 : 0) + rewardTierLines.length;
+    const infoH = infoLineCount * INFO_LINE_H + rewardBlockPad + 8;
+    const gapH = gapHint ? 22 : 0;
+    const selfBarH = selfRow ? PLAYER_ROW_H + 8 : 0;
+    const inviteH = 40;
+    const footH = 14;
+    const fixedH = titleH + tabsH + 8 + infoH + gapH + 6 + selfBarH + 8 + inviteH + footH;
+    const stride = playerRowStride();
+    const podiumEstimate = playerRows.length >= 3 ? LEADERBOARD_PODIUM_H : 0;
+    const scrollEstimate = playerRows.length >= 3 ? Math.max(0, playerRows.length - 3) : playerRows.length;
+    const wantRows = Math.max(
+      MIN_VISIBLE_ROWS,
+      Math.min(MAX_VISIBLE_ROWS, scrollEstimate || playerRows.length)
+    );
+    const desiredH = fixedH + podiumEstimate + wantRows * stride;
+    const panelH = Math.min(input.height * 0.9, desiredH);
     const x = (input.width - panelW) / 2;
     const y = Math.max(12, (input.height - panelH) / 2);
+    const tabsY = y + titleH;
+    const tabGap = 8;
+    const tabW = (innerW - tabGap) / 2;
+    const tabs = [
+      {
+        id: "lb_tab_level",
+        x: x + padX,
+        y: tabsY,
+        w: tabW,
+        h: tabsH,
+        label: notice_default.leaderboard.tabLevel,
+        active: !isWeek
+      },
+      {
+        id: "lb_tab_week",
+        x: x + padX + tabW + tabGap,
+        y: tabsY,
+        w: tabW,
+        h: tabsH,
+        label: notice_default.leaderboard.tabWeek,
+        active: isWeek
+      }
+    ];
+    const infoTop = tabsY + tabsH + 8;
+    const gapY = infoTop + infoH;
+    const listTop = gapY + gapH + 6;
+    const inviteY = y + panelH - footH - inviteH;
+    const selfBarY = inviteY - 8 - selfBarH;
+    const listBottom = selfRow ? selfBarY - 4 : inviteY - 8;
+    const listViewportH = Math.max(0, listBottom - listTop);
+    const showPodium = leaderboardShowPodium(playerRows.length, listViewportH);
+    const podiumH = showPodium ? LEADERBOARD_PODIUM_H : 0;
+    const scrollRowCount = showPodium ? Math.max(0, playerRows.length - 3) : playerRows.length;
+    const listContentH = scrollRowCount * stride;
     const tagX = x + padX;
-    const avatarX = tagX + tagW + avatarGap + avatarR;
-    const textX = avatarX + avatarR + avatarGap;
-    const scoreX = x + panelW - padX;
-    const bodyTop = y + titleH;
-    const bodyBottom = y + panelH - footH;
-    const listTop = bodyTop + headerH;
-    const listBottom = bodyBottom;
-    const fittedViewportH = Math.max(0, listBottom - listTop);
+    const avatarX = tagX + tagW + avatarGap + AVATAR_R;
+    const textX = avatarX + AVATAR_R + avatarGap;
+    const scoreX = x + panelW - padX - 4;
+    const textWidth = Math.max(60, scoreX - scoreColW - textX);
+    const invite = {
+      id: "invite",
+      x: x + padX + 20,
+      y: inviteY,
+      w: innerW - 40,
+      h: inviteH,
+      label: notice_default.leaderboard.invite
+    };
+    const close = panelCloseButton({ x, y, w: panelW });
     return {
       panel: { x, y, w: panelW, h: panelH },
-      title: (_d = (_c = notice_default.leaderboard) == null ? void 0 : _c.title) != null ? _d : "\u597D\u53CB\u6392\u884C",
-      headerRows,
+      title: notice_default.leaderboard.title,
+      activeTab: input.activeTab,
+      tabs,
+      ruleLines,
+      rewardLines,
+      settleLines,
+      settleNoteLines,
+      rewardTitle,
+      rewardTierLines,
+      infoTop,
+      infoLineH: INFO_LINE_H,
+      gapHint,
+      gapY,
       playerRows,
-      textWidth: Math.max(80, textWidth),
+      emptyText: tab ? isWeek ? notice_default.leaderboard.weekEmpty : notice_default.leaderboard.empty : notice_default.leaderboard.unavailable,
+      textWidth,
       tagX,
       avatarX,
-      avatarR,
+      avatarR: AVATAR_R,
       textX,
       scoreX,
-      bodyTop,
-      bodyBottom,
       listTop,
       listBottom,
-      listViewportH: fittedViewportH,
+      listViewportH,
       listContentH,
+      podiumH,
+      listScrollTop: listTop + podiumH,
+      listScrollViewportH: Math.max(0, listBottom - listTop - podiumH),
       rowH: PLAYER_ROW_H,
-      metaRowH: META_ROW_H,
-      buttons: [panelCloseButton({ x, y, w: panelW })]
+      rowGap: PLAYER_ROW_GAP,
+      selfRow,
+      selfBar: { x: x + 8, y: selfBarY, w: panelW - 16, h: selfBarH },
+      buttons: [{ ...close }, ...tabs, invite]
     };
   }
   function clampLeaderboardScroll(scrollY, layout) {
-    const maxScroll = Math.max(0, layout.listContentH - layout.listViewportH);
+    const viewport = layout.listScrollViewportH > 0 ? layout.listScrollViewportH : layout.listViewportH;
+    const maxScroll = Math.max(0, layout.listContentH - viewport);
     if (!Number.isFinite(scrollY) || scrollY < 0) {
       return 0;
     }
@@ -12842,6 +13906,306 @@
       return maxScroll;
     }
     return scrollY;
+  }
+  function leaderboardMedal(tag) {
+    if (tag === "1") {
+      return "gold";
+    }
+    if (tag === "2") {
+      return "silver";
+    }
+    if (tag === "3") {
+      return "bronze";
+    }
+    return null;
+  }
+
+  // src/presentation/ui/DailyTasksPanel.ts
+  var ROW_H = 64;
+  var ROW_GAP = 8;
+  var CHEST_H = 96;
+  function layoutDailyTasksPanel(input) {
+    const panelW = Math.min(352, input.width - 24);
+    const padX = 14;
+    const titleH = 62;
+    const footH = 16;
+    const tasks = input.view.tasks;
+    const listH = tasks.length * ROW_H + Math.max(0, tasks.length - 1) * ROW_GAP;
+    const panelH = Math.min(input.height * 0.92, titleH + listH + 12 + CHEST_H + footH);
+    const x = (input.width - panelW) / 2;
+    const y = Math.max(12, (input.height - panelH) / 2);
+    const innerW = panelW - padX * 2;
+    const btnW = 64;
+    const btnH = 32;
+    const buttons = [{ ...panelCloseButton({ x, y, w: panelW }) }];
+    const rows = tasks.map((task, index) => {
+      const ry = y + titleH + index * (ROW_H + ROW_GAP);
+      const rx = x + padX;
+      const iconCx = rx + 26;
+      const textX = rx + 54;
+      const barX = textX;
+      const barW = Math.max(60, rx + innerW - btnW - 14 - textX);
+      const state = task.claimed ? "claimed" : task.done ? "claim" : "todo";
+      const button = state === "claim" ? {
+        id: "daily_claim",
+        x: rx + innerW - btnW - 6,
+        y: ry + (ROW_H - btnH) / 2,
+        w: btnW,
+        h: btnH,
+        label: "\u9886\u53D6",
+        index
+      } : null;
+      if (button) {
+        buttons.push(button);
+      }
+      return {
+        task,
+        index,
+        x: rx,
+        y: ry,
+        w: innerW,
+        h: ROW_H,
+        iconCx,
+        textX,
+        barX,
+        barY: ry + 39,
+        barW,
+        barH: 14,
+        ratio: task.target > 0 ? Math.min(1, task.progress / task.target) : 0,
+        state,
+        button
+      };
+    });
+    const chestY = y + titleH + listH + 12;
+    const claimedCount = tasks.filter((task) => task.claimed).length;
+    const chestState = input.view.chestClaimed ? "claimed" : input.view.chestReady ? "ready" : "locked";
+    const chestX = x + padX;
+    if (chestState === "ready") {
+      const half = (innerW - 24 - 10) / 2;
+      const by = chestY + CHEST_H - 44;
+      buttons.push(
+        {
+          id: "daily_chest",
+          x: chestX + 12,
+          y: by,
+          w: half,
+          h: 36,
+          label: notice_default.dailyTasks.chestClaim
+        },
+        {
+          id: "daily_chest_double",
+          x: chestX + 12 + half + 10,
+          y: by,
+          w: half,
+          h: 36,
+          label: notice_default.dailyTasks.chestDouble
+        }
+      );
+    }
+    return {
+      panel: { x, y, w: panelW, h: panelH },
+      title: notice_default.dailyTasks.title,
+      subtitle: notice_default.dailyTasks.refresh,
+      rows,
+      chest: {
+        x: chestX,
+        y: chestY,
+        w: innerW,
+        h: CHEST_H,
+        iconCx: chestX + 34,
+        iconCy: chestY + (chestState === "ready" ? 26 : CHEST_H / 2),
+        textX: chestX + 68,
+        claimedCount,
+        total: tasks.length,
+        state: chestState,
+        hint: chestState === "claimed" ? "\u4ECA\u65E5\u5B9D\u7BB1\u5DF2\u9886\u53D6\uFF0C\u660E\u5929\u518D\u6765" : notice_default.dailyTasks.chestHint
+      },
+      buttons
+    };
+  }
+  function dailyTasksSideLabel(_view) {
+    return notice_default.dailyTasks.title;
+  }
+
+  // src/presentation/fx/LevelFx.ts
+  var BANNER_DURATION_MS = {
+    intro: 1500,
+    goal: 1100,
+    bonus: 1200,
+    low_moves: 1100,
+    mahjong_intro: 1500,
+    mahjong_fail: 1400
+  };
+  function makeLevelBanner(kind, title, subtitle) {
+    return { kind, title, subtitle, startMs: 0, durationMs: BANNER_DURATION_MS[kind] };
+  }
+  function clamp012(v) {
+    return v < 0 ? 0 : v > 1 ? 1 : v;
+  }
+  function easeOutBack2(t) {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  }
+  function easeInOutQuad(t) {
+    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  }
+  function bannerFrame(banner, nowMs) {
+    const elapsed = nowMs - banner.startMs;
+    if (elapsed >= banner.durationMs) {
+      return { done: true, offset: 1, alpha: 0, scale: 1, ribbon: 0 };
+    }
+    const t = clamp012(elapsed / banner.durationMs);
+    const inEnd = 0.2;
+    const outStart = 0.82;
+    if (t < inEnd) {
+      const u = t / inEnd;
+      return {
+        done: false,
+        offset: -(1 - easeOutBack2(u)),
+        alpha: clamp012(u * 1.6),
+        scale: 0.9 + 0.1 * u,
+        ribbon: clamp012(u * 1.4)
+      };
+    }
+    if (t > outStart) {
+      const u = (t - outStart) / (1 - outStart);
+      return {
+        done: false,
+        offset: u * u,
+        alpha: 1 - u,
+        scale: 1,
+        ribbon: 1 - u
+      };
+    }
+    const holdPulse = 1 + 0.035 * Math.sin(nowMs * 0.012 + banner.startMs * 1e-3);
+    return { done: false, offset: 0, alpha: 1, scale: holdPulse, ribbon: 1 };
+  }
+  function bannerShimmerPhase(banner, nowMs) {
+    const elapsed = nowMs - banner.startMs;
+    if (elapsed <= 0 || elapsed >= banner.durationMs) {
+      return -1;
+    }
+    const t = clamp012(elapsed / banner.durationMs);
+    if (t < 0.2 || t > 0.82) {
+      return -1;
+    }
+    return elapsed * 85e-5 % 1.35 - 0.2;
+  }
+  function planGoalFlyers(cells, goalKind, max) {
+    if (goalKind === void 0) {
+      return [];
+    }
+    const hits = cells.filter((cell) => cell.kind === goalKind);
+    if (hits.length <= max) {
+      return hits.slice();
+    }
+    const out = [];
+    const step = hits.length / max;
+    for (let i = 0; i < max; i += 1) {
+      out.push(hits[Math.floor(i * step)]);
+    }
+    return out;
+  }
+  function flyerPoint(flyer, nowMs) {
+    const elapsed = nowMs - flyer.startMs;
+    if (elapsed < 0) {
+      return { done: false, started: false, x: flyer.fromX, y: flyer.fromY, scale: 1, alpha: 0 };
+    }
+    if (elapsed >= flyer.durationMs) {
+      return { done: true, started: true, x: flyer.toX, y: flyer.toY, scale: 0.5, alpha: 0 };
+    }
+    const t = easeInOutQuad(elapsed / flyer.durationMs);
+    const midX = (flyer.fromX + flyer.toX) / 2 + (flyer.fromX < flyer.toX ? -30 : 30);
+    const midY = Math.min(flyer.fromY, flyer.toY) - 60;
+    const a = (1 - t) * (1 - t);
+    const b = 2 * (1 - t) * t;
+    const c = t * t;
+    return {
+      done: false,
+      started: true,
+      x: a * flyer.fromX + b * midX + c * flyer.toX,
+      y: a * flyer.fromY + b * midY + c * flyer.toY,
+      scale: t < 0.15 ? 1 + t * 1.6 : 1.24 - 0.7 * t,
+      alpha: t > 0.92 ? (1 - t) / 0.08 : 1
+    };
+  }
+  var STAR_POP_DELAY_MS = 420;
+  var STAR_POP_STEP_MS = 280;
+  var STAR_POP_MS = 360;
+  function starPopFrame(index, elapsedMs) {
+    const start = STAR_POP_DELAY_MS + index * STAR_POP_STEP_MS;
+    const local = elapsedMs - start;
+    if (local < 0) {
+      return { visible: false, scale: 0, alpha: 0, landed: false };
+    }
+    if (local >= STAR_POP_MS) {
+      return { visible: true, scale: 1, alpha: 1, landed: true };
+    }
+    const u = local / STAR_POP_MS;
+    return { visible: true, scale: 0.2 + 1.3 * easeOutBack2(u) - 0.5 * u, alpha: clamp012(u * 2), landed: false };
+  }
+  function starPopTotalMs(count) {
+    return STAR_POP_DELAY_MS + Math.max(0, count - 1) * STAR_POP_STEP_MS + STAR_POP_MS;
+  }
+  function starPath(ctx, cx, cy, r) {
+    const inner = r * 0.48;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i += 1) {
+      const rr = i % 2 === 0 ? r : inner;
+      const ang = -Math.PI / 2 + i * Math.PI / 5;
+      const x = cx + Math.cos(ang) * rr;
+      const y = cy + Math.sin(ang) * rr;
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.closePath();
+  }
+  function drawCandyStar(ctx, cx, cy, r, filled) {
+    ctx.save();
+    ctx.lineJoin = "round";
+    starPath(ctx, cx, cy + r * 0.08, r);
+    ctx.fillStyle = "rgba(90, 40, 70, 0.22)";
+    ctx.fill();
+    starPath(ctx, cx, cy, r);
+    if (filled) {
+      const g = ctx.createLinearGradient(cx, cy - r, cx, cy + r);
+      g.addColorStop(0, "#fff3bf");
+      g.addColorStop(0.45, "#ffd43b");
+      g.addColorStop(1, "#f59f00");
+      ctx.fillStyle = g;
+    } else {
+      ctx.fillStyle = "rgba(222, 226, 230, 0.95)";
+    }
+    ctx.fill();
+    ctx.lineWidth = Math.max(1.5, r * 0.14);
+    ctx.strokeStyle = filled ? "#ffffff" : "rgba(255,255,255,0.9)";
+    ctx.stroke();
+    if (filled) {
+      ctx.fillStyle = "rgba(255,255,255,0.65)";
+      ctx.beginPath();
+      ctx.arc(cx - r * 0.22, cy - r * 0.28, r * 0.16, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+  function bannerPalette(kind) {
+    switch (kind) {
+      case "goal":
+        return { top: "#b2f2bb", bottom: "#37b24d", ink: "#ffffff", edge: "#2b8a3e" };
+      case "bonus":
+        return { top: "#ffe066", bottom: "#f76707", ink: "#ffffff", edge: "#d9480f" };
+      case "low_moves":
+      case "mahjong_fail":
+        return { top: "#ffa8a8", bottom: "#e03131", ink: "#ffffff", edge: "#c92a2a" };
+      case "mahjong_intro":
+      case "intro":
+      default:
+        return { top: "#d0bfff", bottom: "#7048e8", ink: "#ffffff", edge: "#5f3dc4" };
+    }
   }
 
   // src/core/utils/lobbyNav.ts
@@ -12865,10 +14229,11 @@
   var LOBBY_NAV_CHIP_H = 36;
   var LOBBY_NAV_CHIP_MIN_W = 68;
   var LOBBY_NAV_HIT_PAD = 16;
-  var LOBBY_CLAIM_LABEL = "\u70B9\u51FB\u9886\u53D6 \u91CD\u6392 x1";
+  var LOBBY_DAILY_BAR_LABEL = "\u6BCF\u65E5\u4EFB\u52A1 \xB7 {n} \u4E2A\u5956\u52B1\u5F85\u9886\u53D6";
   var LOBBY_SIDE_ACTIONS = [
     { id: "invite", label: "\u9080\u8BF7\u597D\u53CB" },
-    { id: "leaderboard", label: "\u597D\u53CB\u6392\u884C" },
+    { id: "daily_open", label: "\u6BCF\u65E5\u4EFB\u52A1" },
+    { id: "leaderboard", label: "\u6392\u884C\u699C" },
     { id: "howto", label: "\u600E\u4E48\u73A9" }
   ];
   function lobbySideActionsTop(statusBarHeight, _coverDy, _coverDh) {
@@ -12934,11 +14299,11 @@
       w: chipW,
       h: chipH
     }));
-    const progressState = lobbyDailyProgress(input.clearsToday, input.shuffleGranted);
+    const claimable = Math.max(0, Math.floor(input.dailyClaimable) || 0);
     const claimH = 36;
-    const claim = progressState.readyToClaim ? {
-      id: "claim_shuffle",
-      label: LOBBY_CLAIM_LABEL,
+    const claim = claimable > 0 ? {
+      id: "daily_open",
+      label: LOBBY_DAILY_BAR_LABEL.replace("{n}", String(claimable)),
       x: side,
       y: chipY - gap - claimH,
       w: input.width - side * 2,
@@ -14299,9 +15664,11 @@
     }
     ctx.restore();
   }
-  function drawMahjongModalVeil(ctx, width, height, strength = 0.48) {
-    ctx.fillStyle = `rgba(28, 64, 58, ${strength})`;
-    ctx.fillRect(0, 0, width, height);
+  function drawMahjongModalVeil(ctx, width, height, strength = 0.48, tone = "teal") {
+    drawResultSceneBackdrop(ctx, width, height, {
+      veilAlpha: Math.min(1, strength / 0.48),
+      tone
+    });
   }
   function drawMahjongCuteCard(ctx, x, y, w, h, style = {}) {
     var _a;
@@ -14527,16 +15894,30 @@
     ctx.fill();
   }
   function drawMahjongPrimaryCapsuleButton(ctx, x, y, w, h, label, top = "#ffe066", bottom = "#fab005", textColor = "#5c3d00", fontSize = 16) {
+    const r = h / 2;
+    ctx.save();
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = "#4a3728";
+    roundRectPath(ctx, x + 1, y + 4, w, h, r);
+    ctx.fill();
+    ctx.globalAlpha = 1;
     const g = ctx.createLinearGradient(x, y, x, y + h);
     g.addColorStop(0, top);
     g.addColorStop(1, bottom);
     ctx.fillStyle = g;
-    roundRectPath(ctx, x, y, w, h, h / 2);
+    roundRectPath(ctx, x, y, w, h, r);
     ctx.fill();
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = "rgba(255,255,255,0.75)";
+    roundRectPath(ctx, x + 4, y + 3, w - 8, h * 0.38, Math.max(4, r - 4));
+    ctx.fill();
+    ctx.restore();
     ctx.strokeStyle = "rgba(255,255,255,0.85)";
     ctx.lineWidth = 2;
-    roundRectPath(ctx, x + 1, y + 1, w - 2, h - 2, h / 2 - 1);
+    roundRectPath(ctx, x + 1, y + 1, w - 2, h - 2, r - 1);
     ctx.stroke();
+    ctx.restore();
     drawMahjongCenterText(
       ctx,
       label,
@@ -14776,7 +16157,7 @@
     const t = Math.min(1, Math.max(0, elapsed / anim.durationMs));
     const e = easeOutCubic3(t);
     const arc = Math.sin(t * Math.PI) * Math.max(12, anim.fromH * 0.35);
-    const pop = 1 + Math.sin(t * Math.PI) * 0.08;
+    const pop = 1 + Math.sin(t * Math.PI) * 0.11;
     return {
       x: lerp(anim.fromX, anim.toX, e),
       y: lerp(anim.fromY, anim.toY, e) - arc,
@@ -14799,9 +16180,22 @@
     }
     flight.anims.push(anim);
   }
-  function pruneMahjongSlotFlight(flight, nowMs, append) {
+  function pruneMahjongSlotFlight(flight, nowMs, append, onLand) {
     while (flight.anims.length > 0 && mahjongFlyAnimDone(flight.anims[0], nowMs)) {
-      flight.baseSlots = append(flight.baseSlots, flight.anims.shift().type);
+      const anim = flight.anims[0];
+      const slotsBefore = flight.baseSlots;
+      const slotsAfter = append(slotsBefore, anim.type);
+      if (onLand) {
+        onLand({
+          type: anim.type,
+          slotsBefore,
+          slotsAfter,
+          removedCount: slotsBefore.length + 1 - slotsAfter.length,
+          anim
+        });
+      }
+      flight.baseSlots = slotsAfter;
+      flight.anims.shift();
     }
     return flight.anims.length > 0;
   }
@@ -14924,6 +16318,110 @@
     ctx.restore();
   }
 
+  // src/presentation/mahjong/MahjongStageFx.ts
+  function makeMahjongIntroBanner(level, subtitle) {
+    return makeLevelBanner("mahjong_intro", `\u7B2C ${level} \u5173`, subtitle);
+  }
+  function mahjongIntroSubtitle(themeName) {
+    const base = "\u4E09\u5F20\u540C\u724C\u5165\u69FD\u6D88\u9664";
+    if (!themeName) {
+      return base;
+    }
+    const short = themeName.replace(/麻将馆$/, "").trim();
+    return short ? `${short} \xB7 ${base}` : base;
+  }
+  function makeMahjongFailBanner(reason) {
+    return makeLevelBanner("mahjong_fail", "\u6311\u6218\u5931\u8D25", reason);
+  }
+  function mahjongFailReasonLabel(failReason) {
+    if (failReason === "timeout") {
+      return "\u65F6\u95F4\u5230\u5566\uFF0C\u518D\u8BD5\u4E00\u6B21\u5427";
+    }
+    if (failReason === "slot_full") {
+      return "\u69FD\u4F4D\u5DF2\u6EE1";
+    }
+    return "\u52A0\u6CB9\uFF0C\u4E0B\u628A\u4E00\u5B9A\u80FD\u8FC7";
+  }
+  function mahjongResultRevealFrame(startMs, nowMs, durationMs = 520) {
+    const elapsed = nowMs - startMs;
+    if (elapsed <= 0) {
+      return { alpha: 0, scale: 0.82, offsetY: 28 };
+    }
+    const t = Math.min(1, elapsed / durationMs);
+    const u = 1 - (1 - t) ** 3;
+    const bounce = 1 + 0.06 * Math.sin(t * Math.PI);
+    return {
+      alpha: Math.min(1, t * 1.35),
+      scale: (0.82 + 0.18 * u) * bounce,
+      offsetY: (1 - u) * 28
+    };
+  }
+  function drawMahjongLevelStageBanner(ctx, width, height, banner, nowMs, centerY = height * 0.42) {
+    if (banner.startMs === 0) {
+      banner.startMs = nowMs;
+    }
+    const frame = bannerFrame(banner, nowMs);
+    if (frame.done) {
+      return false;
+    }
+    const pal = bannerPalette(banner.kind);
+    const bandH = banner.subtitle ? 82 : 62;
+    const top = centerY - bandH / 2;
+    if (banner.kind === "mahjong_fail") {
+      ctx.save();
+      ctx.globalAlpha = frame.alpha * 0.28;
+      ctx.fillStyle = "#1a1a2e";
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+    ctx.save();
+    ctx.globalAlpha = frame.ribbon * 0.92;
+    const g = ctx.createLinearGradient(0, top, 0, top + bandH);
+    g.addColorStop(0, pal.top);
+    g.addColorStop(1, pal.bottom);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, top, width, bandH);
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.fillRect(0, top, width, 3);
+    ctx.fillRect(0, top + bandH - 3, width, 3);
+    const shimmer = bannerShimmerPhase(banner, nowMs);
+    if (shimmer >= 0) {
+      const sx = shimmer * width;
+      const sg = ctx.createLinearGradient(sx - 40, top, sx + 40, top + bandH);
+      sg.addColorStop(0, "rgba(255,255,255,0)");
+      sg.addColorStop(0.5, "rgba(255,255,255,0.45)");
+      sg.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = sg;
+      ctx.fillRect(sx - 50, top, 100, bandH);
+    }
+    ctx.restore();
+    ctx.save();
+    ctx.globalAlpha = frame.alpha;
+    ctx.translate(width / 2 + frame.offset * width, centerY);
+    ctx.scale(frame.scale, frame.scale);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    const titleSize = banner.kind === "mahjong_intro" ? 34 : 30;
+    const ty = banner.subtitle ? -13 : 0;
+    ctx.font = `bold ${titleSize}px sans-serif`;
+    ctx.strokeStyle = pal.edge;
+    ctx.lineWidth = 7;
+    ctx.strokeText(banner.title, 0, ty);
+    ctx.fillStyle = pal.ink;
+    ctx.fillText(banner.title, 0, ty);
+    if (banner.subtitle) {
+      ctx.font = "bold 14px sans-serif";
+      ctx.strokeStyle = pal.edge;
+      ctx.lineWidth = 4;
+      ctx.strokeText(banner.subtitle, 0, 22);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(banner.subtitle, 0, 22);
+    }
+    ctx.restore();
+    return true;
+  }
+
   // src/presentation/mahjong/MahjongHallUi.ts
   function formatTime(ms) {
     const sec = Math.max(0, Math.ceil(ms / 1e3));
@@ -14954,69 +16452,129 @@
       ctx.restore();
     }
   }
-  function drawMahjongPlayHeader(ctx, width, game, ladderCoins, mahjongRunCoins, safeTop) {
+  function drawMahjongGlassBar3D(ctx, x, y, w, h, r) {
+    ctx.save();
+    ctx.globalAlpha = 0.2;
+    ctx.fillStyle = MJ_PALETTE.tileShadow;
+    roundRect3(ctx, x + 1.5, y + 4, w, h, r);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    const body = ctx.createLinearGradient(x, y, x, y + h);
+    body.addColorStop(0, "rgba(255,255,255,0.38)");
+    body.addColorStop(0.42, MJ_PALETTE.glass);
+    body.addColorStop(1, MJ_PALETTE.glassDeep);
+    ctx.fillStyle = body;
+    roundRect3(ctx, x, y, w, h, r);
+    ctx.fill();
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    const gloss = ctx.createLinearGradient(x, y, x, y + h * 0.55);
+    gloss.addColorStop(0, "rgba(255,255,255,0.72)");
+    gloss.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = gloss;
+    roundRect3(ctx, x + 3, y + 2, w - 6, h * 0.42, Math.max(4, r - 4));
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = MJ_PALETTE.glassStroke;
+    ctx.lineWidth = 2;
+    roundRect3(ctx, x + 0.5, y + 0.5, w - 1, h - 1, r - 0.5);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.22)";
+    ctx.lineWidth = 1;
+    roundRect3(ctx, x + 3, y + 3, w - 6, h - 6, Math.max(2, r - 3));
+    ctx.stroke();
+    ctx.restore();
+  }
+  function drawMahjongPlayHeader(ctx, width, game, ladderCoins, mahjongRunCoins, safeTop, nowMs = 0) {
     const leftReserve = mahjongPlayHeaderLeftReserve();
     const rightReserve = Math.max(118, width * 0.3);
     const bx = leftReserve;
     const bannerW = Math.max(160, width - leftReserve - rightReserve);
     const by = safeTop + 4;
     const barH = 32;
-    const grad = ctx.createLinearGradient(bx, by, bx, by + barH);
-    grad.addColorStop(0, MJ_PALETTE.glass);
-    grad.addColorStop(1, MJ_PALETTE.glassDeep);
-    ctx.fillStyle = grad;
-    roundRect3(ctx, bx, by, bannerW, barH, 12);
-    ctx.fill();
-    ctx.strokeStyle = MJ_PALETTE.glassStroke;
-    ctx.lineWidth = 1.5;
-    roundRect3(ctx, bx, by, bannerW, barH, 12);
-    ctx.stroke();
+    drawMahjongGlassBar3D(ctx, bx, by, bannerW, barH, 12);
     const midY = by + barH / 2;
     ctx.save();
     ctx.textBaseline = "middle";
-    ctx.fillStyle = MJ_PALETTE.textPrimary;
     ctx.textAlign = "left";
     ctx.font = "bold 14px sans-serif";
     const levelLabel = `\u5173\u5361 ${game.level}`;
     const levelX = bx + 12;
+    ctx.strokeStyle = "rgba(8, 48, 44, 0.35)";
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+    ctx.strokeText(levelLabel, levelX, midY);
+    ctx.fillStyle = MJ_PALETTE.textPrimary;
     ctx.fillText(levelLabel, levelX, midY);
     const levelW = ctx.measureText(levelLabel).width;
     ctx.font = "bold 13px sans-serif";
     const timerLabel = `\u23F1 ${formatTime(game.remainingMs)}`;
-    ctx.fillText(timerLabel, levelX + levelW + 10, midY);
+    const timerX = levelX + levelW + 10;
+    const urgent = game.remainingMs > 0 && game.remainingMs <= 45e3;
+    if (urgent) {
+      const pulse = 0.55 + 0.45 * Math.abs(Math.sin(nowMs * 0.012));
+      ctx.save();
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = "rgba(255, 107, 107, 0.28)";
+      ctx.fillRect(timerX - 4, midY - 12, ctx.measureText(timerLabel).width + 8, 24);
+      ctx.restore();
+    }
+    ctx.fillStyle = urgent ? "#c92a2a" : MJ_PALETTE.textPrimary;
+    ctx.strokeText(timerLabel, timerX, midY);
+    ctx.fillText(timerLabel, timerX, midY);
     ctx.textAlign = "right";
     ctx.font = "bold 11px sans-serif";
     const coinLine = `\u68AF\u5B50${formatMahjongGlobalCoinAmount(ladderCoins)} \u672C\u5C40${formatMahjongGlobalCoinAmount(mahjongRunCoins)}`;
+    ctx.strokeText(coinLine, bx + bannerW - 8, midY);
+    ctx.fillStyle = MJ_PALETTE.textSoft;
     ctx.fillText(coinLine, bx + bannerW - 8, midY);
     ctx.restore();
   }
-  function drawMahjongSlotBar(ctx, width, slotY, slotW, slotH, pad) {
+  function drawMahjongSlotBar(ctx, width, slotY, slotW, slotH, pad, slotCount = 0, maxSlots = 6, nowMs = 0) {
     const barPad = 6;
     const barH = slotH + barPad * 2;
     const barY = slotY - barPad;
-    ctx.fillStyle = MJ_PALETTE.glassDeep;
-    roundRect3(ctx, pad - 4, barY, width - pad * 2 + 8, barH, 16);
-    ctx.fill();
-    ctx.strokeStyle = MJ_PALETTE.glassStroke;
-    ctx.lineWidth = 1.5;
-    roundRect3(ctx, pad - 4, barY, width - pad * 2 + 8, barH, 16);
-    ctx.stroke();
+    const barX = pad - 4;
+    const barW = width - pad * 2 + 8;
+    drawMahjongGlassBar3D(ctx, barX, barY, barW, barH, 16);
+    const tight = maxSlots > 0 && slotCount >= Math.max(1, maxSlots - 1);
+    if (tight) {
+      const pulse = 0.35 + 0.35 * Math.abs(Math.sin(nowMs * 9e-3));
+      ctx.save();
+      ctx.globalAlpha = pulse;
+      ctx.strokeStyle = slotCount >= maxSlots ? "#ff6b6b" : "#ff922b";
+      ctx.lineWidth = 3;
+      roundRect3(ctx, barX + 1, barY + 1, barW - 2, barH - 2, 15);
+      ctx.stroke();
+      ctx.restore();
+    }
     for (let i = 0; i < 7; i += 1) {
       const x = pad + i * (slotW + 5);
-      ctx.fillStyle = MJ_PALETTE.slotWell;
+      ctx.save();
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = "#000000";
+      roundRect3(ctx, x + 1, slotY + 3, slotW, slotH, 8);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      const well = ctx.createLinearGradient(x, slotY, x, slotY + slotH);
+      well.addColorStop(0, "rgba(18, 72, 68, 0.55)");
+      well.addColorStop(0.5, MJ_PALETTE.slotWell);
+      well.addColorStop(1, "rgba(12, 48, 46, 0.62)");
+      ctx.fillStyle = well;
       roundRect3(ctx, x, slotY, slotW, slotH, 8);
       ctx.fill();
       const wellShine = ctx.createLinearGradient(x, slotY, x, slotY + slotH);
-      wellShine.addColorStop(0, "rgba(255,255,255,0.42)");
-      wellShine.addColorStop(0.55, "rgba(255,255,255,0.08)");
+      wellShine.addColorStop(0, "rgba(255,255,255,0.48)");
+      wellShine.addColorStop(0.55, "rgba(255,255,255,0.1)");
       wellShine.addColorStop(1, "rgba(255,255,255,0)");
       ctx.fillStyle = wellShine;
-      roundRect3(ctx, x, slotY, slotW, slotH * 0.55, 8);
+      roundRect3(ctx, x + 1, slotY + 1, slotW - 2, slotH * 0.48, 7);
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.32)";
-      ctx.lineWidth = 1;
-      roundRect3(ctx, x, slotY, slotW, slotH, 8);
+      ctx.strokeStyle = "rgba(255,255,255,0.38)";
+      ctx.lineWidth = 1.5;
+      roundRect3(ctx, x + 0.5, slotY + 0.5, slotW - 1, slotH - 1, 7.5);
       ctx.stroke();
+      ctx.restore();
     }
   }
   function layoutMahjongPlay(width, height, game, tileHits, buttons) {
@@ -15081,7 +16639,7 @@
       chrome,
       chrome.pileSway
     );
-    drawMahjongPlayHeader(ctx, width, game, ladderCoins, game.coinsThisRun, m.safeTop);
+    drawMahjongPlayHeader(ctx, width, game, ladderCoins, game.coinsThisRun, m.safeTop, nowMs);
     const pileZMax = layoutMahjongPlay(width, height, game, tileHits, buttons);
     const tileDrawOptsBase = {
       mahjongLevel: game.level,
@@ -15105,7 +16663,23 @@
         stand: pose == null ? void 0 : pose.stand
       });
     }
-    drawMahjongSlotBar(ctx, width, m.slotY, m.slotW, m.slotH, m.pad);
+    const shownSlots = slotFlight ? mahjongSlotsForDisplay(
+      game.slots,
+      slotFlight,
+      nowMs,
+      (slots, tile) => game.slotsAfterAppend(slots, tile)
+    ) : game.slots;
+    drawMahjongSlotBar(
+      ctx,
+      width,
+      m.slotY,
+      m.slotW,
+      m.slotH,
+      m.pad,
+      shownSlots.length,
+      game.maxSlots(),
+      nowMs
+    );
     for (let i = 0; i < 7; i += 1) {
       const locked = i === 6 && !game.adSlotUnlocked;
       if (locked) {
@@ -15123,12 +16697,6 @@
         ctx.fillText("\u89E3\u9501", x + m.slotW / 2, m.slotY + m.slotH * 0.62);
       }
     }
-    const shownSlots = slotFlight ? mahjongSlotsForDisplay(
-      game.slots,
-      slotFlight,
-      nowMs,
-      (slots, tile) => game.slotsAfterAppend(slots, tile)
-    ) : game.slots;
     shownSlots.forEach((type, idx) => {
       if (idx >= game.maxSlots()) {
         return;
@@ -15154,17 +16722,17 @@
     }
     if (game.level === 1 && !game.guideShown) {
       const gy = m.headerBottom - 4;
-      ctx.fillStyle = MJ_PALETTE.glass;
-      roundRect3(ctx, m.pad, gy, width - m.pad * 2, 26, 8);
-      ctx.fill();
-      ctx.strokeStyle = MJ_PALETTE.glassStroke;
-      ctx.lineWidth = 1;
-      roundRect3(ctx, m.pad, gy, width - m.pad * 2, 26, 8);
-      ctx.stroke();
+      const gw = width - m.pad * 2;
+      drawMahjongGlassBar3D(ctx, m.pad, gy, gw, 26, 10);
       ctx.fillStyle = MJ_PALETTE.textPrimary;
       ctx.font = "12px sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText("\u70B9\u51FB\u9EBB\u5C06\u653E\u5165\u69FD\u4F4D\uFF0C3 \u4E2A\u76F8\u540C\u81EA\u52A8\u6D88\u9664", width / 2, gy + 17);
+      ctx.textBaseline = "middle";
+      ctx.strokeStyle = "rgba(8, 48, 44, 0.32)";
+      ctx.lineWidth = 2.5;
+      const tip = "\u70B9\u51FB\u9EBB\u5C06\u653E\u5165\u69FD\u4F4D\uFF0C3 \u4E2A\u76F8\u540C\u81EA\u52A8\u6D88\u9664";
+      ctx.strokeText(tip, width / 2, gy + 13);
+      ctx.fillText(tip, width / 2, gy + 13);
     }
     for (const btn of buttons) {
       if (btn.id.startsWith("mahjong_tool_")) {
@@ -15392,7 +16960,15 @@
       );
     }
   }
-  function drawMahjongSlotFullChallengeFailed(ctx, width, height, buttons, nowMs, chrome) {
+  function drawMahjongSlotFullChallengeFailed(ctx, width, height, buttons, nowMs, chrome, resultRevealStartMs = 0) {
+    ctx.save();
+    if (resultRevealStartMs > 0) {
+      const rev = mahjongResultRevealFrame(resultRevealStartMs, nowMs);
+      ctx.globalAlpha = rev.alpha;
+      ctx.translate(width / 2, height / 2 + rev.offsetY);
+      ctx.scale(rev.scale, rev.scale);
+      ctx.translate(-width / 2, -height / 2);
+    }
     drawMahjongModalVeil(ctx, width, height, 0.46);
     const cardW = Math.min(width * 0.86, 328);
     const footerH = 112;
@@ -15478,9 +17054,10 @@
       "#37b24d",
       "#ffffff"
     );
+    ctx.restore();
   }
   function drawMahjongWinCelebratePanel(ctx, width, height, game, buttons, autoNextMs, nowMs, celebrateImage) {
-    drawMahjongModalVeil(ctx, width, height, 0.42);
+    drawMahjongModalVeil(ctx, width, height, 0.88, "pink");
     const cardW = Math.min(width * 0.86, 328);
     const footerH = autoNextMs > 0 ? 132 : 112;
     const cardH = Math.min(Math.max(440, height * 0.56), height - 64);
@@ -15568,13 +17145,21 @@
       "#495057"
     );
   }
-  function drawMahjongResult(ctx, width, height, game, buttons, autoNextMs = 0, slotFullOfferDismissed = false, nowMs = 0, celebrateImage, chrome = {}) {
+  function drawMahjongResult(ctx, width, height, game, buttons, autoNextMs = 0, slotFullOfferDismissed = false, nowMs = 0, celebrateImage, chrome = {}, resultRevealStartMs = 0) {
     buttons.length = 0;
     if (game.phase === "lost" && game.failReason === "slot_full") {
       if (!slotFullOfferDismissed) {
         drawMahjongSlotFullReviveOffer(ctx, width, height, game, chrome, buttons, nowMs);
       } else {
-        drawMahjongSlotFullChallengeFailed(ctx, width, height, buttons, nowMs, chrome);
+        drawMahjongSlotFullChallengeFailed(
+          ctx,
+          width,
+          height,
+          buttons,
+          nowMs,
+          chrome,
+          resultRevealStartMs
+        );
       }
       return;
     }
@@ -15591,6 +17176,14 @@
         celebrateImage
       );
       return;
+    }
+    ctx.save();
+    if (resultRevealStartMs > 0) {
+      const rev = mahjongResultRevealFrame(resultRevealStartMs, nowMs);
+      ctx.globalAlpha = rev.alpha;
+      ctx.translate(width / 2, height / 2 + rev.offsetY);
+      ctx.scale(rev.scale, rev.scale);
+      ctx.translate(-width / 2, -height / 2);
     }
     drawMahjongModalVeil(ctx, width, height, won ? 0.42 : 0.48);
     const cardW = width * 0.82;
@@ -15696,6 +17289,7 @@
         btn.id === "mahjong_back_lobby" ? "#495057" : "#ffffff"
       );
     }
+    ctx.restore();
   }
   function roundRect3(ctx, x, y, w, h, r) {
     const radius = Math.min(r, w / 2, h / 2);
@@ -15716,7 +17310,7 @@
     }
     return null;
   }
-  function drawMahjongLadderCoinGateModal(ctx, width, height, ladderCoins, replayCost, buttons) {
+  function drawMahjongLadderCoinGateModal(ctx, width, height, ladderCoins, replayCost, buttons, nowMs = 0) {
     buttons.length = 0;
     const shortOnCoins = ladderCoins < replayCost;
     const pad = 22;
@@ -15731,7 +17325,10 @@
       radius: 20,
       border: "rgba(255, 190, 120, 0.95)",
       fillTop: "rgba(255,255,255,0.98)",
-      fillBottom: "rgba(255,248,235,0.98)"
+      fillBottom: "rgba(255,248,235,0.98)",
+      shadow: true,
+      sparkle: true,
+      nowMs
     });
     drawMahjongCenterText(
       ctx,
@@ -15924,6 +17521,80 @@
     reveal: "assets/main/mahjong/tools/tool-reveal.png"
   };
 
+  // src/presentation/mahjong/MahjongSlotClearFx.ts
+  function spawnMahjongSlotClearRings(rings, cx, cy, nowMs, count = 1) {
+    for (let i = 0; i < count; i += 1) {
+      rings.push({
+        cx,
+        cy: cy - i * 4,
+        startMs: nowMs + i * 40,
+        durationMs: 460 + i * 30
+      });
+    }
+  }
+  function pruneMahjongSlotClearRings(rings, nowMs) {
+    let any = false;
+    for (let i = rings.length - 1; i >= 0; i -= 1) {
+      const r = rings[i];
+      if (nowMs - r.startMs >= r.durationMs) {
+        rings.splice(i, 1);
+      } else {
+        any = true;
+      }
+    }
+    return any;
+  }
+  function drawMiniSparkle(ctx, x, y, r, alpha) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = Math.max(1.2, r * 0.35);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x - r, y);
+    ctx.lineTo(x + r, y);
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x, y + r);
+    ctx.stroke();
+    ctx.strokeStyle = "#96f2d7";
+    ctx.lineWidth = Math.max(1, r * 0.22);
+    ctx.beginPath();
+    ctx.moveTo(x - r * 0.65, y - r * 0.65);
+    ctx.lineTo(x + r * 0.65, y + r * 0.65);
+    ctx.moveTo(x + r * 0.65, y - r * 0.65);
+    ctx.lineTo(x - r * 0.65, y + r * 0.65);
+    ctx.stroke();
+    ctx.restore();
+  }
+  function drawMahjongSlotClearRings(ctx, rings, nowMs) {
+    for (const ring of rings) {
+      const elapsed = nowMs - ring.startMs;
+      if (elapsed < 0) {
+        continue;
+      }
+      const t = Math.min(1, elapsed / ring.durationMs);
+      const fade = (1 - t) * (1 - t);
+      const baseR = 18 + t * 52;
+      ctx.save();
+      ctx.globalAlpha = fade * 0.92;
+      ctx.strokeStyle = "#51cf66";
+      ctx.lineWidth = 3.5 * (1 - t * 0.35);
+      ctx.beginPath();
+      ctx.arc(ring.cx, ring.cy, baseR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = fade * 0.55;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(ring.cx, ring.cy, baseR * 0.72, 0, Math.PI * 2);
+      ctx.stroke();
+      if (t < 0.55) {
+        drawMiniSparkle(ctx, ring.cx, ring.cy, 5 + (1 - t) * 6, fade);
+      }
+      ctx.restore();
+    }
+  }
+
   // src/presentation/wechat/WxCanvasGameApp.ts
   var MAHJONG_AUTO_NEXT_MS = 1800;
   var BURIED_POSE_MS = 1100;
@@ -16010,12 +17681,16 @@
     { tag: "\u4F19\u4F34", text: "\u96EA\u4EBA\u3001\u4F01\u9E45\u85CF\u5728\u51B0\u4E0B\uFF0C\u5404\u5360\u591A\u683C\u3002\u5360\u5730\u51B0\u5757\u5168\u788E\u540E\u624D\u9732\u51FA\u5E76\u6536\u83B7\uFF1B\u96EA\u4EBA\u9732\u51FA\u65F6\u4F1A\u9707\u788E\u5468\u56F4\u4E00\u5708\u51B0\u3002" },
     { tag: "\u5927\u62DB", text: "\u56DB\u8FDE\u6216 L/T \u5F62\u51FA\u95EA\u5149\uFF08\u8303\u56F4\u7206\u70B8\uFF09\uFF1B\u4E94\u8FDE\u51FA\u8D85\u7EA7\u732B\u5934\u9E70\uFF08\u6E05\u540C\u8272\uFF09\u3002\u4E24\u679A\u95EA\u5149\u4E92\u6ED1\u53EF\u540C\u65F6\u5F15\u7206\u3002" },
     { tag: "\u7C89\u788E", text: "\u901A\u5173\u540E\u8FDB\u5165\u9650\u65F6\u70B9\u51FB\u7C89\u788E\u52A0\u5206\uFF0C\u53EF\u770B\u5E7F\u544A\u52A0\u65F6\u3002\u603B\u5206\u591F\u9AD8\u65F6\u8FD8\u53EF\u9009\u6E05\u6D01\u5C0F\u6E38\u620F\uFF08\u4E0D\u52A0\u4E3B\u7EBF\u5206\uFF09\u3002" },
+    {
+      tag: "\u661F\u7EA7",
+      text: "\u8FC7\u5173\u65F6\u7701\u4E0B\u7684\u6B65\u6570\u8D8A\u591A\uFF0C\u661F\u7EA7\u8D8A\u9AD8\uFF08\u6700\u591A 3 \u661F\uFF0C\u663E\u793A\u5728\u5173\u5361\u5706\u4E0B\u65B9\u7684\u5C0F\u91D1\u661F\uFF09\u3002\u4E0E\u68AF\u5B50\u4E0A\u7684\u300C\u9986\u5E01\u300D\u65E0\u5173\uFF1A\u9986\u5E01\u6309\u5386\u53F2\u6700\u9AD8\u5206\u6298\u7B97\uFF0C\u7528\u4E8E\u840C\u5BA0\u9EBB\u5C06\u9986\u3002"
+    },
     { tag: "\u9053\u5177", text: "\u9524\u5B50\u7838\u4E00\u683C\u3001\u91CD\u6392\u6D17\u76D8\u3001\u52A0\u6B65 +5\uFF0C\u5F00\u5C40\u4E0D\u9001\u3002\u5E93\u5B58\u7A7A\u65F6\uFF1A\u8F6C\u53D1\u597D\u53CB\u8FD4\u56DE +1 \u2192 \u8F6C\u53D1\u7FA4\u8FD4\u56DE +1 \u2192 \u518D\u770B\u5E7F\u544A\uFF1B\u91CD\u6392\u5165\u5305\u540E\u9700\u518D\u70B9\u4E00\u6B21\u624D\u6D17\u724C\u3002" },
     { tag: "\u5956\u52B1", text: "\u6BCF\u65E5\u767B\u5F55\u9001\u9524\u5B50\uFF1B\u5F53\u65E5\u901A\u5173\u6EE1 3 \u5173\u9886\u91CD\u6392\uFF1B\u67D0\u6B21\u5269 \u22656 \u6B65\u901A\u5173\u9001\u52A0\u6B65\u3002\u9053\u5177\u53EF\u5E26\u5165\u4E0B\u5173\uFF0C\u5404\u6700\u591A 9 \u4E2A\u3002" },
     { tag: "\u9080\u8BF7", text: "\u5206\u4EAB\u7ED9\u6CA1\u73A9\u8FC7\u7684\u597D\u53CB\uFF0C\u5BF9\u65B9\u901A\u5173\u540E\u53CC\u65B9\u5404\u5F97 1 \u9524\u5B50\u3002" },
     {
       tag: "\u9986\u9986",
-      text: "\u7CD6\u679C\u68AF\u5B50\u6BCF 100 \u5206 = 1 \u9986\u9986\u91D1\u5E01\u2B50\uFF08\u6309\u5404\u5173\u5386\u53F2\u6700\u9AD8\u5206\u6298\u7B97\uFF09\u3002\u840C\u5BA0\u9EBB\u5C06\u9986\u91CD\u5F00\u672C\u5173\u9700 300 \u91D1\u5E01\u2B50\uFF0C\u4E5F\u53EF\u770B\u5E7F\u544A\u590D\u6D3B\u6216\u91CD\u5F00\u3002"
+      text: "\u7CD6\u679C\u68AF\u5B50\u6761\u4E0A\u300C123\u5206 \xB7 \u99863\u300D= \u8BE5\u5173\u6700\u9AD8\u5206\u4E0E\u6298\u7B97\u9986\u5E01\uFF08\u6362\u9EBB\u5C06\u7528\uFF09\u3002\u6587\u6848\u91CC\u7684\u91D1\u5E01\u2B50\u662F\u9986\u5E01\u56FE\u6807\uFF0C\u4E0D\u662F\u901A\u5173\u661F\u7EA7\u3002"
     }
   ];
   var WIN_CELEBRATE_SRC = "assets/main/ui/win-celebrate.jpg";
@@ -16055,6 +17730,10 @@
       this.mahjongSuppressAutoNext = false;
       this.mahjongAutoNextInFlight = false;
       this.mahjongSlotFlight = createMahjongSlotFlight();
+      this.mahjongSlotClearRings = [];
+      this.mahjongStageBanner = null;
+      this.mahjongFailBannerQueued = false;
+      this.mahjongResultRevealStartMs = 0;
       this.mahjongPileSway = createMahjongPileSway();
       this.mahjongTileJitters = [];
       this.mahjongPileLastX = 0;
@@ -16080,6 +17759,20 @@
       this.toastUntilMs = 0;
       /** 进关「难度提升」艺术字提示 */
       this.difficultyArt = null;
+      /** 关卡横幅队列：开局 / 目标达成 / 步数奖励 / 只剩 5 步，一次放一条 */
+      this.levelBanners = [];
+      /** 目标块飞向 HUD 目标栏 */
+      this.goalFlyers = [];
+      /** HUD 目标图标中心，drawHud 时更新，飞行终点 */
+      this.hudGoalIconPos = null;
+      this.lowMovesWarned = false;
+      /** 局内刚完成的每日任务提示 */
+      this.dailyTaskPop = null;
+      /** 结算页打开时刻（星星逐颗弹出） */
+      this.resultOpenedMs = 0;
+      this.resultStars = 0;
+      this.leaderboardTab = "level";
+      this.dailyChestBusy = false;
       /** 锤子选格模式 */
       this.hammerTargeting = false;
       /** 锤子光标屏幕坐标（选中后跟随手指/鼠标） */
@@ -16227,6 +17920,8 @@
       this.lastInteractMs = Date.now();
       /** 连续画帧失败次数，过多则停循环等下一次触摸 */
       this.frameErrors = 0;
+      /** 避免 draw 异常每帧打 log，拖死微信开发者工具控制台 */
+      this.lastDrawErrorLogMs = 0;
       /** 胜利结算：是否询问进入清洁模式 */
       this.offerCleanPrompt = false;
       /** 交换滑动过渡 */
@@ -16265,11 +17960,13 @@
         this.height - ((_e = (_d = info.safeArea) == null ? void 0 : _d.bottom) != null ? _e : this.height)
       );
       this.menuButton = typeof wx.getMenuButtonBoundingClientRect === "function" ? wx.getMenuButtonBoundingClientRect() : null;
-      this.canvas = resolveWxMainCanvas();
+      const canvasBinding = bindMainCanvas2d();
+      this.canvas = canvasBinding.canvas;
+      this.canvasPresent = canvasBinding.present;
       this.canvas.width = Math.floor(this.width * this.dpr);
       this.canvas.height = Math.floor(this.height * this.dpr);
-      this.ctx = this.canvas.getContext("2d");
-      this.ctx.scale(this.dpr, this.dpr);
+      this.ctx = canvasBinding.ctx;
+      this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       this.applyCanvasDrawQuality();
       this.ctx.fillStyle = "#b6e8fc";
       this.ctx.fillRect(0, 0, this.width, this.height);
@@ -16461,16 +18158,16 @@
       }
       this.requestPaint();
       void this.preloadDeferredAssets();
+      const kickAfterAssets = () => {
+        this.sceneBg.layout(this.width, this.height);
+        this.needsPaint = true;
+        this.kickRenderLoop();
+      };
       if (!isWxDesktopIdeHost()) {
-        setTimeout(() => {
-          this.sceneBg.layout(this.width, this.height);
-          this.needsPaint = true;
-          this.kickRenderLoop();
-        }, 40);
-        setTimeout(() => {
-          this.needsPaint = true;
-          this.kickRenderLoop();
-        }, 200);
+        setTimeout(kickAfterAssets, 40);
+        setTimeout(kickAfterAssets, 200);
+      } else {
+        setTimeout(kickAfterAssets, 0);
       }
       console.info(
         "[crush-crush] assets loaded tiles=",
@@ -16562,6 +18259,7 @@
       if (inviteToast) {
         this.statusText = inviteToast;
       }
+      this.showLeaderboardRewardToast();
       wx.onTouchStart(this.onTouchStartBound);
       wx.onTouchMove(this.onTouchMoveBound);
       wx.onTouchEnd(this.onTouchEndBound);
@@ -16764,6 +18462,15 @@
       if (this.floatingScores.length || this.crushSparks.length || this.crushBursts.length) {
         return true;
       }
+      if (this.levelBanners.length > 0 || this.goalFlyers.length > 0) {
+        return true;
+      }
+      if (this.dailyTaskPop && now < this.dailyTaskPop.startMs + 2400) {
+        return true;
+      }
+      if (this.mode === "result" && this.resultStars > 0 && now < this.resultOpenedMs + starPopTotalMs(this.resultStars) + 100) {
+        return true;
+      }
       if (this.lobbyDrag || this.lobbyCamAutoTarget !== null) {
         return true;
       }
@@ -16778,6 +18485,26 @@
       }
       if (this.mode === "mahjong_play" && this.mahjongSlotFlight.anims.length > 0) {
         return true;
+      }
+      if (this.mode === "mahjong_play" && this.mahjongSlotClearRings.length > 0) {
+        return true;
+      }
+      if (this.mode === "mahjong_play" && this.mahjongStageBanner) {
+        return true;
+      }
+      if (this.mode === "mahjong_play" && this.mahjongResultRevealStartMs > 0 && now < this.mahjongResultRevealStartMs + 560) {
+        return true;
+      }
+      if (this.mode === "mahjong_play") {
+        const mj = this.session.mahjong.getActiveGame();
+        if ((mj == null ? void 0 : mj.phase) === "playing") {
+          if (mj.remainingMs > 0 && mj.remainingMs <= 45e3) {
+            return true;
+          }
+          if (mj.slots.length >= mj.maxSlots() - 1) {
+            return true;
+          }
+        }
       }
       return false;
     }
@@ -16849,6 +18576,56 @@
         void this.session.mahjong.saveActiveRun();
       }
       this.markUserActivity();
+      this.kickRenderLoop();
+    }
+    onMahjongTileLandedInSlot(ev) {
+      if (ev.removedCount < 3) {
+        return;
+      }
+      const now = this.nowMs || Date.now();
+      const triples = Math.floor(ev.removedCount / 3);
+      const cx = ev.anim.toX + ev.anim.toW / 2;
+      const cy = ev.anim.toY + ev.anim.toH / 2;
+      this.session.playMatchSfx();
+      this.shakeMs = Math.max(this.shakeMs, 100 + triples * 28);
+      spawnMahjongSlotClearRings(this.mahjongSlotClearRings, cx, cy, now, triples);
+      const starGain = triples * mahjongStarPerTriple();
+      const coinGain = triples * mahjongCoinPerTriple();
+      this.floatingScores.push({
+        x: cx,
+        y: cy - 28,
+        text: `+${starGain}\u2605`,
+        startMs: now,
+        durationMs: 920,
+        color: "#ffd43b",
+        fontSize: 22
+      });
+      if (coinGain > 0) {
+        this.floatingScores.push({
+          x: cx,
+          y: cy - 4,
+          text: `+${coinGain}`,
+          startMs: now + 60,
+          durationMs: 880,
+          color: "#ffe566",
+          fontSize: 20
+        });
+      }
+      const sparkCount = this.cheapFx ? 6 : 10;
+      for (let i = 0; i < sparkCount; i += 1) {
+        const ang = Math.PI * 2 * i / sparkCount + Math.random() * 0.35;
+        const speed = 48 + Math.random() * 95;
+        this.crushSparks.push({
+          x: cx,
+          y: cy,
+          vx: Math.cos(ang) * speed,
+          vy: Math.sin(ang) * speed - 36,
+          startMs: now,
+          durationMs: 380 + Math.random() * 220,
+          color: ["#96f2d7", "#51cf66", "#ffd43b", "#ffffff"][i % 4],
+          style: i % 3 === 0 ? "star" : "dot"
+        });
+      }
       this.kickRenderLoop();
     }
     isInMahjongPileArea(x, y) {
@@ -16947,11 +18724,84 @@
       this.mahjongPileDragMoved = false;
       this.mahjongPilePointerDown = false;
     }
+    resetMahjongSlotAnimations() {
+      resetMahjongSlotFlight(this.mahjongSlotFlight);
+      this.mahjongSlotClearRings.length = 0;
+    }
+    queueMahjongIntroBanner() {
+      var _a;
+      const game = this.session.mahjong.getActiveGame();
+      if (!game) {
+        return;
+      }
+      this.mahjongStageBanner = makeMahjongIntroBanner(
+        game.level,
+        mahjongIntroSubtitle((_a = this.mahjongActiveTheme) == null ? void 0 : _a.name)
+      );
+      this.mahjongFailBannerQueued = false;
+      this.mahjongResultRevealStartMs = 0;
+      this.kickRenderLoop();
+    }
+    syncMahjongFailStageBanner(game) {
+      if (game.phase !== "lost") {
+        this.mahjongFailBannerQueued = false;
+        return;
+      }
+      if (game.failReason === "slot_full" && !this.mahjongSlotFullOfferDismissed) {
+        return;
+      }
+      if (this.mahjongFailBannerQueued) {
+        return;
+      }
+      this.mahjongFailBannerQueued = true;
+      this.mahjongStageBanner = makeMahjongFailBanner(mahjongFailReasonLabel(game.failReason));
+      this.mahjongResultRevealStartMs = 0;
+      this.shakeMs = Math.max(this.shakeMs, 220);
+      this.kickRenderLoop();
+    }
+    updateMahjongStageBanner(now) {
+      const banner = this.mahjongStageBanner;
+      if (!banner) {
+        return;
+      }
+      if (banner.startMs === 0) {
+        banner.startMs = now;
+      }
+      const frame = bannerFrame(banner, now);
+      if (banner.kind === "mahjong_fail" && frame.done && this.mahjongResultRevealStartMs === 0) {
+        this.mahjongResultRevealStartMs = now;
+      }
+      if (frame.done) {
+        this.mahjongStageBanner = null;
+      }
+    }
+    shouldDeferMahjongResultModal(game) {
+      var _a;
+      if (game.phase !== "lost") {
+        return false;
+      }
+      if (game.failReason === "slot_full" && !this.mahjongSlotFullOfferDismissed) {
+        return false;
+      }
+      return ((_a = this.mahjongStageBanner) == null ? void 0 : _a.kind) === "mahjong_fail";
+    }
     /** 大厅呼吸、结算彩带、粉碎倒计时、公告泡泡需要持续转；对局静止盘面可停循环。 */
     wantsAmbientFx() {
       return this.mode === "lobby" || this.mode === "result" || this.mode === "crush" || this.mode === "clean";
     }
     /** 首页公告泡泡在漂：开发者工具空闲停循环时也要慢速续画，避免冻在半路。 */
+    /** 每日任务面板动效：真机全速；开发者工具降帧，减轻模拟器崩溃。 */
+    dailyTasksOverlayNeedsTick() {
+      return this.overlay === "daily_tasks";
+    }
+    logThrottledDrawError(label, err) {
+      const now = this.nowMs || Date.now();
+      if (now - this.lastDrawErrorLogMs < 3e3) {
+        return;
+      }
+      this.lastDrawErrorLogMs = now;
+      console.error(label, err);
+    }
     lobbyNoticeBubbleNeedsTick() {
       if (this.mode !== "lobby" || this.overlay !== "none") {
         return false;
@@ -17040,10 +18890,22 @@
               pruneMahjongSlotFlight(
                 this.mahjongSlotFlight,
                 now,
-                (slots, tile) => mj.slotsAfterAppend(slots, tile)
+                (slots, tile) => mj.slotsAfterAppend(slots, tile),
+                (ev) => this.onMahjongTileLandedInSlot(ev)
               );
               this.requestPaint();
             }
+            if (pruneMahjongSlotClearRings(this.mahjongSlotClearRings, now)) {
+              this.requestPaint();
+            }
+            if (this.mode === "mahjong_play" && this.shakeMs > 0) {
+              this.shakeMs = Math.max(0, this.shakeMs - dt);
+            }
+            this.updateMahjongStageBanner(now);
+            if ((mj == null ? void 0 : mj.phase) === "lost") {
+              this.syncMahjongFailStageBanner(mj);
+            }
+            this.pruneCrushBursts(now);
             if ((mj == null ? void 0 : mj.phase) === "won") {
               if (this.mahjongWinShownAtMs === 0) {
                 this.mahjongWinShownAtMs = now;
@@ -17074,6 +18936,7 @@
             this.session.tickCrushReward(dt);
           }
           const animating = this.sceneIsBusy();
+          const dailyTasksFx = this.dailyTasksOverlayNeedsTick();
           const ambientBubble = this.lobbyNoticeBubbleNeedsTick();
           const mjGame = this.session.mahjong.getActiveGame();
           const mahjongPlaying = this.mode === "mahjong_play" && (mjGame == null ? void 0 : mjGame.phase) === "playing";
@@ -17098,21 +18961,26 @@
               desktopIde,
               ambientFx: this.wantsAmbientFx()
             })
-          }) || ambientBubble || mahjongKeepLoop || animating;
+          }) || ambientBubble || dailyTasksFx || mahjongKeepLoop || animating;
           this.frameDelayMs = resolveNextFrameDelayMs({
-            animating,
+            animating: animating || dailyTasksFx,
             desktopIde,
             baseDelayMs: this.baseFrameDelayMs
           });
-          if (ambientBubble && !animating) {
+          if (ambientBubble && !animating && !dailyTasksFx) {
             this.frameDelayMs = Math.max(this.frameDelayMs, desktopIde ? 90 : 70);
           }
-          if (mahjongKeepLoop && !animating && desktopIde) {
-            this.frameDelayMs = Math.max(this.frameDelayMs, 220);
-          } else if (mahjongKeepLoop && !animating) {
+          if (dailyTasksFx && desktopIde) {
+            this.frameDelayMs = Math.max(this.frameDelayMs, 110);
+          } else if (dailyTasksFx) {
+            this.frameDelayMs = Math.max(this.frameDelayMs, 66);
+          }
+          if (mahjongKeepLoop && !animating && !dailyTasksFx && desktopIde) {
+            this.frameDelayMs = Math.max(this.frameDelayMs, 280);
+          } else if (mahjongKeepLoop && !animating && !dailyTasksFx) {
             this.frameDelayMs = Math.max(this.frameDelayMs, desktopIde ? 160 : 200);
           }
-          const shouldDraw = this.needsPaint || animating || ambientBubble || mahjongTimerPaint || mahjongWon;
+          const shouldDraw = this.needsPaint || animating || ambientBubble || dailyTasksFx || mahjongTimerPaint || mahjongWon;
           if (shouldDraw) {
             this.draw();
             this.frameErrors = 0;
@@ -17121,7 +18989,7 @@
             }
           }
         } catch (err) {
-          console.error("[crush-crush] frame failed", err);
+          this.logThrottledDrawError("[crush-crush] frame failed", err);
           this.frameErrors += 1;
           this.needsPaint = !shouldBackoffAfterFrameErrors(this.frameErrors);
           keepLoop = this.needsPaint;
@@ -17381,7 +19249,7 @@
       this.session.hideLobbyBanner();
     }
     onGameEvent(event) {
-      var _a, _b;
+      var _a, _b, _c, _d;
       this.requestPaint();
       if (event.type === "InviteReward") {
         this.notifyUser(
@@ -17393,9 +19261,24 @@
       if (event.type === "PostClearAnnouncement") {
         return;
       }
+      if (event.type === "LeaderboardReward") {
+        this.showLeaderboardRewardToast();
+        return;
+      }
+      if (event.type === "DailyTaskCompleted") {
+        this.dailyTaskPop = {
+          text: notice_default.dailyTasks.taskDone.replace("{title}", event.title),
+          startMs: this.nowMs || Date.now()
+        };
+        this.shakeMs = Math.max(this.shakeMs, 120);
+        return;
+      }
       if (event.type === "LevelWon") {
         this.pendingResult = "won";
         this.statusText = "\u5173\u5361\u80DC\u5229\uFF01";
+        this.enqueueLevelBanner(makeLevelBanner("goal", "\u76EE\u6807\u8FBE\u6210\uFF01"));
+        this.shakeMs = Math.max(this.shakeMs, 340);
+        this.hudScorePunch = Math.max(this.hudScorePunch, 1.14);
         if (!this.animator.isPlaying() && !this.swapSlide) {
           this.afterLevelResolved();
         }
@@ -17411,6 +19294,11 @@
       }
       if (event.type === "SwapAccepted") {
         this.beginSwapSlide(event.rowA, event.colA, event.rowB, event.colB, false);
+        const total = (_b = (_a = this.session.getLevelConfig()) == null ? void 0 : _a.moves) != null ? _b : 0;
+        if (!this.lowMovesWarned && total > 8 && this.session.getMovesLeft() === 5) {
+          this.lowMovesWarned = true;
+          this.enqueueLevelBanner(makeLevelBanner("low_moves", "\u53EA\u5269 5 \u6B65\uFF01", "\u6293\u7D27\u5B8C\u6210\u76EE\u6807"));
+        }
         return;
       }
       if (event.type === "SwapRejected") {
@@ -17441,6 +19329,11 @@
       }
       if (event.type === "MovesBonusApplied") {
         this.statusText = event.movesConverted > 0 ? `\u5269\u4F59 ${event.movesConverted} \u6B65\u52A0\u6210\u95EA\u5149\uFF01` : "\u6B65\u6570\u52A0\u6210";
+        if (event.movesConverted > 0) {
+          this.enqueueLevelBanner(
+            makeLevelBanner("bonus", "\u6B65\u6570\u5956\u52B1\u65F6\u95F4\uFF01", `\u5269\u4F59 ${event.movesConverted} \u6B65\u53D8\u95EA\u5149`)
+          );
+        }
         this.syncBoardView();
         return;
       }
@@ -17452,7 +19345,7 @@
       }
       if (event.type === "CrushBurstFired") {
         const board = this.session.getBoard();
-        const cols = (_a = board == null ? void 0 : board.size.cols) != null ? _a : 8;
+        const cols = (_c = board == null ? void 0 : board.size.cols) != null ? _c : 8;
         const clearedCells = event.clearedIndices.map((index) => ({
           row: Math.floor(index / cols),
           col: index % cols
@@ -17523,7 +19416,7 @@
         } else if (event.boosterId === "shuffle") {
           this.statusText = `\u76D8\u9762\u5DF2\u91CD\u6392 \xB7 \u5269\u4F59 ${event.remaining}`;
         } else {
-          this.statusText = `+${(_b = event.movesGranted) != null ? _b : 5} \u6B65 \xB7 \u5269\u4F59 ${event.remaining}`;
+          this.statusText = `+${(_d = event.movesGranted) != null ? _d : 5} \u6B65 \xB7 \u5269\u4F59 ${event.remaining}`;
         }
         this.hammerTargeting = false;
         this.hammerCursor = null;
@@ -17617,6 +19510,10 @@
       this.mode = "result";
       const won = this.pendingResult === "won";
       this.offerCleanPrompt = won && this.session.canOfferCleaning();
+      this.levelBanners = [];
+      this.goalFlyers = [];
+      this.resultOpenedMs = this.nowMs || Date.now();
+      this.resultStars = won ? this.session.getLastStars() : 0;
       if (won) {
         this.session.playWinSfx();
         this.shakeMs = 220;
@@ -17850,6 +19747,7 @@
      * 三消波次：粒子炸开 + 飘分 + 震动；连锁再播消除音。
      */
     spawnMatchClearJuice(cells, waveIndex, hasSpecial) {
+      var _a, _b;
       if (this.mode === "crush" || this.mode === "clean" || this.mode === "result") {
         return;
       }
@@ -17923,6 +19821,23 @@
           startMs: now,
           durationMs: 750,
           color: "#74c0fc"
+        });
+      }
+      const goalKind = formatHudGoals((_b = (_a = this.session.getGoals()) == null ? void 0 : _a.getSnapshots()) != null ? _b : []).collectKind;
+      const target = this.hudGoalIconPos;
+      if (target && goalKind !== void 0 && this.tileImages.has(goalKind)) {
+        const picks = planGoalFlyers(cells, goalKind, this.cheapFx ? 3 : 6);
+        picks.forEach((cell, i) => {
+          this.goalFlyers.push({
+            kind: cell.kind,
+            fromX: layout.originX + (cell.col + 0.5) * layout.cellSize,
+            fromY: layout.originY - (cell.row + 0.5) * layout.cellSize,
+            toX: target.x,
+            toY: target.y,
+            startMs: now + 120 + i * 45,
+            durationMs: 560,
+            size: layout.cellSize * 0.78
+          });
         });
       }
       for (const cell of cells) {
@@ -18483,6 +20398,10 @@
         }
         fontSize -= 1;
       }
+      ctx.strokeStyle = unlocked ? "rgba(26, 92, 58, 0.88)" : "rgba(55, 55, 55, 0.65)";
+      ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.22));
+      ctx.lineJoin = "round";
+      ctx.strokeText(label, cx, cy);
       ctx.fillStyle = unlocked ? "#ffffff" : "rgba(255,255,255,0.82)";
       ctx.fillText(label, cx, cy);
       ctx.restore();
@@ -18527,12 +20446,43 @@
       const unlocked = this.session.isMahjongHallUnlocked();
       const showNew = this.session.shouldShowMahjongHallNewBadge();
       const { ctx } = this;
+      const now = this.nowMs || Date.now();
+      const cx = x + size / 2;
+      const cy = y + size / 2;
+      const pulse = unlocked ? 1 + this.fxAmt(0.028, 0.014) * Math.sin(now * 45e-4 + x * 0.02) : 1;
       ctx.save();
+      ctx.globalAlpha = unlocked ? 0.32 : 0.18;
+      ctx.fillStyle = "#3d5a40";
+      this.fillEllipse(cx + 2, y + size + 5, size * 0.44, size * 0.11);
+      ctx.globalAlpha = 1;
+      if (unlocked) {
+        ctx.save();
+        const glowA = 0.28 + 0.14 * Math.sin(now * 6e-3);
+        ctx.globalAlpha = glowA;
+        ctx.strokeStyle = showNew ? "#ff922b" : "#51cf66";
+        ctx.lineWidth = Math.max(3, size * 0.04);
+        ctx.beginPath();
+        ctx.arc(cx, cy, size * 0.54, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = glowA * 0.45;
+        ctx.lineWidth = Math.max(5, size * 0.07);
+        ctx.stroke();
+        ctx.restore();
+        if (showNew || Math.sin(now * 3e-3) > 0.82) {
+          this.drawSparkleStar(x + size * 0.18, y + size * 0.22, 5, 0.9);
+          this.drawSparkleStar(x + size * 0.82, y + size * 0.35, 4, 0.75);
+        }
+      }
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(pulse, pulse);
+      ctx.translate(-cx, -cy);
       if (!unlocked) {
         ctx.filter = "grayscale(100%)";
         ctx.globalAlpha = 0.72;
       }
       ctx.drawImage(img, x, y, size, size);
+      ctx.restore();
       const badge = this.uiIcons.get("mahjong_new_badge");
       if (showNew && badge && ((_b = badge.width) != null ? _b : 0) > 0 && ((_c = badge.height) != null ? _c : 0) > 0) {
         const srcW = Math.max(1, (_d = badge.width) != null ? _d : 1);
@@ -18541,8 +20491,13 @@
         const badgeW = Math.round(badgeH * (srcW / srcH));
         const overlap = Math.round(size * 0.05);
         const badgeX = x + size - badgeW + overlap;
-        const badgeY = y - Math.round(badgeH * 0.2);
+        const badgeBob = Math.sin(now / 520) * this.fxAmt(2.5, 1.2);
+        const badgeY = y - Math.round(badgeH * 0.2) + badgeBob;
+        ctx.save();
+        ctx.shadowColor = "rgba(240, 62, 62, 0.45)";
+        ctx.shadowBlur = 6;
         ctx.drawImage(badge, badgeX, badgeY, badgeW, badgeH);
+        ctx.restore();
       }
       this.drawMahjongHallLobbyCaption(x, y, size, unlocked);
       ctx.restore();
@@ -18578,14 +20533,12 @@
         });
         return;
       }
-      const daily = this.session.getDailyLoop();
       const chrome = layoutLobbyBottom({
         width: this.width,
         height: this.height,
         bannerReserve: this.session.getLobbyBannerReservePx(),
         safeBottom: this.safeAreaBottom,
-        clearsToday: daily.clearsToday,
-        shuffleGranted: daily.playShuffleGranted
+        dailyClaimable: this.session.getDailyTasksView().claimable
       });
       this.pushMuteNavButton(
         chrome.settings.x,
@@ -18597,7 +20550,7 @@
       this.drawLobbyMahjongEntry(chrome.settings);
       if (chrome.claim) {
         const claimBtn = {
-          id: "claim_shuffle",
+          id: "daily_open",
           x: chrome.claim.x,
           y: chrome.claim.y,
           w: chrome.claim.w,
@@ -18664,6 +20617,13 @@
           gloss: true,
           fontSize: LOBBY_SIDE_ACTION_FONT
         },
+        daily_open: {
+          top: "#ffe066",
+          bottom: "#f59f00",
+          border: "#ffffff",
+          gloss: true,
+          fontSize: LOBBY_SIDE_ACTION_FONT
+        },
         leaderboard: {
           top: "#d0bfff",
           bottom: "#845ef7",
@@ -18680,18 +20640,48 @@
         }
       };
       for (const frame of frames) {
+        const dailyView = frame.id === "daily_open" ? this.session.getDailyTasksView() : null;
         const btn = {
           id: frame.id,
           x: frame.x,
           y: frame.y,
           w: frame.w,
           h: frame.h,
-          label: frame.label,
+          label: dailyView ? dailyTasksSideLabel(dailyView) : frame.label,
           hitPad: 6
         };
         this.buttons.push(btn);
         this.drawCuteButton(btn, palettes[frame.id]);
+        if (frame.id === "daily_open" && dailyView) {
+          const claimable = dailyView.claimable;
+          if (claimable > 0) {
+            this.drawRedDotBadge(frame.x + frame.w - 3, frame.y + 3, String(claimable));
+          } else if (!dailyView.chestClaimed && dailyView.tasks.some((task) => !task.done)) {
+            this.drawRedDotBadge(frame.x + frame.w - 3, frame.y + 3, "");
+          }
+        }
       }
+    }
+    drawRedDotBadge(cx, cy, text) {
+      const { ctx } = this;
+      const pulse = 1 + 0.08 * Math.sin((this.nowMs || Date.now()) * 8e-3);
+      const r = (text ? 8 : 5) * pulse;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = "#fa5252";
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#ffffff";
+      ctx.stroke();
+      if (text) {
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, cx, cy + 0.5);
+      }
+      ctx.restore();
     }
     hideGameClubNativeButton() {
       var _a, _b;
@@ -18824,7 +20814,7 @@
         label: ""
       });
       ctx.save();
-      ctx.fillStyle = "rgba(40, 20, 55, 0.46)";
+      ctx.fillStyle = this.overlay === "leaderboard" ? "rgba(28, 52, 96, 0.55)" : "rgba(40, 20, 55, 0.46)";
       ctx.fillRect(0, 0, width, height);
       ctx.restore();
       if (this.overlay === "howto") {
@@ -18839,108 +20829,329 @@
         this.drawLeaderboardPanel();
         return;
       }
+      if (this.overlay === "daily_tasks") {
+        this.drawDailyTasksPanel();
+        return;
+      }
       if (this.overlay === "profile_welcome") {
         this.drawProfileWelcomePanel();
         return;
       }
+      if (this.overlay === "mahjong_lock") {
+        this.drawMahjongHallLockPanel();
+        return;
+      }
       this.drawSettingsPanel();
     }
-    /** 好友排行：标题/奖励固定，玩家列表可滑动。 */
-    drawLeaderboardPanel() {
-      var _a, _b, _c;
-      this.ctx.font = "12px sans-serif";
-      const view = this.boardViewModel;
-      const layout = layoutLeaderboardPanel({
-        width: this.width,
-        height: this.height,
-        hint: (_a = view == null ? void 0 : view.hint) != null ? _a : "",
-        rewardText: (_b = view == null ? void 0 : view.rewardText) != null ? _b : "",
-        rows: (_c = view == null ? void 0 : view.rows) != null ? _c : [],
-        wrap: (text, maxWidth) => this.wrapText(text, maxWidth)
-      });
-      this.leaderboardScrollY = clampLeaderboardScroll(this.leaderboardScrollY, layout);
-      const { ctx } = this;
-      const { panel } = layout;
-      this.drawCuteCard(panel.x, panel.y, panel.w, panel.h, {
+    /** 未解锁麻将馆：说明条件（真机 Toast 常只显示小游戏名，必须用弹窗）。 */
+    drawMahjongHallLockPanel() {
+      const { ctx, width, height } = this;
+      const panelW = Math.min(300, width - 48);
+      const body = mahjongHallLockPanelBody(this.session.getMaxClearedLevelId());
+      const bodyLines = [];
+      for (const paragraph of body.split("\n")) {
+        bodyLines.push(...this.wrapText(paragraph.trim(), panelW - 48));
+      }
+      const panelH = 168 + Math.max(0, bodyLines.length - 2) * 22;
+      const x = (width - panelW) / 2;
+      const y = Math.max(24, height * 0.26);
+      this.drawCuteCard(x, y, panelW, panelH, {
         radius: 24,
         fillTop: "rgba(255,255,255,0.98)",
-        fillBottom: "rgba(232, 248, 255, 0.97)",
-        border: "rgba(116, 192, 252, 0.95)",
+        fillBottom: "rgba(255, 236, 245, 0.97)",
+        border: "rgba(255, 170, 210, 0.95)",
         borderWidth: 3,
         shadow: true,
         sparkle: true,
-        sparkleColor: "#a5d8ff",
+        sparkleColor: "#ffc9e8",
         nowMs: this.nowMs || Date.now()
       });
+      this.paintPanelCornerChrome(panelCloseButton({ x, y, w: panelW }), "#c2255c");
       ctx.save();
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.font = "bold 20px sans-serif";
-      ctx.fillStyle = "#1864ab";
-      ctx.fillText(layout.title, panel.x + panel.w / 2, panel.y + 28);
+      ctx.fillStyle = "#c2255c";
+      ctx.fillText("\u840C\u5BA0\u9EBB\u5C06\u9986\u672A\u89E3\u9501", x + panelW / 2, y + 40);
+      ctx.font = "bold 14px sans-serif";
+      ctx.fillStyle = "#862e4a";
+      let ty = y + 78;
+      for (const line of bodyLines) {
+        ctx.fillText(line, x + panelW / 2, ty);
+        ty += 22;
+      }
       ctx.restore();
-      let ty = layout.bodyTop;
-      for (const row of layout.headerRows) {
-        if (row.kind === "reward") {
-          const rewardW = panel.w - 28;
-          ctx.font = "12px sans-serif";
-          const lines2 = this.wrapText(row.text, rewardW);
-          const rowH2 = Math.max(layout.metaRowH, lines2.length * 16 + 8);
-          ctx.textAlign = "center";
-          ctx.textBaseline = "top";
-          ctx.font = "12px sans-serif";
-          ctx.fillStyle = "#fa5252";
-          let ly2 = ty + 2;
-          const cx = panel.x + panel.w / 2;
-          for (const line of lines2) {
-            ctx.fillText(line, cx, ly2);
-            ly2 += 16;
-          }
-          ty += rowH2 + 6;
-          continue;
-        }
-        ctx.font = "12px sans-serif";
-        const lines = this.wrapText(row.text, layout.textWidth + 56);
-        const rowH = Math.max(layout.metaRowH, lines.length * 16 + 10);
-        ctx.fillStyle = "#74c0fc";
-        this.roundRectPath(layout.tagX, ty, 44, 24, 12);
+      const btnH = 44;
+      const btnY = y + panelH - btnH - 18;
+      this.buttons.push({
+        id: "resume",
+        x: x + 24,
+        y: btnY,
+        w: panelW - 48,
+        h: btnH,
+        label: "\u77E5\u9053\u4E86\uFF0C\u5148\u53BB\u95EF\u5173"
+      });
+      this.drawCuteButton(
+        { id: "resume", x: x + 24, y: btnY, w: panelW - 48, h: btnH, label: "\u77E5\u9053\u4E86\uFF0C\u5148\u53BB\u95EF\u5173" },
+        { top: "#74c0fc", bottom: "#1c7ed6", border: "#ffffff", gloss: true },
+        1
+      );
+    }
+    /** 排行榜弹窗内景：天空渐变 + 云 + 名单区纸感底，与大厅糖果风一致。 */
+    drawLeaderboardPanelBackdrop(layout, nowMs) {
+      const { ctx } = this;
+      const panel = layout.panel;
+      const { x, y, w, h } = panel;
+      const radius = 24;
+      const drift = Math.sin(nowMs * 85e-5) * 5;
+      ctx.save();
+      this.roundRectPath(x, y, w, h, radius);
+      ctx.clip();
+      const sky = ctx.createLinearGradient(x, y, x, y + h * 0.5);
+      sky.addColorStop(0, "rgba(186, 230, 253, 0.72)");
+      sky.addColorStop(0.45, "rgba(224, 242, 254, 0.35)");
+      sky.addColorStop(1, "rgba(224, 242, 254, 0)");
+      ctx.fillStyle = sky;
+      ctx.fillRect(x, y, w, h * 0.52);
+      const candy = ctx.createLinearGradient(x, y + h * 0.35, x, y + h);
+      candy.addColorStop(0, "rgba(237, 221, 255, 0)");
+      candy.addColorStop(0.35, "rgba(208, 169, 255, 0.28)");
+      candy.addColorStop(1, "rgba(165, 216, 255, 0.42)");
+      ctx.fillStyle = candy;
+      ctx.fillRect(x, y, w, h);
+      if (layout.podiumH > 0) {
+        const glow = ctx.createRadialGradient(
+          x + w / 2,
+          layout.listTop + layout.podiumH * 0.45,
+          6,
+          x + w / 2,
+          layout.listTop + layout.podiumH * 0.45,
+          w * 0.52
+        );
+        glow.addColorStop(0, "rgba(255, 212, 59, 0.38)");
+        glow.addColorStop(0.55, "rgba(255, 243, 191, 0.12)");
+        glow.addColorStop(1, "rgba(255, 243, 191, 0)");
+        ctx.fillStyle = glow;
+        ctx.fillRect(x + 8, layout.listTop - 6, w - 16, layout.podiumH + 16);
+      }
+      const listH = Math.max(0, layout.listBottom - layout.listTop);
+      if (listH > 0) {
+        ctx.fillStyle = "rgba(255, 255, 255, 0.48)";
+        this.roundRectPath(x + 10, layout.listTop - 2, w - 20, listH + 6, 16);
         ctx.fill();
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 12px sans-serif";
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.78)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.save();
+        ctx.globalAlpha = 0.07;
+        ctx.strokeStyle = "#74c0fc";
+        ctx.lineWidth = 1;
+        for (let row = layout.listTop + 18; row < layout.listBottom; row += 14) {
+          ctx.beginPath();
+          ctx.moveTo(x + 18, row);
+          ctx.lineTo(x + w - 18, row);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      const drawCloud = (img, cx, cy, scale, alpha) => {
+        if (!img || !(img.width > 0)) {
+          return;
+        }
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        const iw = img.width * scale;
+        const ih = img.height * scale;
+        ctx.drawImage(img, cx - iw / 2 + drift * (cx < x + w / 2 ? 1 : -1), cy - ih / 2, iw, ih);
+        ctx.restore();
+      };
+      drawCloud(this.uiIcons.get("ladder-cloud"), x + w * 0.14, y + h * 0.11, 0.34, 0.38);
+      drawCloud(this.uiIcons.get("ladder-cloudSm"), x + w * 0.86, y + h * 0.09, 0.42, 0.32);
+      drawCloud(this.uiIcons.get("ladder-cloudSm"), x + w * 0.78, y + h * 0.62, 0.48, 0.2);
+      const tw = nowMs * 4e-3;
+      for (let i = 0; i < 4; i += 1) {
+        const sx = x + 22 + i * 71 % Math.max(40, w - 44);
+        const sy = y + 48 + i * 37 % Math.max(24, layout.listTop - y - 12);
+        ctx.save();
+        ctx.globalAlpha = 0.28 + 0.32 * Math.abs(Math.sin(tw + i * 1.3));
+        drawCandyStar(ctx, sx, sy, 4.5 + i % 2, true);
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+    /** 排行榜：关卡榜 / 本周榜切换，名单可滑动，底部固定「我的排名」。 */
+    drawLeaderboardPanel() {
+      var _a;
+      const layout = this.resolveLeaderboardLayout();
+      this.leaderboardScrollY = clampLeaderboardScroll(this.leaderboardScrollY, layout);
+      const { ctx } = this;
+      const { panel } = layout;
+      const now = this.nowMs || Date.now();
+      this.drawCuteCard(panel.x, panel.y, panel.w, panel.h, {
+        radius: 24,
+        fillTop: "rgba(248, 251, 255, 0.97)",
+        fillBottom: "rgba(232, 240, 255, 0.96)",
+        border: "rgba(132, 94, 247, 0.88)",
+        borderWidth: 3,
+        shadow: true,
+        sparkle: true,
+        sparkleColor: "#d0bfff",
+        nowMs: now
+      });
+      this.drawLeaderboardPanelBackdrop(layout, now);
+      const titleY = panel.y + 26;
+      ctx.save();
+      const ribbonW = Math.min(panel.w - 40, 168);
+      const ribbonX = panel.x + (panel.w - ribbonW) / 2;
+      const ribbonG = ctx.createLinearGradient(ribbonX, titleY - 18, ribbonX, titleY + 18);
+      ribbonG.addColorStop(0, "rgba(116, 192, 252, 0.92)");
+      ribbonG.addColorStop(1, "rgba(28, 126, 214, 0.92)");
+      ctx.fillStyle = ribbonG;
+      this.roundRectPath(ribbonX, titleY - 18, ribbonW, 36, 18);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "bold 20px sans-serif";
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = "rgba(21, 101, 192, 0.35)";
+      ctx.lineWidth = 4;
+      ctx.strokeText(layout.title, panel.x + panel.w / 2, titleY);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(layout.title, panel.x + panel.w / 2, titleY);
+      ctx.restore();
+      for (const tab of layout.tabs) {
+        ctx.save();
+        this.roundRectPath(tab.x, tab.y, tab.w, tab.h, tab.h / 2);
+        if (tab.active) {
+          const g = ctx.createLinearGradient(tab.x, tab.y, tab.x, tab.y + tab.h);
+          g.addColorStop(0, "#74c0fc");
+          g.addColorStop(1, "#1c7ed6");
+          ctx.fillStyle = g;
+        } else {
+          ctx.fillStyle = "rgba(208, 235, 255, 0.85)";
+        }
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = tab.active ? "#ffffff" : "#1c7ed6";
+        ctx.font = "bold 14px sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(row.tag, layout.tagX + 22, ty + 12);
-        ctx.textAlign = "left";
-        ctx.textBaseline = "top";
-        ctx.font = "12px sans-serif";
-        ctx.fillStyle = "#1864ab";
-        let ly = ty + 2;
-        for (const line of lines) {
-          ctx.fillText(line, layout.textX - 20, ly);
-          ly += 16;
-        }
-        ty += rowH + 6;
+        ctx.fillText(tab.label, tab.x + tab.w / 2, tab.y + tab.h / 2 + 0.5);
+        ctx.restore();
       }
       ctx.save();
-      ctx.beginPath();
-      ctx.rect(panel.x + 6, layout.listTop, panel.w - 12, layout.listViewportH);
-      ctx.clip();
-      let py = layout.listTop - this.leaderboardScrollY;
-      for (const row of layout.playerRows) {
-        const rowH = layout.rowH;
-        const nextY = py + rowH + 6;
-        if (nextY > layout.listTop && py < layout.listBottom) {
-          this.drawLeaderboardPlayerRow(row, layout, py, rowH);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      let ly = layout.infoTop;
+      const cx = panel.x + panel.w / 2;
+      const innerX = panel.x + 14;
+      const innerW = panel.w - 28;
+      ctx.font = "12px sans-serif";
+      ctx.fillStyle = "#5c7cfa";
+      for (const line of layout.ruleLines) {
+        ctx.fillText(line, cx, ly);
+        ly += layout.infoLineH;
+      }
+      if (layout.settleLines.length > 0) {
+        ly += 2;
+        ctx.font = "bold 13px sans-serif";
+        ctx.fillStyle = "#e67700";
+        for (const line of layout.settleLines) {
+          ctx.fillText(line, cx, ly);
+          ly += layout.infoLineH;
         }
-        py = nextY;
+      }
+      if (layout.settleNoteLines.length > 0) {
+        ctx.font = "11px sans-serif";
+        ctx.fillStyle = "#868e96";
+        for (const line of layout.settleNoteLines) {
+          ctx.fillText(line, cx, ly);
+          ly += layout.infoLineH;
+        }
+      }
+      if (layout.rewardTierLines.length > 0) {
+        ly += 4;
+        const titleH = layout.infoLineH;
+        const tierH = layout.rewardTierLines.length * layout.infoLineH;
+        const blockH = titleH + tierH + 10;
+        ctx.fillStyle = "rgba(255, 243, 191, 0.72)";
+        this.roundRectPath(innerX, ly, innerW, blockH, 12);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255, 212, 59, 0.85)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.font = "bold 11px sans-serif";
+        ctx.fillStyle = "#c92a2a";
+        ctx.fillText((_a = layout.rewardTitle) != null ? _a : "\u5468\u5956\u52B1", cx, ly + 8);
+        ly += titleH + 2;
+        ctx.font = "11px sans-serif";
+        ctx.fillStyle = "#862e00";
+        for (const line of layout.rewardTierLines) {
+          ctx.fillText(line, cx, ly);
+          ly += layout.infoLineH;
+        }
+        ly += 6;
+      }
+      if (layout.gapHint) {
+        ctx.font = "bold 12px sans-serif";
+        const w = Math.min(panel.w - 28, ctx.measureText(layout.gapHint).width + 24);
+        ctx.fillStyle = "rgba(255, 243, 191, 0.95)";
+        this.roundRectPath(cx - w / 2, layout.gapY, w, 20, 10);
+        ctx.fill();
+        ctx.fillStyle = "#e67700";
+        ctx.textBaseline = "middle";
+        ctx.fillText(layout.gapHint, cx, layout.gapY + 10.5);
       }
       ctx.restore();
-      const maxScroll = Math.max(0, layout.listContentH - layout.listViewportH);
-      if (maxScroll > 4 && layout.listViewportH > 20) {
+      if (layout.playerRows.length === 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(panel.x + 6, layout.listTop, panel.w - 12, layout.listViewportH);
+        ctx.clip();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = "13px sans-serif";
+        ctx.fillStyle = "#74c0fc";
+        const emptyY = layout.listTop + Math.min(36, layout.listViewportH / 2 - 8);
+        ctx.fillText(layout.emptyText, cx, emptyY);
+        ctx.font = "12px sans-serif";
+        ctx.fillStyle = "#91a7ff";
+        const tip = layout.activeTab === "week" ? "\u901A\u5173\u4E00\u5173\u5373\u53EF\u4E0A\u699C" : "\u9080\u8BF7\u597D\u53CB\u4E00\u8D77\u95EF\u5173 \xB7 \u540C\u5173\u6BD4\u7D2F\u8BA1\u5206";
+        ctx.fillText(tip, cx, emptyY + 22);
+        ctx.restore();
+      } else {
+        if (layout.podiumH > 0) {
+          this.drawLeaderboardPodium(layout, cx);
+        }
+        const scrollTop = layout.listScrollTop;
+        const scrollH = layout.listScrollViewportH;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(panel.x + 6, scrollTop, panel.w - 12, scrollH);
+        ctx.clip();
+        let py = scrollTop - this.leaderboardScrollY;
+        const stride = layout.rowH + layout.rowGap;
+        const listRows = layout.podiumH > 0 ? layout.playerRows.slice(3) : layout.playerRows;
+        for (const row of listRows) {
+          if (py + stride > scrollTop && py < layout.listBottom) {
+            this.drawLeaderboardPlayerRow(row, layout, py, layout.rowH, false);
+          }
+          py += stride;
+        }
+        ctx.restore();
+      }
+      const scrollViewport = layout.listScrollViewportH > 0 ? layout.listScrollViewportH : layout.listViewportH;
+      const maxScroll = Math.max(0, layout.listContentH - scrollViewport);
+      if (maxScroll > 4 && scrollViewport > 20) {
         const trackX = panel.x + panel.w - 10;
-        const trackTop = layout.listTop + 4;
-        const trackH = layout.listViewportH - 8;
-        const thumbH = Math.max(18, layout.listViewportH / layout.listContentH * trackH);
+        const trackTop = (layout.podiumH > 0 ? layout.listScrollTop : layout.listTop) + 4;
+        const trackH = scrollViewport - 8;
+        const thumbH = Math.max(18, scrollViewport / Math.max(1, layout.listContentH) * trackH);
         const thumbY = trackTop + this.leaderboardScrollY / maxScroll * (trackH - thumbH);
         ctx.fillStyle = "rgba(116, 192, 252, 0.25)";
         this.roundRectPath(trackX, trackTop, 3, trackH, 2);
@@ -18948,6 +21159,25 @@
         ctx.fillStyle = "rgba(28, 126, 214, 0.55)";
         this.roundRectPath(trackX, thumbY, 3, thumbH, 2);
         ctx.fill();
+      }
+      if (layout.selfRow) {
+        const bar = layout.selfBar;
+        ctx.save();
+        ctx.shadowColor = "rgba(28, 126, 214, 0.25)";
+        ctx.shadowBlur = 8;
+        ctx.shadowOffsetY = -2;
+        const g = ctx.createLinearGradient(bar.x, bar.y, bar.x, bar.y + bar.h);
+        g.addColorStop(0, "#e7f5ff");
+        g.addColorStop(1, "#a5d8ff");
+        ctx.fillStyle = g;
+        this.roundRectPath(bar.x, bar.y, bar.w, bar.h, 16);
+        ctx.fill();
+        ctx.shadowColor = "transparent";
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+        this.drawLeaderboardPlayerRow(layout.selfRow, layout, bar.y + (bar.h - layout.rowH) / 2, layout.rowH, true);
       }
       for (const spec of layout.buttons) {
         const btn = {
@@ -18965,27 +21195,31 @@
           ctx.font = "bold 22px sans-serif";
           ctx.fillStyle = "#74c0fc";
           ctx.fillText(spec.label, spec.x + spec.w / 2, spec.y + spec.h / 2);
-        } else {
-          this.drawCuteButton(btn, spec.palette);
+        } else if (spec.id === "invite") {
+          this.drawCuteButton(btn, { top: "#8ce99a", bottom: "#37b24d", border: "#ffffff", gloss: true });
         }
       }
     }
     resolveLeaderboardLayout() {
-      var _a, _b, _c;
+      var _a, _b;
       const view = this.boardViewModel;
+      this.ctx.font = "12px sans-serif";
       return layoutLeaderboardPanel({
         width: this.width,
         height: this.height,
-        hint: (_a = view == null ? void 0 : view.hint) != null ? _a : "",
-        rewardText: (_b = view == null ? void 0 : view.rewardText) != null ? _b : "",
-        rows: (_c = view == null ? void 0 : view.rows) != null ? _c : [],
+        activeTab: this.leaderboardTab,
+        tab: (_b = (_a = view == null ? void 0 : view.tabs) == null ? void 0 : _a[this.leaderboardTab]) != null ? _b : null,
+        settleText: view == null ? void 0 : view.settleText,
+        rewardText: view == null ? void 0 : view.rewardText,
         wrap: (text, maxWidth) => this.wrapText(text, maxWidth)
       });
     }
     beginLeaderboardScroll(x, y) {
       const layout = this.resolveLeaderboardLayout();
-      const inList = x >= layout.panel.x && x <= layout.panel.x + layout.panel.w && y >= layout.listTop && y <= layout.listBottom;
-      if (!inList || layout.listContentH <= layout.listViewportH + 1) {
+      const scrollTop = layout.podiumH > 0 ? layout.listScrollTop : layout.listTop;
+      const inScroll = x >= layout.panel.x && x <= layout.panel.x + layout.panel.w && y >= scrollTop && y <= layout.listBottom;
+      const scrollViewport = layout.listScrollViewportH > 0 ? layout.listScrollViewportH : layout.listViewportH;
+      if (!inScroll || layout.listContentH <= scrollViewport + 1) {
         this.leaderboardDrag = null;
         return;
       }
@@ -19016,6 +21250,374 @@
       const scrolled = !!((_a = this.leaderboardDrag) == null ? void 0 : _a.scrolled);
       this.leaderboardDrag = null;
       return scrolled;
+    }
+    resolveDailyTasksLayout() {
+      return layoutDailyTasksPanel({
+        width: this.width,
+        height: this.height,
+        view: this.session.getDailyTasksView()
+      });
+    }
+    dailyTaskKindEmoji(id) {
+      switch (id) {
+        case "clear_levels":
+          return "\u{1F3AF}";
+        case "clear_tiles":
+          return "\u{1F43E}";
+        case "make_specials":
+          return "\u2728";
+        case "combo_chain":
+          return "\u26A1";
+        case "crush_rounds":
+          return "\u{1F4A5}";
+        case "collect_kind":
+          return "\u{1F381}";
+        case "three_star":
+          return "\u2B50";
+        case "use_boosters":
+          return "\u{1F528}";
+        default:
+          return "\u{1F4CB}";
+      }
+    }
+    /** 进度条上扫光 + 尖端星点（每日任务专用）。 */
+    drawDailyTaskBarFx(barX, barY, barW, barH, ratio, state, nowMs, rowIndex) {
+      if (state === "claimed" || ratio <= 1e-3) {
+        return;
+      }
+      const { ctx } = this;
+      const inset = 3.5;
+      const innerH = Math.max(6, barH - inset * 2);
+      const innerMaxW = Math.max(0, barW - inset * 2);
+      let fillW = Math.floor(innerMaxW * Math.min(1, ratio));
+      if (fillW < innerH) {
+        fillW = Math.min(innerMaxW, Math.max(fillW, Math.floor(innerH * 0.95)));
+      }
+      const fx = barX + inset;
+      const fy = barY + inset;
+      ctx.save();
+      this.roundRectPath(fx, fy, fillW, innerH, innerH / 2);
+      ctx.clip();
+      const period = state === "claim" ? 1600 : 2400;
+      const phase = (nowMs + rowIndex * 380) % period / period;
+      const bandW = Math.max(22, barH * 2.2);
+      const sx = fx + phase * (fillW + bandW) - bandW;
+      ctx.globalAlpha = state === "claim" ? 0.55 : 0.38;
+      const shine = ctx.createLinearGradient(sx, fy, sx + bandW, fy);
+      shine.addColorStop(0, "rgba(255,255,255,0)");
+      shine.addColorStop(0.45, "rgba(255,255,255,0.92)");
+      shine.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = shine;
+      ctx.fillRect(fx - bandW, fy, fillW + bandW * 2, innerH);
+      ctx.restore();
+      const tipX = fx + fillW;
+      const tipY = barY + barH / 2;
+      const twinkle = 0.65 + 0.35 * Math.abs(Math.sin(nowMs * 9e-3 + rowIndex));
+      if (state === "claim" || state === "todo" && ratio < 1) {
+        this.drawSparkleStar(tipX - 3, tipY, 3.8 + twinkle, twinkle);
+      }
+      if (state === "claim") {
+        this.drawSparkleStar(fx + fillW * 0.42, fy + 2, 3.2, 0.5 + 0.5 * Math.sin(nowMs * 0.011));
+      }
+    }
+    /** 每日任务行左侧：渐变圆牌 + 投影，托住 emoji。 */
+    drawDailyTaskIconBadge(cx, cy, emoji, tone, size = 22, nowMs = 0) {
+      const { ctx } = this;
+      let drawCx = cx;
+      let drawCy = cy;
+      let scale = 1;
+      if (tone === "claim") {
+        scale = 1 + 0.07 * Math.sin(nowMs * 9e-3);
+        drawCy += Math.sin(nowMs * 7e-3) * 1.8;
+      } else if (tone === "active") {
+        scale = 1 + 0.025 * Math.sin(nowMs * 5e-3 + cx * 0.04);
+      }
+      const r = size * scale;
+      const palettes = {
+        active: { top: "#ffffff", bottom: "#ffe8cc", border: "#ffc078", shadow: "#8d6e3a" },
+        claim: { top: "#fff9db", bottom: "#ffd43b", border: "#f59f00", shadow: "#a65d00" },
+        claimed: { top: "#f8f9fa", bottom: "#dee2e6", border: "#ced4da", shadow: "#6c757d" },
+        locked: { top: "#f1f3f5", bottom: "#e9ecef", border: "#dee2e6", shadow: "#868e96" }
+      };
+      const p = palettes[tone];
+      ctx.save();
+      ctx.globalAlpha = tone === "claimed" || tone === "locked" ? 0.2 : 0.28;
+      ctx.fillStyle = p.shadow;
+      this.fillEllipse(drawCx + 1.5, drawCy + 3.5, r * 0.98, r * 0.9);
+      ctx.globalAlpha = 1;
+      if (tone === "claim") {
+        ctx.save();
+        ctx.globalAlpha = 0.35 + 0.2 * Math.sin(nowMs * 8e-3);
+        ctx.strokeStyle = "#ffd43b";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(drawCx, drawCy, r + 3, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+      const body = ctx.createLinearGradient(drawCx, drawCy - r, drawCx, drawCy + r);
+      body.addColorStop(0, p.top);
+      body.addColorStop(0.55, p.bottom);
+      body.addColorStop(1, this.shadeHex(p.bottom, -12));
+      ctx.fillStyle = body;
+      this.fillEllipse(drawCx, drawCy, r - 1, (r - 1) * 0.94);
+      ctx.strokeStyle = p.border;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.save();
+      ctx.globalAlpha = 0.62;
+      ctx.fillStyle = "#ffffff";
+      this.fillEllipse(drawCx, drawCy - r * 0.42, r * 0.68, r * 0.32);
+      ctx.restore();
+      ctx.font = `${Math.round(r * 0.82)}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.globalAlpha = tone === "claimed" || tone === "locked" ? 0.62 : 1;
+      ctx.fillText(emoji, drawCx, drawCy - 1);
+      ctx.restore();
+    }
+    dailyTaskProgressColors(state) {
+      if (state === "claimed") {
+        return {
+          track: "#e9ecef",
+          fillTop: "#dee2e6",
+          fillMid: "#ced4da",
+          fillBottom: "#adb5bd",
+          border: "#ced4da"
+        };
+      }
+      if (state === "claim") {
+        return {
+          track: "#fff3bf",
+          fillTop: "#ffe066",
+          fillMid: "#ffc078",
+          fillBottom: "#f08c00",
+          border: "#ffd43b"
+        };
+      }
+      return {
+        track: "#fff9db",
+        fillTop: "#ffe066",
+        fillMid: "#ffd43b",
+        fillBottom: "#f59f00",
+        border: "#ffc078"
+      };
+    }
+    /** 每日任务：4 行进度 + 活跃宝箱（参考同类小游戏任务页）。 */
+    drawDailyTasksPanel() {
+      const layout = this.resolveDailyTasksLayout();
+      const { ctx } = this;
+      const { panel } = layout;
+      const now = this.nowMs || Date.now();
+      this.drawCuteCard(panel.x, panel.y, panel.w, panel.h, {
+        radius: 24,
+        fillTop: "rgba(255,255,255,0.98)",
+        fillBottom: "rgba(255, 248, 220, 0.97)",
+        border: "rgba(255, 212, 59, 0.95)",
+        borderWidth: 3,
+        shadow: true,
+        sparkle: true,
+        sparkleColor: "#ffe066",
+        nowMs: now
+      });
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "bold 20px sans-serif";
+      ctx.fillStyle = "#e67700";
+      ctx.fillText(layout.title, panel.x + panel.w / 2, panel.y + 26);
+      ctx.font = "12px sans-serif";
+      ctx.fillStyle = "#f59f00";
+      ctx.fillText(layout.subtitle, panel.x + panel.w / 2, panel.y + 48);
+      ctx.restore();
+      for (const row of layout.rows) {
+        const { task } = row;
+        ctx.save();
+        this.roundRectPath(row.x, row.y, row.w, row.h, 14);
+        ctx.fillStyle = row.state === "claim" ? "rgba(255, 243, 191, 0.92)" : row.state === "claimed" ? "rgba(241, 243, 245, 0.92)" : "rgba(255, 255, 255, 0.88)";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        if (row.state === "claim") {
+          ctx.strokeStyle = `rgba(245, 159, 0, ${0.5 + 0.35 * Math.sin(now * 8e-3 + row.index)})`;
+          ctx.lineWidth = 2.5;
+          this.roundRectPath(row.x + 0.5, row.y + 0.5, row.w - 1, row.h - 1, 13);
+          ctx.stroke();
+        } else if (row.state === "todo" && row.ratio > 0 && row.ratio < 1) {
+          ctx.strokeStyle = `rgba(255, 212, 59, ${0.35 + 0.2 * Math.sin(now * 6e-3 + row.index * 0.7)})`;
+          ctx.lineWidth = 1.5;
+          this.roundRectPath(row.x + 0.5, row.y + 0.5, row.w - 1, row.h - 1, 13);
+          ctx.stroke();
+        }
+        const iconTone = row.state === "claimed" ? "claimed" : row.state === "claim" ? "claim" : "active";
+        this.drawDailyTaskIconBadge(
+          row.iconCx,
+          row.y + row.h / 2 - 2,
+          this.dailyTaskKindEmoji(task.id),
+          iconTone,
+          21,
+          now
+        );
+        ctx.textAlign = "left";
+        ctx.font = "bold 13px sans-serif";
+        ctx.fillStyle = "#862e00";
+        ctx.fillText(task.title, row.textX, row.y + 18);
+        ctx.font = "11px sans-serif";
+        ctx.fillStyle = "#e67700";
+        const rewardLabel = formatDailyReward([task.reward]);
+        ctx.fillText(rewardLabel ? `\u5956\u52B1 ${rewardLabel}` : "", row.textX, row.y + 34);
+        const barPulse = row.state === "claim" ? 1.03 + 0.025 * Math.sin(now * 0.01 + row.index) : row.state === "todo" && row.ratio > 0 && row.ratio < 1 ? 1 + 0.012 * Math.sin(now * 8e-3 + row.index) : 1;
+        this.drawCartoonProgressBar(
+          row.barX,
+          row.barY,
+          row.barW,
+          row.barH,
+          row.ratio,
+          this.dailyTaskProgressColors(row.state),
+          barPulse
+        );
+        this.drawDailyTaskBarFx(row.barX, row.barY, row.barW, row.barH, row.ratio, row.state, now, row.index);
+        ctx.font = "bold 10px sans-serif";
+        ctx.fillStyle = row.state === "claimed" ? "#868e96" : "#d9480f";
+        ctx.textAlign = "right";
+        ctx.textBaseline = "alphabetic";
+        ctx.strokeStyle = "rgba(255,255,255,0.85)";
+        ctx.lineWidth = 2.5;
+        const progLabel = `${task.progress}/${task.target}`;
+        const progX = row.barX + row.barW - 2;
+        const progY = row.barY - 5;
+        ctx.strokeText(progLabel, progX, progY);
+        ctx.fillText(progLabel, progX, progY);
+        if (row.state === "claimed") {
+          ctx.textAlign = "center";
+          ctx.font = "bold 12px sans-serif";
+          ctx.fillStyle = "#868e96";
+          ctx.fillText("\u5DF2\u9886", row.x + row.w - 38, row.y + row.h / 2);
+        } else if (row.state === "todo") {
+          ctx.textAlign = "center";
+          ctx.font = "12px sans-serif";
+          ctx.fillStyle = "#fab005";
+          const todoPulse = 0.88 + 0.12 * Math.sin(now * 7e-3 + row.index);
+          ctx.globalAlpha = todoPulse;
+          ctx.fillText("\u8FDB\u884C\u4E2D", row.x + row.w - 38, row.y + row.h / 2);
+          ctx.globalAlpha = 1;
+        }
+        ctx.restore();
+      }
+      const chest = layout.chest;
+      const chestRatio = chest.total > 0 ? chest.claimedCount / chest.total : 0;
+      ctx.save();
+      this.roundRectPath(chest.x, chest.y, chest.w, chest.h, 16);
+      const chestG = ctx.createLinearGradient(chest.x, chest.y, chest.x, chest.y + chest.h);
+      if (chest.state === "ready") {
+        chestG.addColorStop(0, "#fff3bf");
+        chestG.addColorStop(1, "#ffd43b");
+      } else if (chest.state === "claimed") {
+        chestG.addColorStop(0, "#f1f3f5");
+        chestG.addColorStop(1, "#dee2e6");
+      } else {
+        chestG.addColorStop(0, "#f8f9fa");
+        chestG.addColorStop(1, "#e9ecef");
+      }
+      ctx.fillStyle = chestG;
+      ctx.fill();
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      if (chest.state === "ready") {
+        ctx.strokeStyle = `rgba(245, 159, 0, ${0.55 + 0.4 * Math.sin(now * 7e-3)})`;
+        ctx.lineWidth = 3;
+        this.roundRectPath(chest.x + 1, chest.y + 1, chest.w - 2, chest.h - 2, 15);
+        ctx.stroke();
+      }
+      const chestIconTone = chest.state === "claimed" ? "claimed" : chest.state === "ready" ? "claim" : "locked";
+      this.drawDailyTaskIconBadge(
+        chest.iconCx,
+        chest.iconCy,
+        chest.state === "claimed" ? "\u{1F4E6}" : "\u{1F381}",
+        chestIconTone,
+        28,
+        now
+      );
+      const chestBarX = chest.textX;
+      const chestBarW = chest.x + chest.w - chestBarX - 10;
+      const chestBarH = 9;
+      const chestBarY = chest.state === "ready" ? chest.y + 42 : chest.y + chest.h - 16;
+      if (chest.state !== "claimed") {
+        this.drawCartoonProgressBar(
+          chestBarX,
+          chestBarY,
+          chestBarW,
+          chestBarH,
+          chestRatio,
+          chest.state === "ready" ? this.dailyTaskProgressColors("claim") : this.dailyTaskProgressColors("todo"),
+          chest.state === "ready" ? 1.04 + 0.02 * Math.sin(now * 9e-3) : 1
+        );
+        this.drawDailyTaskBarFx(
+          chestBarX,
+          chestBarY,
+          chestBarW,
+          chestBarH,
+          chestRatio,
+          chest.state === "ready" ? "claim" : "todo",
+          now,
+          99
+        );
+      }
+      ctx.textAlign = "left";
+      ctx.font = "bold 14px sans-serif";
+      ctx.fillStyle = chest.state === "ready" ? "#e67700" : "#495057";
+      ctx.fillText(notice_default.dailyTasks.chest, chest.textX, chest.y + 22);
+      ctx.font = "11px sans-serif";
+      ctx.fillStyle = "#868e96";
+      const chestReward = formatDailyReward(this.session.getDailyTasksView().chest);
+      ctx.fillText(
+        chest.state === "claimed" ? chest.hint : `${chest.hint} \xB7 ${chestReward}`,
+        chest.textX,
+        chest.y + 40
+      );
+      ctx.font = "bold 12px sans-serif";
+      ctx.fillStyle = "#f59f00";
+      ctx.fillText(
+        `${chest.claimedCount}/${chest.total} \u5DF2\u9886`,
+        chest.textX,
+        chest.y + 58
+      );
+      ctx.restore();
+      for (const spec of layout.buttons) {
+        const btn = {
+          id: spec.id,
+          x: spec.x,
+          y: spec.y,
+          w: spec.w,
+          h: spec.h,
+          label: spec.label,
+          hitPad: 6,
+          ...spec.id === "daily_claim" && spec.index != null ? { levelId: spec.index } : {}
+        };
+        this.buttons.push(btn);
+        if (isPanelCloseLabel(spec.label) || isPanelBackLabel(spec.label)) {
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.font = "bold 22px sans-serif";
+          ctx.fillStyle = "#fab005";
+          ctx.fillText(spec.label, spec.x + spec.w / 2, spec.y + spec.h / 2);
+        } else if (spec.id === "daily_claim") {
+          this.drawCuteButton(btn, {
+            top: "#ffe066",
+            bottom: "#f59f00",
+            border: "#ffffff",
+            gloss: true,
+            fontSize: 13
+          });
+        } else if (spec.id === "daily_chest" || spec.id === "daily_chest_double") {
+          this.drawCuteButton(
+            btn,
+            spec.id === "daily_chest_double" ? { top: "#ffa8a8", bottom: "#f03e3e", border: "#ffffff", gloss: true, fontSize: 12 } : { top: "#8ce99a", bottom: "#37b24d", border: "#ffffff", gloss: true, fontSize: 12 }
+          );
+        }
+      }
     }
     /** 首次进入：可选授权头像昵称（不强制）。 */
     drawProfileWelcomePanel() {
@@ -19067,26 +21669,144 @@
       ctx.fillStyle = "#74c0fc";
       ctx.fillText(skip.label, skip.x + skip.w / 2, skip.y + skip.h / 2);
     }
-    drawLeaderboardPlayerRow(row, layout, ty, rowH) {
+    /** 前三名领奖台（固定在滚动区上方，不随列表滚动） */
+    drawLeaderboardPodium(layout, cx) {
+      var _a, _b;
+      const { ctx } = this;
+      const panel = layout.panel;
+      const podiumH = layout.podiumH || LEADERBOARD_PODIUM_H;
+      const baseY = layout.listTop + podiumH;
+      const slots = [
+        { row: layout.playerRows[1], x: cx - 72, h: 38, medal: "silver" },
+        { row: layout.playerRows[0], x: cx, h: 46, medal: "gold" },
+        { row: layout.playerRows[2], x: cx + 72, h: 34, medal: "bronze" }
+      ];
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(panel.x + 6, layout.listTop, panel.w - 12, podiumH);
+      ctx.clip();
+      for (const slot of slots) {
+        if (!slot.row) {
+          continue;
+        }
+        ctx.font = "bold 11px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#1864ab";
+        ctx.fillText((_b = (_a = slot.row.nickName) == null ? void 0 : _a.slice(0, 4)) != null ? _b : "\u73A9\u5BB6", slot.x, layout.listTop + 12);
+        ctx.beginPath();
+        ctx.arc(slot.x, layout.listTop + podiumH - slot.h / 2, 14, 0, Math.PI * 2);
+        ctx.fillStyle = slot.medal === "gold" ? "#ffd43b" : slot.medal === "silver" ? "#dee2e6" : "#f2b98a";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 12px sans-serif";
+        ctx.fillText(slot.row.tag, slot.x, layout.listTop + podiumH - slot.h / 2 + 0.5);
+      }
+      ctx.fillStyle = "rgba(116, 192, 252, 0.35)";
+      ctx.fillRect(panel.x + 20, baseY - 4, panel.w - 40, 3);
+      ctx.restore();
+    }
+    /** 关卡榜第一名头像上的小皇冠 */
+    drawLeaderboardCrown(cx, cy) {
+      const { ctx } = this;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.beginPath();
+      ctx.moveTo(-11, 4);
+      ctx.lineTo(-8, -6);
+      ctx.lineTo(-4, 2);
+      ctx.lineTo(0, -9);
+      ctx.lineTo(4, 2);
+      ctx.lineTo(8, -6);
+      ctx.lineTo(11, 4);
+      ctx.closePath();
+      const g = ctx.createLinearGradient(0, -9, 0, 6);
+      g.addColorStop(0, "#ffe066");
+      g.addColorStop(0.5, "#ffd43b");
+      g.addColorStop(1, "#f59f00");
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.lineJoin = "round";
+      ctx.stroke();
+      ctx.fillStyle = "#fa5252";
+      ctx.beginPath();
+      ctx.arc(-6, -2, 2.2, 0, Math.PI * 2);
+      ctx.arc(0, -5, 2.4, 0, Math.PI * 2);
+      ctx.arc(6, -2, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    drawLeaderboardPlayerRow(row, layout, ty, rowH, pinned) {
       var _a;
       const { ctx } = this;
       const { panel } = layout;
-      if (row.highlight) {
-        ctx.fillStyle = "rgba(208, 235, 255, 0.95)";
-        this.roundRectPath(panel.x + 8, ty - 2, panel.w - 16, rowH, 14);
-        ctx.fill();
+      const medal = leaderboardMedal(row.tag);
+      const medalColors = {
+        gold: { fill: "#ffd43b", deep: "#f59f00", row: "rgba(255, 243, 191, 0.92)" },
+        silver: { fill: "#dee2e6", deep: "#868e96", row: "rgba(241, 243, 245, 0.95)" },
+        bronze: { fill: "#f2b98a", deep: "#c0703a", row: "rgba(255, 232, 214, 0.92)" }
+      };
+      if (!pinned) {
+        if (row.highlight) {
+          ctx.fillStyle = "rgba(208, 235, 255, 0.95)";
+          this.roundRectPath(panel.x + 8, ty - 2, panel.w - 16, rowH, 14);
+          ctx.fill();
+        } else if (medal) {
+          ctx.fillStyle = medalColors[medal].row;
+          this.roundRectPath(panel.x + 8, ty - 2, panel.w - 16, rowH, 14);
+          ctx.fill();
+        }
       }
-      const rankCx = layout.tagX + 12;
+      const rankCx = layout.tagX + 13;
       const rankCy = ty + rowH / 2;
-      ctx.beginPath();
-      ctx.arc(rankCx, rankCy, 11, 0, Math.PI * 2);
-      ctx.fillStyle = row.highlight ? "#1c7ed6" : "#74c0fc";
-      ctx.fill();
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 12px sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(row.tag, rankCx, rankCy);
+      if (medal) {
+        const c = medalColors[medal];
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(rankCx - 7, rankCy - 18);
+        ctx.lineTo(rankCx - 2, rankCy - 6);
+        ctx.lineTo(rankCx + 2, rankCy - 6);
+        ctx.lineTo(rankCx + 7, rankCy - 18);
+        ctx.closePath();
+        ctx.fillStyle = "#ff6b6b";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(rankCx, rankCy + 2, 12, 0, Math.PI * 2);
+        const g = ctx.createLinearGradient(rankCx, rankCy - 10, rankCx, rankCy + 14);
+        g.addColorStop(0, c.fill);
+        g.addColorStop(1, c.deep);
+        ctx.fillStyle = g;
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 13px sans-serif";
+        ctx.fillText(row.tag, rankCx, rankCy + 2.5);
+        ctx.restore();
+        if (medal === "gold") {
+          this.drawLeaderboardCrown(layout.avatarX, rankCy - layout.avatarR - 3);
+        }
+      } else if (/^\d+$/.test(row.tag)) {
+        ctx.beginPath();
+        ctx.arc(rankCx, rankCy, 11, 0, Math.PI * 2);
+        ctx.fillStyle = row.highlight ? "#1c7ed6" : "#74c0fc";
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = row.tag.length >= 3 ? "bold 10px sans-serif" : "bold 12px sans-serif";
+        ctx.fillText(row.tag, rankCx, rankCy);
+      } else {
+        ctx.fillStyle = "#868e96";
+        ctx.font = "bold 10px sans-serif";
+        ctx.fillText(row.tag, rankCx, rankCy);
+      }
       const ax = layout.avatarX;
       const ay = rankCy;
       const ar = layout.avatarR;
@@ -19703,6 +22423,7 @@
       if (needReplayGate) {
         this.mahjongEntryGateLevel = level;
         this.leavingLobby = false;
+        this.statusText = "\u672C\u5173\u9700\u6D88\u8017\u9986\u9986\u91D1\u5E01\u6216\u770B\u5E7F\u544A\u540E\u518D\u8FDB";
         this.requestPaint();
         return;
       }
@@ -19712,22 +22433,31 @@
     }
     /** 先加载五面壳 + 萌宠贴图，再进对局，避免第 1 关首帧空白/绿牌。 */
     async openMahjongPlayWhenReady() {
-      this.session.mahjong.enterFromHall();
-      this.mahjongWinShownAtMs = 0;
-      this.mahjongSuppressAutoNext = false;
-      resetMahjongSlotFlight(this.mahjongSlotFlight);
-      this.resetMahjongPileSway();
-      this.mahjongTimerPaintSec = -1;
-      this.mahjongDrawRecoverAttempted = false;
-      this.mahjongSlotFullOfferDismissed = false;
-      await this.ensureMahjongTileShellPackLoaded();
-      await this.syncMahjongThemeAssets();
-      void this.session.refreshMahjongThemeCatalog().finally(() => {
-        void this.syncMahjongThemeAssets();
-      });
-      this.mode = "mahjong_play";
-      this.markUserActivity();
-      this.requestPaint();
+      try {
+        this.session.mahjong.enterFromHall();
+        this.mahjongWinShownAtMs = 0;
+        this.mahjongSuppressAutoNext = false;
+        this.resetMahjongSlotAnimations();
+        this.resetMahjongPileSway();
+        this.mahjongTimerPaintSec = -1;
+        this.mahjongDrawRecoverAttempted = false;
+        this.mahjongSlotFullOfferDismissed = false;
+        await this.ensureMahjongTileShellPackLoaded();
+        await this.syncMahjongThemeAssets();
+        void this.session.refreshMahjongThemeCatalog().finally(() => {
+          void this.syncMahjongThemeAssets();
+        });
+        this.mode = "mahjong_play";
+        this.queueMahjongIntroBanner();
+        this.markUserActivity();
+        this.requestPaint();
+      } catch (err) {
+        console.error("[crush-crush] mahjong enter failed", err);
+        this.leavingLobby = false;
+        this.syncLobbyBanner();
+        this.notifyUser("\u9EBB\u5C06\u9986\u8FDB\u4E0D\u53BB\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5", "\u8FDB\u9986\u5931\u8D25");
+        this.requestPaint();
+      }
     }
     async loadMahjongShellPackOnce() {
       const [front, frontWhite, frontPetRabbit, top, bottom, left, right, back] = await Promise.all([
@@ -19843,12 +22573,13 @@
       const next = game.level + 1;
       this.mahjongWinShownAtMs = 0;
       this.mahjongSuppressAutoNext = false;
-      resetMahjongSlotFlight(this.mahjongSlotFlight);
+      this.resetMahjongSlotAnimations();
       await this.session.mahjong.finishActive(true);
       this.session.mahjong.startLevel(next, false);
       this.session.mahjong.trackAutoNext(next);
       void this.syncMahjongThemeAssets();
       this.mode = "mahjong_play";
+      this.queueMahjongIntroBanner();
       this.requestPaint();
       this.mahjongAutoNextInFlight = false;
     }
@@ -19858,13 +22589,14 @@
         this.mahjongEntryGateLevel = null;
         this.mahjongSlotFullOfferDismissed = false;
         this.mahjongSuppressAutoNext = false;
-        resetMahjongSlotFlight(this.mahjongSlotFlight);
+        this.resetMahjongSlotAnimations();
         if (fromLobbyGate) {
           this.leavingLobby = true;
           await this.openMahjongPlayWhenReady();
         } else {
           void this.syncMahjongThemeAssets();
           this.mode = "mahjong_play";
+          this.queueMahjongIntroBanner();
         }
       } else if (result === "skipped") {
         this.notifyUser("\u770B\u5B8C\u89C6\u9891\u624D\u80FD\u7EE7\u7EED", "\u6FC0\u52B1\u89C6\u9891");
@@ -19908,6 +22640,10 @@
       }
       if (id === "mahjong_slot_full_close") {
         this.mahjongSlotFullOfferDismissed = true;
+        const lostGame = this.session.mahjong.getActiveGame();
+        if (lostGame) {
+          this.syncMahjongFailStageBanner(lostGame);
+        }
         this.requestPaint();
         return;
       }
@@ -20019,7 +22755,7 @@
           this.requestPaint();
           return;
         }
-        resetMahjongSlotFlight(this.mahjongSlotFlight);
+        this.resetMahjongSlotAnimations();
         if (!game.useTool(tool)) {
           const hint = tool === "reveal" ? "\u6CA1\u6709\u53EF\u7FFB\u5F00\u7684\u6263\u724C" : "\u5F53\u524D\u65E0\u6CD5\u4F7F\u7528\u8BE5\u9053\u5177";
           this.notifyUser(hint, "\u9053\u5177");
@@ -20041,6 +22777,7 @@
         this.mahjongWinShownAtMs = 0;
         void this.syncMahjongThemeAssets();
         this.mode = "mahjong_play";
+        this.queueMahjongIntroBanner();
         this.requestPaint();
         return;
       }
@@ -20051,6 +22788,7 @@
         await this.session.mahjong.clearSavedRun();
         this.session.mahjong.startLevel(level, false);
         this.mode = "mahjong_play";
+        this.queueMahjongIntroBanner();
         this.requestPaint();
         return;
       }
@@ -20070,10 +22808,11 @@
         }
         this.mahjongSlotFullOfferDismissed = false;
         this.mahjongSuppressAutoNext = false;
-        resetMahjongSlotFlight(this.mahjongSlotFlight);
+        this.resetMahjongSlotAnimations();
         await this.session.mahjong.restartLevel(level);
         void this.syncMahjongThemeAssets();
         this.mode = "mahjong_play";
+        this.queueMahjongIntroBanner();
         this.requestPaint();
         return;
       }
@@ -20096,13 +22835,14 @@
         this.mahjongSlotFullOfferDismissed = false;
         this.session.mahjong.startLevel(level, false);
         this.mode = "mahjong_play";
+        this.queueMahjongIntroBanner();
         this.requestPaint();
         return;
       }
     }
     async handleButton(id, levelId) {
       var _a, _b, _c, _d;
-      if (id === "booster_hammer" || id === "booster_shuffle" || id === "booster_extra" || id === "mute" || id === "level" || id === "lobby" || id === "settings" || id === "howto" || id === "notice" || id === "club" || id === "recommend" || id === "post" || id === "invite" || id === "claim_shuffle" || id === "resume" || id === "mahjong_hall") {
+      if (id === "booster_hammer" || id === "booster_shuffle" || id === "booster_extra" || id === "mute" || id === "level" || id === "lobby" || id === "settings" || id === "howto" || id === "notice" || id === "club" || id === "recommend" || id === "post" || id === "invite" || id === "daily_open" || id === "daily_claim" || id === "lb_tab_level" || id === "lb_tab_week" || id === "resume" || id === "mahjong_hall") {
         this.session.playUiSfx();
       }
       if (id === "mahjong_hall") {
@@ -20110,7 +22850,12 @@
           this.requestPaint();
         });
         if (!this.session.isMahjongHallUnlocked()) {
-          this.notifyUser(mahjongHallLockHint(), "\u840C\u5BA0\u9EBB\u5C06\u9986");
+          const cleared = this.session.getMaxClearedLevelId();
+          this.notifyUser(
+            mahjongHallLockHint(),
+            mahjongHallLockToastTitle(cleared)
+          );
+          this.openOverlay("mahjong_lock");
           return;
         }
         this.enterMahjongPlay();
@@ -20149,10 +22894,42 @@
         this.openOverlay("notice");
         return;
       }
-      if (id === "claim_shuffle") {
-        if (this.session.claimDailyShuffle()) {
-          this.notifyUser("\u91CD\u6392 x1 \u5DF2\u5230\u8D26", "\u9886\u53D6\u6210\u529F");
+      if (id === "daily_open") {
+        this.openOverlay("daily_tasks");
+        return;
+      }
+      if (id === "daily_claim") {
+        const task = this.session.getDailyTasksView().tasks[levelId != null ? levelId : -1];
+        const text = task ? this.session.claimDailyTask(task.id) : null;
+        if (text) {
+          this.notifyUser(text, "\u4EFB\u52A1\u5956\u52B1");
         }
+        this.requestPaint();
+        return;
+      }
+      if (id === "daily_chest" || id === "daily_chest_double") {
+        if (this.dailyChestBusy) {
+          return;
+        }
+        this.dailyChestBusy = true;
+        try {
+          const doubled = id === "daily_chest_double";
+          const text = doubled ? await this.runDuringAd(() => this.session.claimDailyChest(true)) : await this.session.claimDailyChest(false);
+          if (text) {
+            this.notifyUser(text, doubled ? "\u53CC\u500D\u5B9D\u7BB1" : "\u6D3B\u8DC3\u5B9D\u7BB1");
+          } else if (doubled) {
+            this.notifyUser("\u770B\u5B8C\u89C6\u9891\u624D\u80FD\u9886\u53CC\u500D\uFF0C\u4E5F\u53EF\u4EE5\u76F4\u63A5\u9886\u53D6", "\u5B9D\u7BB1");
+          }
+        } finally {
+          this.dailyChestBusy = false;
+          this.requestPaint();
+        }
+        return;
+      }
+      if (id === "lb_tab_level" || id === "lb_tab_week") {
+        this.leaderboardTab = id === "lb_tab_week" ? "week" : "level";
+        this.leaderboardScrollY = 0;
+        this.requestPaint();
         return;
       }
       if (id === "club") {
@@ -20588,17 +23365,267 @@
         recommendTitle
       };
     }
+    enqueueLevelBanner(banner) {
+      if (this.levelBanners.some((item) => item.kind === banner.kind)) {
+        return;
+      }
+      this.levelBanners.push(banner);
+      this.requestPaint();
+    }
+    showLeaderboardRewardToast() {
+      const text = this.session.takeLeaderboardRewardToast();
+      if (text) {
+        this.notifyUser(text, "\u5468\u699C\u5956\u52B1");
+      }
+    }
+    /** 棋盘中线的横幅：滑入 → 停留 → 滑出，队列里一条接一条。 */
+    drawLevelBanner() {
+      var _a;
+      if (this.mode !== "playing") {
+        return;
+      }
+      const banner = this.levelBanners[0];
+      if (!banner) {
+        return;
+      }
+      const now = this.nowMs || Date.now();
+      if (banner.startMs === 0) {
+        banner.startMs = now;
+      }
+      const frame = bannerFrame(banner, now);
+      if (frame.done) {
+        this.levelBanners.shift();
+        return;
+      }
+      const { ctx, width } = this;
+      const pal = bannerPalette(banner.kind);
+      const board = this.session.getBoard();
+      let cy = this.height * 0.45;
+      if (board) {
+        const layout = this.computeBoardLayout(board);
+        cy = layout.originY - board.size.rows * layout.cellSize / 2;
+      }
+      const bandH = banner.subtitle ? 82 : 62;
+      const top = cy - bandH / 2;
+      ctx.save();
+      ctx.globalAlpha = frame.ribbon * 0.92;
+      const g = ctx.createLinearGradient(0, top, 0, top + bandH);
+      g.addColorStop(0, pal.top);
+      g.addColorStop(1, pal.bottom);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, top, width, bandH);
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.fillRect(0, top, width, 3);
+      ctx.fillRect(0, top + bandH - 3, width, 3);
+      const shimmer = bannerShimmerPhase(banner, now);
+      if (shimmer >= 0) {
+        const sx = top + shimmer * width;
+        const sg = ctx.createLinearGradient(sx - 40, top, sx + 40, top + bandH);
+        sg.addColorStop(0, "rgba(255,255,255,0)");
+        sg.addColorStop(0.5, "rgba(255,255,255,0.45)");
+        sg.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = sg;
+        ctx.fillRect(sx - 50, top, 100, bandH);
+      }
+      ctx.restore();
+      ctx.save();
+      ctx.globalAlpha = frame.alpha;
+      ctx.translate(width / 2 + frame.offset * width, cy);
+      ctx.scale(frame.scale, frame.scale);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineJoin = "round";
+      const titleSize = banner.kind === "intro" ? 34 : 30;
+      const ty = banner.subtitle ? -13 : 0;
+      ctx.font = `bold ${titleSize}px sans-serif`;
+      ctx.strokeStyle = pal.edge;
+      ctx.lineWidth = 7;
+      ctx.strokeText(banner.title, 0, ty);
+      ctx.fillStyle = pal.ink;
+      ctx.fillText(banner.title, 0, ty);
+      if (banner.subtitle) {
+        ctx.font = "bold 14px sans-serif";
+        const sub = (_a = this.wrapText(banner.subtitle, width - 40)[0]) != null ? _a : banner.subtitle;
+        ctx.strokeStyle = pal.edge;
+        ctx.lineWidth = 4;
+        ctx.strokeText(sub, 0, 22);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(sub, 0, 22);
+      }
+      ctx.restore();
+    }
+    /** 收集目标飞向 HUD；落进目标栏时让进度条跳一下。 */
+    drawGoalFlyers() {
+      if (this.goalFlyers.length === 0) {
+        return;
+      }
+      if (this.mode !== "playing") {
+        this.goalFlyers = [];
+        return;
+      }
+      const now = this.nowMs || Date.now();
+      const { ctx } = this;
+      let landed = false;
+      const keep = [];
+      for (const flyer of this.goalFlyers) {
+        const p = flyerPoint(flyer, now);
+        if (p.done) {
+          landed = true;
+          continue;
+        }
+        keep.push(flyer);
+        const img = p.started ? this.tileImages.get(flyer.kind) : void 0;
+        if (!img) {
+          continue;
+        }
+        const s = flyer.size * p.scale;
+        ctx.save();
+        ctx.globalAlpha = p.alpha;
+        this.drawTileSprite(img, p.x - s / 2, p.y - s / 2, s);
+        ctx.restore();
+      }
+      this.goalFlyers = keep;
+      if (landed) {
+        this.hudBarPulse = Math.max(this.hudBarPulse, 260);
+        this.hudScorePunch = Math.max(this.hudScorePunch, 1.06);
+      }
+    }
+    /** 局内完成每日任务的小胶囊；结算页时挪到底部，避免压住胜利卡。 */
+    drawDailyTaskPop() {
+      var _a;
+      const pop = this.dailyTaskPop;
+      if (!pop) {
+        return;
+      }
+      const now = this.nowMs || Date.now();
+      const t = now - pop.startMs;
+      if (t >= 2400) {
+        this.dailyTaskPop = null;
+        return;
+      }
+      if (this.mode === "lobby" || this.mode === "mahjong_play") {
+        return;
+      }
+      const { ctx, width } = this;
+      const alpha = t < 200 ? t / 200 : t > 2e3 ? (2400 - t) / 400 : 1;
+      const drop = t < 200 ? (1 - t / 200) * -12 : 0;
+      ctx.save();
+      ctx.font = "bold 13px sans-serif";
+      const w = Math.min(width - 24, ctx.measureText(pop.text).width + 44);
+      const h = 30;
+      const x = (width - w) / 2;
+      const y = this.mode === "result" ? this.height - this.safeAreaBottom - h - 18 + drop : this.getHudBottom() + 28 + drop;
+      ctx.globalAlpha = alpha;
+      const g = ctx.createLinearGradient(x, y, x, y + h);
+      g.addColorStop(0, "#fff9db");
+      g.addColorStop(1, "#ffe066");
+      ctx.fillStyle = g;
+      this.roundRectPath(x, y, w, h, h / 2);
+      ctx.fill();
+      ctx.strokeStyle = "#f59f00";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      drawCandyStar(ctx, x + 17, y + h / 2, 8, true);
+      ctx.fillStyle = "#d9480f";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText((_a = this.wrapText(pop.text, w - 38)[0]) != null ? _a : pop.text, x + 30, y + h / 2 + 0.5);
+      ctx.restore();
+    }
+    /** 结算：星数文案 + 评星说明（与馆币 ⭐ 无关）。 */
+    drawResultStarCaption(cx, starsCy, starSize) {
+      const count = this.resultStars;
+      if (count <= 0) {
+        return;
+      }
+      const stars = count;
+      const { ctx } = this;
+      const baseY = starsCy + starSize * 1.85;
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.font = "bold 15px sans-serif";
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+      ctx.lineWidth = 4;
+      ctx.strokeText(starClearLabel(stars), cx, baseY);
+      ctx.fillStyle = "#e67700";
+      ctx.fillText(starClearLabel(stars), cx, baseY);
+      ctx.font = "12px sans-serif";
+      ctx.fillStyle = "#868e96";
+      ctx.fillText(starsHint(stars), cx, baseY + 20);
+      ctx.restore();
+    }
+    /** 结算星星：空槽先在，金星逐颗弹进去，中间那颗更大更高。 */
+    drawResultStars(cx, cy, size, now) {
+      const count = this.resultStars;
+      if (count <= 0) {
+        return;
+      }
+      const { ctx } = this;
+      const elapsed = now - this.resultOpenedMs;
+      const gap = size * 2.25;
+      for (let i = 0; i < 3; i += 1) {
+        const x = cx + (i - 1) * gap;
+        const y = cy + (i === 1 ? -size * 0.4 : 0);
+        const r = i === 1 ? size * 1.2 : size;
+        drawCandyStar(ctx, x, y, r, false);
+        if (i >= count) {
+          continue;
+        }
+        const f = starPopFrame(i, elapsed);
+        if (!f.visible) {
+          continue;
+        }
+        ctx.save();
+        ctx.globalAlpha = f.alpha;
+        ctx.translate(x, y);
+        ctx.scale(f.scale, f.scale);
+        drawCandyStar(ctx, 0, 0, r, true);
+        ctx.restore();
+      }
+    }
+    /** 关卡条内横向三星（空槽 + 金星，居中一行）。 */
+    drawLobbyBarStarRow(leftX, cy, r, earned) {
+      const { ctx } = this;
+      const gap = r * 2.08;
+      for (let i = 0; i < 3; i += 1) {
+        const x = leftX + i * gap;
+        const y = cy + (i === 1 ? -r * 0.12 : 0);
+        const filled = i < earned;
+        ctx.save();
+        if (filled) {
+          ctx.shadowColor = "rgba(255, 212, 59, 0.85)";
+          ctx.shadowBlur = r * 0.55;
+        }
+        drawCandyStar(ctx, x, y, r, filled);
+        ctx.restore();
+      }
+      return gap * 2 + r * 0.5;
+    }
     /** 6–20 进关/重试/下一关：艺术字「难度提升」。 */
     applyLevelEntryTip(levelId) {
-      var _a;
-      const procedural = (_a = this.session.getLevelConfig()) == null ? void 0 : _a.procedural;
+      var _a, _b;
+      this.levelBanners = [];
+      this.goalFlyers = [];
+      this.lowMovesWarned = false;
+      this.dailyTaskPop = null;
+      const level = this.session.getLevelConfig();
+      const goalText = formatHudGoals((_b = (_a = this.session.getGoals()) == null ? void 0 : _a.getSnapshots()) != null ? _b : []).text;
+      const intro = makeLevelBanner(
+        "intro",
+        `\u7B2C ${levelId} \u5173`,
+        [goalText, level ? `${level.moves} \u6B65` : ""].filter(Boolean).join(" \xB7 ")
+      );
+      this.enqueueLevelBanner(intro);
+      const procedural = level == null ? void 0 : level.procedural;
       const art = levelDifficultyArt(levelId, procedural);
       if (art) {
         this.statusText = "";
         this.difficultyArt = {
           title: art.title,
           subtitle: art.subtitle,
-          startMs: this.nowMs || Date.now(),
+          startMs: (this.nowMs || Date.now()) + intro.durationMs,
           durationMs: 2800
         };
         this.requestPaint();
@@ -20615,6 +23642,9 @@
       }
       const now = this.nowMs || Date.now();
       const elapsed = now - tip.startMs;
+      if (elapsed < 0) {
+        return;
+      }
       if (elapsed >= tip.durationMs) {
         this.difficultyArt = null;
         return;
@@ -20794,7 +23824,7 @@
       var _a;
       for (let i = this.buttons.length - 1; i >= 0; i -= 1) {
         const btn = this.buttons[i];
-        if (btn.id !== "invite" && btn.id !== "howto" && btn.id !== "settings" && btn.id !== "claim_shuffle" && btn.id !== "recommend" && btn.id !== "club") {
+        if (btn.id !== "invite" && btn.id !== "howto" && btn.id !== "settings" && btn.id !== "daily_open" && btn.id !== "recommend" && btn.id !== "club") {
           continue;
         }
         const pad = (_a = btn.hitPad) != null ? _a : 0;
@@ -20805,7 +23835,7 @@
       return null;
     }
     draw() {
-      var _a, _b, _c;
+      var _a, _b, _c, _d;
       const { ctx } = this;
       this.buttons.length = 0;
       try {
@@ -20861,6 +23891,15 @@
             void this.ensureMahjongTileShellPackLoaded().then(() => this.requestPaint());
           }
           const chrome = this.buildMahjongPlayChrome(game);
+          const now = this.nowMs || Date.now();
+          ctx.save();
+          if (this.shakeMs > 0) {
+            const mag = Math.min(5, this.shakeMs / 24);
+            ctx.translate(
+              Math.sin(now * 0.09) * mag,
+              Math.cos(now * 0.075) * mag
+            );
+          }
           drawMahjongPlay(
             ctx,
             this.width,
@@ -20871,8 +23910,20 @@
             this.mahjongButtons,
             chrome,
             this.mahjongSlotFlight,
-            this.nowMs || Date.now()
+            now
           );
+          drawMahjongSlotClearRings(ctx, this.mahjongSlotClearRings, now);
+          this.drawMatchJuiceOverlays();
+          if (this.mahjongStageBanner) {
+            drawMahjongLevelStageBanner(
+              ctx,
+              this.width,
+              this.height,
+              this.mahjongStageBanner,
+              now
+            );
+          }
+          ctx.restore();
           if (this.mahjongToolOffer && game.phase === "playing") {
             drawMahjongToolOfferModal(
               ctx,
@@ -20884,7 +23935,9 @@
               mahjongCoinCost()
             );
           }
-          if (game.phase === "won" || game.phase === "lost") {
+          const showMahjongResult = (game.phase === "won" || game.phase === "lost") && !this.shouldDeferMahjongResultModal(game);
+          if (showMahjongResult) {
+            const revealStart = game.phase === "lost" ? this.mahjongResultRevealStartMs : 0;
             drawMahjongResult(
               ctx,
               this.width,
@@ -20895,7 +23948,8 @@
               this.mahjongSlotFullOfferDismissed,
               this.nowMs || Date.now(),
               this.winCelebrate,
-              chrome
+              chrome,
+              revealStart
             );
           }
           return;
@@ -20927,23 +23981,32 @@
         }
         if (this.mode === "playing") {
           this.drawBoosterBar();
+          this.drawGoalFlyers();
         }
         this.drawActionToast();
         this.drawDifficultyArtTip();
+        this.drawLevelBanner();
         if (this.hammerTargeting) {
           this.drawHammerCursor();
         }
         if (this.mode === "result") {
           this.drawResultOverlay();
         }
+        this.drawDailyTaskPop();
         this.drawNavChips();
         this.drawPageOverlay();
       } catch (err) {
-        console.error("[crush-crush] draw failed", err);
+        this.logThrottledDrawError("[crush-crush] draw failed", err);
         try {
           ctx.fillStyle = this.mode === "lobby" ? "#a7f0d4" : "#b6e8fc";
           ctx.fillRect(0, 0, this.width, this.height);
         } catch (e) {
+        }
+      } finally {
+        try {
+          (_d = this.canvasPresent) == null ? void 0 : _d.call(this);
+        } catch (presentErr) {
+          console.warn("[crush-crush] canvas present failed", presentErr);
         }
       }
     }
@@ -21029,7 +24092,8 @@
           this.height,
           this.session.getLadderCoinsAvailable(),
           MAHJONG_REPLAY_COIN_COST,
-          this.mahjongGateButtons
+          this.mahjongGateButtons,
+          now
         );
       }
     }
@@ -21059,7 +24123,7 @@
         this.mahjongEntryGateLevel = null;
         this.leavingLobby = true;
         const level = this.session.mahjong.resolveEntryLevel();
-        resetMahjongSlotFlight(this.mahjongSlotFlight);
+        this.resetMahjongSlotAnimations();
         await this.session.mahjong.restartLevel(level);
         await this.openMahjongPlayWhenReady();
         this.requestPaint();
@@ -21282,22 +24346,13 @@
         }
       }
       if (isCurrent) {
-        const star = this.uiIcons.get("ladder-star");
-        const badge = circleR * 0.7;
-        const bx = cx + circleR * 0.55;
-        const by = cy - circleR * 0.78;
-        if (star && (star.width || 0) > 0) {
-          const bob = Math.sin(nowMs * 6e-3) * 2;
-          ctx.drawImage(star, bx - badge / 2, by - badge / 2 + bob, badge, badge);
-        }
         if ("startTop" in theme) {
           this.drawLobbyStartChip(node, theme.startTop, theme.startBottom);
         }
       } else if (cleared && unlocked) {
+        const stars = Math.min(3, Math.max(1, this.session.getLevelStars(node.levelId)));
         const score = this.session.getBestScore(node.levelId);
-        if (score > 0) {
-          this.drawLobbyScoreChip(node, score);
-        }
+        this.drawLobbyClearedBarMeta(node, stars, score);
       }
       ctx.restore();
     }
@@ -21361,54 +24416,92 @@
       ctx.fillText("\u5F00\u59CB", chipX + chipW / 2, chipY + chipH / 2 + 1);
       ctx.restore();
     }
-    drawLobbyScoreChip(node, score) {
+    /** 已通关条：白底胶囊内「三星 + 最高分 + 馆币」，与彩色条拉开对比。 */
+    drawLobbyClearedBarMeta(node, stars, score) {
       const { ctx } = this;
-      const label = String(Math.max(0, Math.floor(score)));
-      const coinLabel = formatMahjongGlobalCoinAmount(
-        this.session.getLadderCoinsForLevel(node.levelId)
-      );
+      const { barX, barW, barH, circleR, circleSide } = node;
+      const cy = node.y;
+      const starR = Math.max(8, barH * 0.24);
+      const scoreText = `${Math.max(0, Math.floor(score))}\u5206`;
+      const coinText = formatLadderCoinChip(this.session.getLadderCoinsForLevel(node.levelId));
+      let fontSize = Math.max(13, Math.round(barH * 0.38));
+      const coinPadX = 6;
+      const coinGap = 6;
       ctx.save();
-      const fontSize = Math.max(11, Math.round(node.barH * 0.28));
       ctx.font = `bold ${fontSize}px sans-serif`;
-      const tw = ctx.measureText(label).width;
-      const coinTw = ctx.measureText(coinLabel).width;
-      const chipH = Math.min(26, node.barH * 0.42);
-      const scoreChipW = tw + 18;
-      const coinChipW = coinTw + 22;
-      const gap = 4;
-      const totalW = scoreChipW + gap + coinChipW;
-      const chipX = node.circleSide === "left" ? node.barX + node.barW * 0.42 : node.barX + node.barW * 0.22 - Math.max(0, totalW - node.barW * 0.5);
-      const chipY = node.y - chipH / 2;
-      this.roundRectPath(chipX, chipY, scoreChipW, chipH, chipH / 2);
-      ctx.fillStyle = "rgba(255,255,255,0.94)";
+      const starsBlockW = starR * 2.08 * 2 + starR;
+      const textGap = 8;
+      const measureTextBlock = () => {
+        const scoreW2 = ctx.measureText(scoreText).width;
+        const coinInner = ctx.measureText(coinText).width + coinPadX * 2;
+        return scoreW2 + coinGap + coinInner;
+      };
+      let textBlockW = measureTextBlock();
+      const pad = 10;
+      let chipH = Math.min(barH - 3, Math.max(30, barH * 0.92));
+      let chipW = pad * 2 + starsBlockW + textGap + textBlockW;
+      const circleReserve = circleSide === "left" ? circleR * 2 + 12 : circleR * 2 + 8;
+      const maxW = Math.max(40, barW - circleReserve - 10);
+      while (chipW > maxW && fontSize > 10) {
+        fontSize -= 1;
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        textBlockW = measureTextBlock();
+        chipW = pad * 2 + starsBlockW + textGap + textBlockW;
+      }
+      let chipX = circleSide === "left" ? barX + circleR * 2 + 10 : barX + 12;
+      chipX = Math.min(chipX, barX + barW - chipW - 6);
+      chipX = Math.max(chipX, barX + 6);
+      const chipY = cy - chipH / 2;
+      ctx.shadowColor = "rgba(40, 60, 80, 0.28)";
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetY = 2;
+      this.roundRectPath(chipX, chipY, chipW, chipH, chipH / 2);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.98)";
+      ctx.shadowColor = "transparent";
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.98)";
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255, 212, 59, 0.45)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      const starLeft = chipX + pad + starR;
+      this.drawLobbyBarStarRow(starLeft, cy, starR, stars);
+      const textX = chipX + pad + starsBlockW + textGap;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      ctx.font = `bold ${fontSize}px sans-serif`;
+      ctx.fillStyle = "#495057";
+      ctx.fillText(scoreText, textX, cy + 0.5);
+      const scoreW = ctx.measureText(scoreText).width;
+      ctx.font = `bold ${fontSize}px sans-serif`;
+      const coinW = ctx.measureText(coinText).width;
+      const coinPadY = 3;
+      const coinBoxX = textX + scoreW + coinGap;
+      const coinBoxW = coinW + coinPadX * 2;
+      const coinBoxH = chipH - coinPadY * 2;
+      const coinBoxY = chipY + coinPadY;
+      const cg = ctx.createLinearGradient(coinBoxX, coinBoxY, coinBoxX, coinBoxY + coinBoxH);
+      cg.addColorStop(0, "#fff3bf");
+      cg.addColorStop(1, "#ffd43b");
+      this.roundRectPath(coinBoxX, coinBoxY, coinBoxW, coinBoxH, coinBoxH / 2);
+      ctx.fillStyle = cg;
+      ctx.fill();
+      ctx.strokeStyle = "#f59f00";
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      ctx.fillStyle = "#6b5b6e";
+      ctx.fillStyle = "#d9480f";
       ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(label, chipX + scoreChipW / 2, chipY + chipH / 2 + 0.5);
-      const coinX = chipX + scoreChipW + gap;
-      this.roundRectPath(coinX, chipY, coinChipW, chipH, chipH / 2);
-      ctx.fillStyle = "rgba(255, 248, 220, 0.96)";
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255, 212, 59, 0.85)";
-      ctx.stroke();
-      ctx.fillStyle = "#e67700";
-      ctx.font = `bold ${Math.max(10, fontSize - 1)}px sans-serif`;
-      ctx.fillText(coinLabel, coinX + coinChipW / 2, chipY + chipH / 2 + 0.5);
+      ctx.fillText(coinText, coinBoxX + coinBoxW / 2, cy + 0.5);
       ctx.restore();
     }
     lobbyContentTop() {
-      const daily = this.session.getDailyLoop();
       return layoutLobbyBottom({
         width: this.width,
         height: this.height,
         bannerReserve: this.mode === "lobby" ? this.session.getLobbyBannerReservePx() : 0,
         safeBottom: this.safeAreaBottom,
-        clearsToday: daily.clearsToday,
-        shuffleGranted: daily.playShuffleGranted
+        dailyClaimable: this.session.getDailyTasksView().claimable
       }).contentTop;
     }
     /** 未解锁等提示画在树干标语处。树屏的文案由 drawLobbyTreePrompt 盖住底图。 */
@@ -22329,6 +25422,7 @@
           iconSize
         );
       }
+      this.hudGoalIconPos = collectSprite ? { x: barX + 4 + iconSize / 2, y: barY + barH / 2 } : null;
       ctx.font = goalLabel.length > 22 ? "bold 10px sans-serif" : "bold 12px sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -24194,8 +27288,11 @@
       const now = this.nowMs || Date.now();
       const anim = this.resultFx.getLayout(now);
       const isFail = this.pendingResult === "failed" || this.session.fsm.getCurrent() === "LevelFailed";
-      ctx.fillStyle = `rgba(40, 20, 50, ${anim.veilAlpha * (isFail ? 1 : 0.72)})`;
-      ctx.fillRect(0, 0, width, height);
+      drawResultSceneBackdrop(ctx, width, height, {
+        veilAlpha: anim.veilAlpha,
+        tone: "pink",
+        isFail
+      });
       this.resultFx.drawParticles(ctx, now);
       if (!isFail && anim.flash > 0.01) {
         ctx.save();
@@ -24272,6 +27369,14 @@
         );
       }
       ctx.restore();
+      if (!isFail) {
+        ctx.save();
+        ctx.globalAlpha = anim.panelAlpha;
+        const starCy = panelCy - panelH / 2 - 6;
+        this.drawResultStars(panelCx, starCy, 20, now);
+        this.drawResultStarCaption(panelCx, starCy, 20);
+        ctx.restore();
+      }
       const revive = isFail ? this.session.getReviveOffer() : { allowed: false, movesGranted: 0 };
       const y0 = height * 0.5;
       const btns = [];
@@ -24318,7 +27423,7 @@
       this.buttons = btns;
       for (let i = 0; i < btns.length; i += 1) {
         const b = btns[i];
-        const stagger = clamp012((anim.buttonProgress - i * 0.12) / 0.55);
+        const stagger = clamp013((anim.buttonProgress - i * 0.12) / 0.55);
         const slide = (1 - easeOutBackLocal(stagger)) * 36;
         const palette = b.id === "revive" ? { top: "#74c0fc", bottom: "#1c7ed6", border: "#ffffff", gloss: true } : b.id === "next" ? { top: "#8ce99a", bottom: "#37b24d", border: "#ffffff", gloss: true } : b.id === "lobby" ? { top: "#d0ebff", bottom: "#74c0fc", border: "#ffffff", gloss: true } : { top: "#a5d8ff", bottom: "#339af0", border: "#ffffff", gloss: true };
         ctx.save();
@@ -24427,6 +27532,13 @@
         ctx.fillText(`\u7C89\u788E\u52A0\u6210 +${crushBonus}`, 0, 28);
       }
       ctx.restore();
+      ctx.save();
+      ctx.globalAlpha = anim.panelAlpha;
+      const starSize = Math.min(22, card.w * 0.07);
+      const starCy = card.y + 4;
+      this.drawResultStars(card.cx, starCy, starSize, now);
+      this.drawResultStarCaption(card.cx, starCy, starSize);
+      ctx.restore();
       const actionTop = panel.actionTop;
       if (this.offerCleanPrompt) {
         this.drawCleanOfferButtons(anim, actionTop, card.w - 28);
@@ -24467,7 +27579,7 @@
       this.buttons = btns;
       for (let i = 0; i < btns.length; i += 1) {
         const b = btns[i];
-        const stagger = clamp012((anim.buttonProgress - i * 0.1) / 0.55);
+        const stagger = clamp013((anim.buttonProgress - i * 0.1) / 0.55);
         const slide = (1 - easeOutBackLocal(stagger)) * 20;
         const palette = b.id === "next" ? { top: "#74c0fc", bottom: "#1c7ed6", border: "#ffffff", gloss: true } : b.id === "lobby" ? { top: "#d0ebff", bottom: "#74c0fc", border: "#ffffff", gloss: true } : { top: "#a5d8ff", bottom: "#339af0", border: "#ffffff", gloss: true };
         ctx.save();
@@ -24557,7 +27669,7 @@
       this.buttons = btns;
       for (let i = 0; i < btns.length; i += 1) {
         const b = btns[i];
-        const stagger = clamp012((anim.buttonProgress - i * 0.12) / 0.55);
+        const stagger = clamp013((anim.buttonProgress - i * 0.12) / 0.55);
         const slide = (1 - easeOutBackLocal(stagger)) * 22;
         const palette = b.id === "clean_yes" ? { top: "#74c0fc", bottom: "#339af0", border: "#ffffff", gloss: true } : { top: "#ced4da", bottom: "#adb5bd", border: "#ffffff", gloss: true };
         ctx.save();
@@ -24690,7 +27802,7 @@
       ctx.restore();
     }
   };
-  function clamp012(v) {
+  function clamp013(v) {
     return Math.max(0, Math.min(1, v));
   }
   function easeOutBackLocal(t) {

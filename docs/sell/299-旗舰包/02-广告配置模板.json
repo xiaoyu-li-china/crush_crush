@@ -1,0 +1,31 @@
+{
+  "_readme": "复制到你的工程配置文件；把所有 YOUR_ 换成流量主后台真实 adunit；不要提交真实 ID 到公开仓库",
+  "rewarded_revive": {
+    "adUnitId": "adunit-YOUR_REWARD_REVIVE",
+    "maxPerLevel": 0,
+    "comment": "失败复活 / 道具补给可共用此激励位，也可再拆一个"
+  },
+  "rewarded_crush_extend": {
+    "adUnitId": "adunit-YOUR_REWARD_EXTEND",
+    "extraMs": 5000,
+    "comment": "奖励关加时，毫秒"
+  },
+  "interstitial_settle": {
+    "adUnitId": "adunit-YOUR_INTERSTITIAL",
+    "everyNLevels": 2,
+    "cooldownSeconds": 60,
+    "comment": "通关结算插屏：关卡 id 整除 everyNLevels 且过冷却才弹；失败不弹"
+  },
+  "interstitial_launch": {
+    "enabled": true,
+    "delayMs": 2500,
+    "retryMs": 2500,
+    "timeoutMs": 45000,
+    "comment": "进大厅延迟展示；可与结算共用同一个插屏 adUnitId"
+  },
+  "banner_lobby": {
+    "adUnitId": "adunit-YOUR_CUSTOM_BANNER",
+    "enabled": true,
+    "comment": "原生模板横幅，仅大厅；进关必须 hide"
+  }
+}

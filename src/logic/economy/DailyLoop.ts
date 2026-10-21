@@ -1,5 +1,5 @@
 /**
- * 本地每日循环：登录锤子入包、今日 3 关领重排。
+ * 本地每日循环：登录锤子入包、今日 3 关领重排、每日任务计数。
  */
 
 import {
@@ -7,6 +7,7 @@ import {
   parseBoosterDaily,
   type BoosterDailyFlags,
 } from './BoosterEconomy';
+import type { DailyTaskCounters } from './DailyTasks';
 
 export const DAILY_GOAL_CLEARS = 3;
 export const DAILY_HAMMER_GRANT = 1;
@@ -15,6 +16,8 @@ export interface DailyLoopData extends BoosterDailyFlags {
   ymd: string;
   bonusHammer: number;
   clearsToday: number;
+  /** 每日任务计数，跨天随整份数据一起清空 */
+  tasks?: DailyTaskCounters;
 }
 
 export const EMPTY_DAILY_LOOP: DailyLoopData = {
@@ -59,6 +62,8 @@ export function applyDailyLogin(
         bonusHammer: DAILY_HAMMER_GRANT,
         clearsToday: 0,
         ...EMPTY_BOOSTER_DAILY,
+        // 跨天清空每日任务计数（任务表由日期重新生成）
+        tasks: undefined,
       },
       grantedHammer: true,
     };
@@ -69,6 +74,7 @@ export function applyDailyLogin(
       bonusHammer: prev.bonusHammer,
       clearsToday: prev.clearsToday,
       ...flags,
+      ...(prev.tasks ? { tasks: prev.tasks } : {}),
     },
     grantedHammer: false,
   };

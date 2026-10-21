@@ -1,0 +1,6 @@
+{
+  "provider": "http",
+  "cloudFunction": "",
+  "baseUrl": "",
+  "_comment": "抖音包默认不走微信云函数排行榜；baseUrl 留空时相关 HTTP 请求会失败但不影响单机闯关。后续可接自建 API。"
+}

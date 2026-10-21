@@ -60,7 +60,7 @@ export function sampleMahjongFlyAnim(anim: MahjongFlyAnim, nowMs: number): Mahjo
   const t = Math.min(1, Math.max(0, elapsed / anim.durationMs));
   const e = easeOutCubic(t);
   const arc = Math.sin(t * Math.PI) * Math.max(12, anim.fromH * 0.35);
-  const pop = 1 + Math.sin(t * Math.PI) * 0.08;
+  const pop = 1 + Math.sin(t * Math.PI) * 0.11;
   return {
     x: lerp(anim.fromX, anim.toX, e),
     y: lerp(anim.fromY, anim.toY, e) - arc,
@@ -69,6 +69,14 @@ export function sampleMahjongFlyAnim(anim: MahjongFlyAnim, nowMs: number): Mahjo
     rot: lerp(anim.fromRot, 0, e),
     done: t >= 1,
   };
+}
+
+export interface MahjongSlotLandEvent {
+  type: number;
+  slotsBefore: readonly number[];
+  slotsAfter: number[];
+  removedCount: number;
+  anim: MahjongFlyAnim;
 }
 
 export function createMahjongSlotFlight(): MahjongSlotFlight {
@@ -97,9 +105,23 @@ export function pruneMahjongSlotFlight(
   flight: MahjongSlotFlight,
   nowMs: number,
   append: MahjongSlotAppendFn,
+  onLand?: (ev: MahjongSlotLandEvent) => void,
 ): boolean {
   while (flight.anims.length > 0 && mahjongFlyAnimDone(flight.anims[0]!, nowMs)) {
-    flight.baseSlots = append(flight.baseSlots, flight.anims.shift()!.type);
+    const anim = flight.anims[0]!;
+    const slotsBefore = flight.baseSlots;
+    const slotsAfter = append(slotsBefore, anim.type);
+    if (onLand) {
+      onLand({
+        type: anim.type,
+        slotsBefore,
+        slotsAfter,
+        removedCount: slotsBefore.length + 1 - slotsAfter.length,
+        anim,
+      });
+    }
+    flight.baseSlots = slotsAfter;
+    flight.anims.shift();
   }
   return flight.anims.length > 0;
 }

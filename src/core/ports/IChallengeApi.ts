@@ -101,6 +101,26 @@ export interface LeaderboardRowDto {
   wxId?: string;
   /** 排行分数；缺省用 maxLevel。 */
   score?: number;
+  /** 各关最高分之和 */
+  totalScore?: number;
+  /** 本周通关累计分 */
+  weekScore?: number;
+}
+
+export interface LeaderboardBoardDto {
+  rows: LeaderboardRowDto[];
+  /** 0 表示未上榜 */
+  selfRank: number;
+  /** 自己不在 rows 里时单独给出 */
+  self?: LeaderboardRowDto | null;
+}
+
+export interface LeaderboardRequestExtra {
+  nickName?: string;
+  avatarUrl?: string;
+  totalScore?: number;
+  weekKey?: string;
+  weekScore?: number;
 }
 
 export interface LeaderboardNotifyDto {
@@ -121,6 +141,16 @@ export interface LeaderboardResponse {
   rewardText?: string;
   rows?: LeaderboardRowDto[];
   notifies?: LeaderboardNotifyDto[];
+  /** 关卡榜（新版） */
+  level?: LeaderboardBoardDto;
+  /** 本周榜（新版） */
+  weekly?: LeaderboardBoardDto;
+  /** 下次结算时间戳 */
+  settleAt?: number;
+  /** 服务端记的本周分，换机时用来补本地 */
+  selfWeekScore?: number;
+  /** 上周结算：只会返回一次 */
+  weeklyReward?: { week: string; rank: number; score: number } | null;
 }
 
 export interface LeaderboardNotifyResponse {
@@ -135,11 +165,11 @@ export interface IChallengeApi {
   status(userId: string): Promise<ChallengeStatusResponse>;
   dailyToday(userId: string): Promise<DailyTodayResponse>;
   dailySubmit(body: DailySubmitRequest): Promise<DailySubmitResponse>;
-  /** 玩家排行。scope=all 时返回所有玩过本小游戏的用户（不再按战书好友过滤）。 */
+  /** 玩家排行：所有玩过本小游戏的用户，同时返回关卡榜和本周榜。 */
   leaderboard(
     userId: string,
     maxClearedLevel?: number,
-    profile?: { nickName?: string; avatarUrl?: string },
+    extra?: LeaderboardRequestExtra,
   ): Promise<LeaderboardResponse>;
   leaderboardNotify?(body: { userId: string; passerId?: string }): Promise<LeaderboardNotifyResponse>;
 }

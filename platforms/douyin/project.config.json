@@ -1,0 +1,13 @@
+{
+  "description": "粉碎消消乐 - 抖音小游戏工程（由 npm run build:douyin 生成到 dist/douyin）",
+  "appid": "tt377641cba90ff3e502",
+  "projectname": "crush-crush-douyin",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "postcss": true,
+    "minified": true,
+    "newFeature": true
+  },
+  "compileType": "game"
+}

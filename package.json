@@ -15,7 +15,8 @@
     "mahjong:tool-icons": "python3 scripts/generate-mahjong-tool-icons.py",
     "mahjong:modal-bg": "python3 scripts/generate-mahjong-modal-slot-full-bg.py",
     "build:wechat": "node scripts/build-wechat.mjs",
-    "dev:wechat": "node scripts/build-wechat.mjs --watch"
+    "dev:wechat": "node scripts/build-wechat.mjs --watch",
+    "build:douyin": "node scripts/build-douyin.mjs"
   },
   "engines": {
     "node": ">=18"
