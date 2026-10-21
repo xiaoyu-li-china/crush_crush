@@ -37,6 +37,8 @@ export const StorageKeys = {
   MahjongHallProgress: 'crush.player.mahjongHall',
   Invite: 'crush.player.invite',
   DeviceId: 'crush.player.device',
+  /** 本周榜累计分 { week, score } */
+  Weekly: 'crush.player.weekly',
 } as const;
 
 export type StorageKey = (typeof StorageKeys)[keyof typeof StorageKeys];

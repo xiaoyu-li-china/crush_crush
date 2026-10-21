@@ -8,6 +8,7 @@ import { BoardView } from '../views/BoardView';
 import { BoardMatchAnimator } from '../fx/BoardMatchAnimator';
 import { CuteSceneBackground } from '../fx/CuteSceneBackground';
 import { LevelResultFx } from '../fx/LevelResultFx';
+import { drawResultSceneBackdrop } from '../fx/ResultSceneBackdrop';
 import { WxShareAdapter } from '../../core/adapters/WxShareAdapter';
 import shareImagesJson from '../../config/share-images.json';
 import {
@@ -58,8 +59,12 @@ import noticeJson from '../../config/notice.json';
 import {
   lobbyNoticeForMahjongState,
   mahjongHallLockHint,
+  mahjongHallLockPanelBody,
+  mahjongHallLockToastTitle,
 } from '../../logic/mahjong/mahjongHallUnlockCopy';
+import { formatLadderCoinChip } from '../../logic/economy/ladderCoins';
 import { levelDifficultyArt } from '../../logic/level/levelDifficultyTip';
+import { starClearLabel, starsHint, type LevelStarCount } from '../../logic/level/LevelStars';
 import { hudPaletteFromHue } from '../../logic/level/LevelPresentation';
 import { BURIED_TILE_SPRITE_SRC } from '../../config/buriedTileSprites';
 import type { GoalProgressSnapshot } from '../../logic/level/LevelGoals';
@@ -77,8 +82,35 @@ import {
   panelBackButton,
   panelCloseButton,
 } from '../ui/PanelChrome';
-import { layoutLeaderboardPanel, clampLeaderboardScroll } from '../ui/LeaderboardPanel';
-import type { LeaderboardView } from '../../logic/economy/FriendLeaderboard';
+import {
+  layoutLeaderboardPanel,
+  clampLeaderboardScroll,
+  leaderboardMedal,
+  LEADERBOARD_PODIUM_H,
+  type LeaderboardPanelLayout,
+} from '../ui/LeaderboardPanel';
+import {
+  dailyTasksSideLabel,
+  layoutDailyTasksPanel,
+  type DailyTaskRowLayout,
+  type DailyTasksPanelLayout,
+} from '../ui/DailyTasksPanel';
+import type { DailyTaskKind } from '../../logic/economy/DailyTasks';
+import { formatDailyReward } from '../../logic/economy/DailyTasks';
+import {
+  bannerFrame,
+  bannerPalette,
+  bannerShimmerPhase,
+  drawCandyStar,
+  flyerPoint,
+  makeLevelBanner,
+  planGoalFlyers,
+  starPopFrame,
+  starPopTotalMs,
+  type GoalFlyer,
+  type LevelBanner,
+} from '../fx/LevelFx';
+import type { LeaderboardTabId, LeaderboardView } from '../../logic/economy/FriendLeaderboard';
 import type { LeaderboardLine } from '../../logic/economy/FriendLeaderboard';
 import {
   hasAskedWxProfile,
@@ -116,9 +148,9 @@ import {
 import {
   canCreateWxFullscreenAds,
   canCreateWxNativeAds,
+  bindMainCanvas2d,
   isWxDesktopIdeHost,
   readWxSystemInfo,
-  resolveWxMainCanvas,
   resolveWxRenderProfile,
 } from '../../core/utils/wxHost';
 import { ForegroundGate } from '../../core/utils/foregroundGate';
@@ -155,7 +187,11 @@ import {
   MAHJONG_TOOL_LABELS,
   type MahjongToolId,
 } from '../../logic/mahjong/MahjongConfig';
-import { mahjongCoinCost } from '../../logic/mahjong/MahjongOpsConfig';
+import {
+  mahjongCoinCost,
+  mahjongCoinPerTriple,
+  mahjongStarPerTriple,
+} from '../../logic/mahjong/MahjongOpsConfig';
 import type { MahjongGame } from '../../logic/mahjong/MahjongGame';
 import {
   drawMahjongLadderCoinGateModal,
@@ -197,12 +233,27 @@ import {
 import { drawStandingMahjongTileBlocks } from '../mahjong/MahjongTileRender';
 import { clearMahjongPileLayoutCache } from '../mahjong/MahjongPileLayout';
 import {
+  drawMahjongSlotClearRings,
+  pruneMahjongSlotClearRings,
+  spawnMahjongSlotClearRings,
+  type MahjongSlotClearRing,
+} from '../mahjong/MahjongSlotClearFx';
+import {
+  drawMahjongLevelStageBanner,
+  makeMahjongFailBanner,
+  makeMahjongIntroBanner,
+  mahjongFailReasonLabel,
+  mahjongIntroSubtitle,
+} from '../mahjong/MahjongStageFx';
+import { bannerFrame, type LevelBanner } from '../fx/LevelFx';
+import {
   createMahjongFlyAnim,
   createMahjongSlotFlight,
   launchMahjongSlotFlight,
   pruneMahjongSlotFlight,
   resetMahjongSlotFlight,
   type MahjongSlotFlight,
+  type MahjongSlotLandEvent,
 } from '../mahjong/MahjongTileFlyAnim';
 
 const MAHJONG_AUTO_NEXT_MS = 1800;
@@ -214,7 +265,15 @@ type ScreenMode =
   | 'clean'
   | 'result'
   | 'mahjong_play';
-type PageOverlay = 'none' | 'settings' | 'howto' | 'notice' | 'leaderboard' | 'profile_welcome';
+type PageOverlay =
+  | 'none'
+  | 'settings'
+  | 'howto'
+  | 'notice'
+  | 'leaderboard'
+  | 'daily_tasks'
+  | 'profile_welcome'
+  | 'mahjong_lock';
 
 interface UiButton {
   id:
@@ -240,7 +299,12 @@ interface UiButton {
     | 'post'
     | 'invite'
     | 'leaderboard'
-    | 'claim_shuffle'
+    | 'lb_tab_level'
+    | 'lb_tab_week'
+    | 'daily_open'
+    | 'daily_claim'
+    | 'daily_chest'
+    | 'daily_chest_double'
     | 'resume'
     | 'profile_skip'
     | 'mahjong_hall'
@@ -253,7 +317,7 @@ interface UiButton {
   w: number;
   h: number;
   label: string;
-  /** 大厅关卡节点 id（仅 id === 'level'） */
+  /** 大厅关卡节点 id（仅 id === 'level'）；daily_claim 时为任务下标 */
   levelId?: number;
   /** 点击热区外扩，给「广告」角标留点按空间 */
   hitPad?: number;
@@ -427,12 +491,16 @@ const HOWTO_LINES: ReadonlyArray<{ tag: string; text: string }> = [
   { tag: '伙伴', text: '雪人、企鹅藏在冰下，各占多格。占地冰块全碎后才露出并收获；雪人露出时会震碎周围一圈冰。' },
   { tag: '大招', text: '四连或 L/T 形出闪光（范围爆炸）；五连出超级猫头鹰（清同色）。两枚闪光互滑可同时引爆。' },
   { tag: '粉碎', text: '通关后进入限时点击粉碎加分，可看广告加时。总分够高时还可选清洁小游戏（不加主线分）。' },
+  {
+    tag: '星级',
+    text: '过关时省下的步数越多，星级越高（最多 3 星，显示在关卡圆下方的小金星）。与梯子上的「馆币」无关：馆币按历史最高分折算，用于萌宠麻将馆。',
+  },
   { tag: '道具', text: '锤子砸一格、重排洗盘、加步 +5，开局不送。库存空时：转发好友返回 +1 → 转发群返回 +1 → 再看广告；重排入包后需再点一次才洗牌。' },
   { tag: '奖励', text: '每日登录送锤子；当日通关满 3 关领重排；某次剩 ≥6 步通关送加步。道具可带入下关，各最多 9 个。' },
   { tag: '邀请', text: '分享给没玩过的好友，对方通关后双方各得 1 锤子。' },
   {
     tag: '馆馆',
-    text: '糖果梯子每 100 分 = 1 馆馆金币⭐（按各关历史最高分折算）。萌宠麻将馆重开本关需 300 金币⭐，也可看广告复活或重开。',
+    text: '糖果梯子条上「123分 · 馆3」= 该关最高分与折算馆币（换麻将用）。文案里的金币⭐是馆币图标，不是通关星级。',
   },
 ];
 
@@ -457,6 +525,8 @@ const BOARD_PANEL_OUTER = 'rgba(160, 210, 230, 0.92)';
 export class WxCanvasGameApp {
   private readonly canvas: WxCanvas;
   private ctx: WxCanvasRenderingContext2D;
+  /** 抖音 Helium：离屏 2D 绘制后 WebGL 上屏。 */
+  private readonly canvasPresent: (() => void) | undefined;
   private readonly session: GameSession;
   private readonly boardView: BoardView;
   private readonly animator = new BoardMatchAnimator();
@@ -506,6 +576,10 @@ export class WxCanvasGameApp {
   private mahjongSuppressAutoNext = false;
   private mahjongAutoNextInFlight = false;
   private readonly mahjongSlotFlight: MahjongSlotFlight = createMahjongSlotFlight();
+  private readonly mahjongSlotClearRings: MahjongSlotClearRing[] = [];
+  private mahjongStageBanner: LevelBanner | null = null;
+  private mahjongFailBannerQueued = false;
+  private mahjongResultRevealStartMs = 0;
   private readonly mahjongPileSway: MahjongPileSway = createMahjongPileSway();
   private readonly mahjongTileJitters: MahjongTileJitter[] = [];
   private mahjongPileLastX = 0;
@@ -539,6 +613,20 @@ export class WxCanvasGameApp {
     startMs: number;
     durationMs: number;
   } | null = null;
+  /** 关卡横幅队列：开局 / 目标达成 / 步数奖励 / 只剩 5 步，一次放一条 */
+  private levelBanners: LevelBanner[] = [];
+  /** 目标块飞向 HUD 目标栏 */
+  private goalFlyers: GoalFlyer[] = [];
+  /** HUD 目标图标中心，drawHud 时更新，飞行终点 */
+  private hudGoalIconPos: { x: number; y: number } | null = null;
+  private lowMovesWarned = false;
+  /** 局内刚完成的每日任务提示 */
+  private dailyTaskPop: { text: string; startMs: number } | null = null;
+  /** 结算页打开时刻（星星逐颗弹出） */
+  private resultOpenedMs = 0;
+  private resultStars = 0;
+  private leaderboardTab: LeaderboardTabId = 'level';
+  private dailyChestBusy = false;
   /** 锤子选格模式 */
   private hammerTargeting = false;
   /** 锤子光标屏幕坐标（选中后跟随手指/鼠标） */
@@ -723,6 +811,8 @@ export class WxCanvasGameApp {
   private lastInteractMs = Date.now();
   /** 连续画帧失败次数，过多则停循环等下一次触摸 */
   private frameErrors = 0;
+  /** 避免 draw 异常每帧打 log，拖死微信开发者工具控制台 */
+  private lastDrawErrorLogMs = 0;
   /** 胜利结算：是否询问进入清洁模式 */
   private offerCleanPrompt = false;
   /** 交换滑动过渡 */
@@ -761,11 +851,13 @@ export class WxCanvasGameApp {
         ? wx.getMenuButtonBoundingClientRect()
         : null;
 
-    this.canvas = resolveWxMainCanvas();
+    const canvasBinding = bindMainCanvas2d();
+    this.canvas = canvasBinding.canvas;
+    this.canvasPresent = canvasBinding.present;
     this.canvas.width = Math.floor(this.width * this.dpr);
     this.canvas.height = Math.floor(this.height * this.dpr);
-    this.ctx = this.canvas.getContext('2d');
-    this.ctx.scale(this.dpr, this.dpr);
+    this.ctx = canvasBinding.ctx;
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.applyCanvasDrawQuality();
     this.ctx.fillStyle = '#b6e8fc';
     this.ctx.fillRect(0, 0, this.width, this.height);
@@ -960,17 +1052,17 @@ export class WxCanvasGameApp {
     }
     this.requestPaint();
     void this.preloadDeferredAssets();
-    // iOS：大批量贴图加载完后首帧 drawImage 偶发黑屏，补踢两帧
+    // 贴图就绪后强制刷新（含抖音开发者工具，否则可能停在启动 splash）
+    const kickAfterAssets = (): void => {
+      this.sceneBg.layout(this.width, this.height);
+      this.needsPaint = true;
+      this.kickRenderLoop();
+    };
     if (!isWxDesktopIdeHost()) {
-      setTimeout(() => {
-        this.sceneBg.layout(this.width, this.height);
-        this.needsPaint = true;
-        this.kickRenderLoop();
-      }, 40);
-      setTimeout(() => {
-        this.needsPaint = true;
-        this.kickRenderLoop();
-      }, 200);
+      setTimeout(kickAfterAssets, 40);
+      setTimeout(kickAfterAssets, 200);
+    } else {
+      setTimeout(kickAfterAssets, 0);
     }
     console.info(
       '[crush-crush] assets loaded tiles=',
@@ -1070,6 +1162,7 @@ export class WxCanvasGameApp {
     if (inviteToast) {
       this.statusText = inviteToast;
     }
+    this.showLeaderboardRewardToast();
 
     wx.onTouchStart(this.onTouchStartBound);
     wx.onTouchMove(this.onTouchMoveBound);
@@ -1306,6 +1399,19 @@ export class WxCanvasGameApp {
     if (this.floatingScores.length || this.crushSparks.length || this.crushBursts.length) {
       return true;
     }
+    if (this.levelBanners.length > 0 || this.goalFlyers.length > 0) {
+      return true;
+    }
+    if (this.dailyTaskPop && now < this.dailyTaskPop.startMs + 2400) {
+      return true;
+    }
+    if (
+      this.mode === 'result'
+      && this.resultStars > 0
+      && now < this.resultOpenedMs + starPopTotalMs(this.resultStars) + 100
+    ) {
+      return true;
+    }
     if (this.lobbyDrag || this.lobbyCamAutoTarget !== null) {
       return true;
     }
@@ -1320,6 +1426,30 @@ export class WxCanvasGameApp {
     }
     if (this.mode === 'mahjong_play' && this.mahjongSlotFlight.anims.length > 0) {
       return true;
+    }
+    if (this.mode === 'mahjong_play' && this.mahjongSlotClearRings.length > 0) {
+      return true;
+    }
+    if (this.mode === 'mahjong_play' && this.mahjongStageBanner) {
+      return true;
+    }
+    if (
+      this.mode === 'mahjong_play'
+      && this.mahjongResultRevealStartMs > 0
+      && now < this.mahjongResultRevealStartMs + 560
+    ) {
+      return true;
+    }
+    if (this.mode === 'mahjong_play') {
+      const mj = this.session.mahjong.getActiveGame();
+      if (mj?.phase === 'playing') {
+        if (mj.remainingMs > 0 && mj.remainingMs <= 45_000) {
+          return true;
+        }
+        if (mj.slots.length >= mj.maxSlots() - 1) {
+          return true;
+        }
+      }
     }
     return false;
   }
@@ -1400,6 +1530,57 @@ export class WxCanvasGameApp {
       void this.session.mahjong.saveActiveRun();
     }
     this.markUserActivity();
+    this.kickRenderLoop();
+  }
+
+  private onMahjongTileLandedInSlot(ev: MahjongSlotLandEvent): void {
+    if (ev.removedCount < 3) {
+      return;
+    }
+    const now = this.nowMs || Date.now();
+    const triples = Math.floor(ev.removedCount / 3);
+    const cx = ev.anim.toX + ev.anim.toW / 2;
+    const cy = ev.anim.toY + ev.anim.toH / 2;
+    this.session.playMatchSfx();
+    this.shakeMs = Math.max(this.shakeMs, 100 + triples * 28);
+    spawnMahjongSlotClearRings(this.mahjongSlotClearRings, cx, cy, now, triples);
+    const starGain = triples * mahjongStarPerTriple();
+    const coinGain = triples * mahjongCoinPerTriple();
+    this.floatingScores.push({
+      x: cx,
+      y: cy - 28,
+      text: `+${starGain}★`,
+      startMs: now,
+      durationMs: 920,
+      color: '#ffd43b',
+      fontSize: 22,
+    });
+    if (coinGain > 0) {
+      this.floatingScores.push({
+        x: cx,
+        y: cy - 4,
+        text: `+${coinGain}`,
+        startMs: now + 60,
+        durationMs: 880,
+        color: '#ffe566',
+        fontSize: 20,
+      });
+    }
+    const sparkCount = this.cheapFx ? 6 : 10;
+    for (let i = 0; i < sparkCount; i += 1) {
+      const ang = (Math.PI * 2 * i) / sparkCount + Math.random() * 0.35;
+      const speed = 48 + Math.random() * 95;
+      this.crushSparks.push({
+        x: cx,
+        y: cy,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed - 36,
+        startMs: now,
+        durationMs: 380 + Math.random() * 220,
+        color: ['#96f2d7', '#51cf66', '#ffd43b', '#ffffff'][i % 4]!,
+        style: i % 3 === 0 ? 'star' : 'dot',
+      });
+    }
     this.kickRenderLoop();
   }
 
@@ -1523,6 +1704,70 @@ export class WxCanvasGameApp {
     this.mahjongPilePointerDown = false;
   }
 
+  private resetMahjongSlotAnimations(): void {
+    resetMahjongSlotFlight(this.mahjongSlotFlight);
+    this.mahjongSlotClearRings.length = 0;
+  }
+
+  private queueMahjongIntroBanner(): void {
+    const game = this.session.mahjong.getActiveGame();
+    if (!game) {
+      return;
+    }
+    this.mahjongStageBanner = makeMahjongIntroBanner(
+      game.level,
+      mahjongIntroSubtitle(this.mahjongActiveTheme?.name),
+    );
+    this.mahjongFailBannerQueued = false;
+    this.mahjongResultRevealStartMs = 0;
+    this.kickRenderLoop();
+  }
+
+  private syncMahjongFailStageBanner(game: MahjongGame): void {
+    if (game.phase !== 'lost') {
+      this.mahjongFailBannerQueued = false;
+      return;
+    }
+    if (game.failReason === 'slot_full' && !this.mahjongSlotFullOfferDismissed) {
+      return;
+    }
+    if (this.mahjongFailBannerQueued) {
+      return;
+    }
+    this.mahjongFailBannerQueued = true;
+    this.mahjongStageBanner = makeMahjongFailBanner(mahjongFailReasonLabel(game.failReason));
+    this.mahjongResultRevealStartMs = 0;
+    this.shakeMs = Math.max(this.shakeMs, 220);
+    this.kickRenderLoop();
+  }
+
+  private updateMahjongStageBanner(now: number): void {
+    const banner = this.mahjongStageBanner;
+    if (!banner) {
+      return;
+    }
+    if (banner.startMs === 0) {
+      banner.startMs = now;
+    }
+    const frame = bannerFrame(banner, now);
+    if (banner.kind === 'mahjong_fail' && frame.done && this.mahjongResultRevealStartMs === 0) {
+      this.mahjongResultRevealStartMs = now;
+    }
+    if (frame.done) {
+      this.mahjongStageBanner = null;
+    }
+  }
+
+  private shouldDeferMahjongResultModal(game: MahjongGame): boolean {
+    if (game.phase !== 'lost') {
+      return false;
+    }
+    if (game.failReason === 'slot_full' && !this.mahjongSlotFullOfferDismissed) {
+      return false;
+    }
+    return this.mahjongStageBanner?.kind === 'mahjong_fail';
+  }
+
   /** 大厅呼吸、结算彩带、粉碎倒计时、公告泡泡需要持续转；对局静止盘面可停循环。 */
   private wantsAmbientFx(): boolean {
     return (
@@ -1534,6 +1779,20 @@ export class WxCanvasGameApp {
   }
 
   /** 首页公告泡泡在漂：开发者工具空闲停循环时也要慢速续画，避免冻在半路。 */
+  /** 每日任务面板动效：真机全速；开发者工具降帧，减轻模拟器崩溃。 */
+  private dailyTasksOverlayNeedsTick(): boolean {
+    return this.overlay === 'daily_tasks';
+  }
+
+  private logThrottledDrawError(label: string, err: unknown): void {
+    const now = this.nowMs || Date.now();
+    if (now - this.lastDrawErrorLogMs < 3000) {
+      return;
+    }
+    this.lastDrawErrorLogMs = now;
+    console.error(label, err);
+  }
+
   private lobbyNoticeBubbleNeedsTick(): boolean {
     if (this.mode !== 'lobby' || this.overlay !== 'none') {
       return false;
@@ -1627,11 +1886,25 @@ export class WxCanvasGameApp {
           this.requestPaint();
         }
         if (mj && this.mahjongSlotFlight.anims.length > 0) {
-          pruneMahjongSlotFlight(this.mahjongSlotFlight, now, (slots, tile) =>
-            mj.slotsAfterAppend(slots, tile),
+          pruneMahjongSlotFlight(
+            this.mahjongSlotFlight,
+            now,
+            (slots, tile) => mj.slotsAfterAppend(slots, tile),
+            (ev) => this.onMahjongTileLandedInSlot(ev),
           );
           this.requestPaint();
         }
+        if (pruneMahjongSlotClearRings(this.mahjongSlotClearRings, now)) {
+          this.requestPaint();
+        }
+        if (this.mode === 'mahjong_play' && this.shakeMs > 0) {
+          this.shakeMs = Math.max(0, this.shakeMs - dt);
+        }
+        this.updateMahjongStageBanner(now);
+        if (mj?.phase === 'lost') {
+          this.syncMahjongFailStageBanner(mj);
+        }
+        this.pruneCrushBursts(now);
         if (mj?.phase === 'won') {
           if (this.mahjongWinShownAtMs === 0) {
             this.mahjongWinShownAtMs = now;
@@ -1665,6 +1938,7 @@ export class WxCanvasGameApp {
         this.session.tickCrushReward(dt);
       }
       const animating = this.sceneIsBusy();
+      const dailyTasksFx = this.dailyTasksOverlayNeedsTick();
       const ambientBubble = this.lobbyNoticeBubbleNeedsTick();
       const mjGame = this.session.mahjong.getActiveGame();
       const mahjongPlaying = this.mode === 'mahjong_play' && mjGame?.phase === 'playing';
@@ -1692,25 +1966,36 @@ export class WxCanvasGameApp {
           }),
         }) ||
         ambientBubble ||
+        dailyTasksFx ||
         mahjongKeepLoop ||
         animating;
       this.frameDelayMs = resolveNextFrameDelayMs({
-        animating,
+        animating: animating || dailyTasksFx,
         desktopIde,
         baseDelayMs: this.baseFrameDelayMs,
       });
       // 仅泡泡在漂：降到约 11～14fps，模拟器不占满主线程
-      if (ambientBubble && !animating) {
+      if (ambientBubble && !animating && !dailyTasksFx) {
         this.frameDelayMs = Math.max(this.frameDelayMs, desktopIde ? 90 : 70);
       }
+      if (dailyTasksFx && desktopIde) {
+        this.frameDelayMs = Math.max(this.frameDelayMs, 110);
+      } else if (dailyTasksFx) {
+        this.frameDelayMs = Math.max(this.frameDelayMs, 66);
+      }
       // 麻将对局静止时降帧：逻辑 tick 继续，五面贴图不必 60fps 全量 draw
-      if (mahjongKeepLoop && !animating && desktopIde) {
-        this.frameDelayMs = Math.max(this.frameDelayMs, 220);
-      } else if (mahjongKeepLoop && !animating) {
+      if (mahjongKeepLoop && !animating && !dailyTasksFx && desktopIde) {
+        this.frameDelayMs = Math.max(this.frameDelayMs, 280);
+      } else if (mahjongKeepLoop && !animating && !dailyTasksFx) {
         this.frameDelayMs = Math.max(this.frameDelayMs, desktopIde ? 160 : 200);
       }
       const shouldDraw =
-        this.needsPaint || animating || ambientBubble || mahjongTimerPaint || mahjongWon;
+        this.needsPaint ||
+        animating ||
+        ambientBubble ||
+        dailyTasksFx ||
+        mahjongTimerPaint ||
+        mahjongWon;
       if (shouldDraw) {
         this.draw();
         this.frameErrors = 0;
@@ -1719,7 +2004,7 @@ export class WxCanvasGameApp {
         }
       }
     } catch (err) {
-      console.error('[crush-crush] frame failed', err);
+      this.logThrottledDrawError('[crush-crush] frame failed', err);
       this.frameErrors += 1;
       this.needsPaint = !shouldBackoffAfterFrameErrors(this.frameErrors);
       keepLoop = this.needsPaint;
@@ -2023,9 +2308,24 @@ export class WxCanvasGameApp {
     if (event.type === 'PostClearAnnouncement') {
       return;
     }
+    if (event.type === 'LeaderboardReward') {
+      this.showLeaderboardRewardToast();
+      return;
+    }
+    if (event.type === 'DailyTaskCompleted') {
+      this.dailyTaskPop = {
+        text: noticeJson.dailyTasks.taskDone.replace('{title}', event.title),
+        startMs: this.nowMs || Date.now(),
+      };
+      this.shakeMs = Math.max(this.shakeMs, 120);
+      return;
+    }
     if (event.type === 'LevelWon') {
       this.pendingResult = 'won';
       this.statusText = '关卡胜利！';
+      this.enqueueLevelBanner(makeLevelBanner('goal', '目标达成！'));
+      this.shakeMs = Math.max(this.shakeMs, 340);
+      this.hudScorePunch = Math.max(this.hudScorePunch, 1.14);
       if (!this.animator.isPlaying() && !this.swapSlide) {
         this.afterLevelResolved();
       }
@@ -2042,6 +2342,11 @@ export class WxCanvasGameApp {
 
     if (event.type === 'SwapAccepted') {
       this.beginSwapSlide(event.rowA, event.colA, event.rowB, event.colB, false);
+      const total = this.session.getLevelConfig()?.moves ?? 0;
+      if (!this.lowMovesWarned && total > 8 && this.session.getMovesLeft() === 5) {
+        this.lowMovesWarned = true;
+        this.enqueueLevelBanner(makeLevelBanner('low_moves', '只剩 5 步！', '抓紧完成目标'));
+      }
       return;
     }
 
@@ -2079,6 +2384,11 @@ export class WxCanvasGameApp {
         event.movesConverted > 0
           ? `剩余 ${event.movesConverted} 步加成闪光！`
           : '步数加成';
+      if (event.movesConverted > 0) {
+        this.enqueueLevelBanner(
+          makeLevelBanner('bonus', '步数奖励时间！', `剩余 ${event.movesConverted} 步变闪光`),
+        );
+      }
       this.syncBoardView();
       return;
     }
@@ -2286,6 +2596,10 @@ export class WxCanvasGameApp {
     const won = this.pendingResult === 'won';
     // 胜利且达标时询问清洁（依赖 finishCrushReward 先进入 Settle）
     this.offerCleanPrompt = won && this.session.canOfferCleaning();
+    this.levelBanners = [];
+    this.goalFlyers = [];
+    this.resultOpenedMs = this.nowMs || Date.now();
+    this.resultStars = won ? this.session.getLastStars() : 0;
     if (won) {
       this.session.playWinSfx();
       this.shakeMs = 220;
@@ -2632,6 +2946,25 @@ export class WxCanvasGameApp {
         startMs: now,
         durationMs: 750,
         color: '#74c0fc',
+      });
+    }
+
+    // 收集目标：被消掉的目标萌宠飞进顶部目标栏
+    const goalKind = formatHudGoals(this.session.getGoals()?.getSnapshots() ?? []).collectKind;
+    const target = this.hudGoalIconPos;
+    if (target && goalKind !== undefined && this.tileImages.has(goalKind)) {
+      const picks = planGoalFlyers(cells, goalKind, this.cheapFx ? 3 : 6);
+      picks.forEach((cell, i) => {
+        this.goalFlyers.push({
+          kind: cell.kind,
+          fromX: layout.originX + (cell.col + 0.5) * layout.cellSize,
+          fromY: layout.originY - (cell.row + 0.5) * layout.cellSize,
+          toX: target.x,
+          toY: target.y,
+          startMs: now + 120 + i * 45,
+          durationMs: 560,
+          size: layout.cellSize * 0.78,
+        });
       });
     }
 
@@ -3300,6 +3633,10 @@ export class WxCanvasGameApp {
       }
       fontSize -= 1;
     }
+    ctx.strokeStyle = unlocked ? 'rgba(26, 92, 58, 0.88)' : 'rgba(55, 55, 55, 0.65)';
+    ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.22));
+    ctx.lineJoin = 'round';
+    ctx.strokeText(label, cx, cy);
     ctx.fillStyle = unlocked ? '#ffffff' : 'rgba(255,255,255,0.82)';
     ctx.fillText(label, cx, cy);
     ctx.restore();
@@ -3351,12 +3688,49 @@ export class WxCanvasGameApp {
     const unlocked = this.session.isMahjongHallUnlocked();
     const showNew = this.session.shouldShowMahjongHallNewBadge();
     const { ctx } = this;
+    const now = this.nowMs || Date.now();
+    const cx = x + size / 2;
+    const cy = y + size / 2;
+    const pulse = unlocked
+      ? 1 + this.fxAmt(0.028, 0.014) * Math.sin(now * 0.0045 + x * 0.02)
+      : 1;
+
     ctx.save();
+    ctx.globalAlpha = unlocked ? 0.32 : 0.18;
+    ctx.fillStyle = '#3d5a40';
+    this.fillEllipse(cx + 2, y + size + 5, size * 0.44, size * 0.11);
+    ctx.globalAlpha = 1;
+
+    if (unlocked) {
+      ctx.save();
+      const glowA = 0.28 + 0.14 * Math.sin(now * 0.006);
+      ctx.globalAlpha = glowA;
+      ctx.strokeStyle = showNew ? '#ff922b' : '#51cf66';
+      ctx.lineWidth = Math.max(3, size * 0.04);
+      ctx.beginPath();
+      ctx.arc(cx, cy, size * 0.54, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = glowA * 0.45;
+      ctx.lineWidth = Math.max(5, size * 0.07);
+      ctx.stroke();
+      ctx.restore();
+      if (showNew || Math.sin(now * 0.003) > 0.82) {
+        this.drawSparkleStar(x + size * 0.18, y + size * 0.22, 5, 0.9);
+        this.drawSparkleStar(x + size * 0.82, y + size * 0.35, 4, 0.75);
+      }
+    }
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(pulse, pulse);
+    ctx.translate(-cx, -cy);
     if (!unlocked) {
       ctx.filter = 'grayscale(100%)';
       ctx.globalAlpha = 0.72;
     }
     ctx.drawImage(img, x, y, size, size);
+    ctx.restore();
+
     const badge = this.uiIcons.get('mahjong_new_badge');
     if (showNew && badge && (badge.width ?? 0) > 0 && (badge.height ?? 0) > 0) {
       const srcW = Math.max(1, badge.width ?? 1);
@@ -3365,8 +3739,13 @@ export class WxCanvasGameApp {
       const badgeW = Math.round(badgeH * (srcW / srcH));
       const overlap = Math.round(size * 0.05);
       const badgeX = x + size - badgeW + overlap;
-      const badgeY = y - Math.round(badgeH * 0.2);
+      const badgeBob = Math.sin(now / 520) * this.fxAmt(2.5, 1.2);
+      const badgeY = y - Math.round(badgeH * 0.2) + badgeBob;
+      ctx.save();
+      ctx.shadowColor = 'rgba(240, 62, 62, 0.45)';
+      ctx.shadowBlur = 6;
       ctx.drawImage(badge, badgeX, badgeY, badgeW, badgeH);
+      ctx.restore();
     }
     this.drawMahjongHallLobbyCaption(x, y, size, unlocked);
     ctx.restore();
@@ -3404,14 +3783,12 @@ export class WxCanvasGameApp {
       return;
     }
 
-    const daily = this.session.getDailyLoop();
     const chrome = layoutLobbyBottom({
       width: this.width,
       height: this.height,
       bannerReserve: this.session.getLobbyBannerReservePx(),
       safeBottom: this.safeAreaBottom,
-      clearsToday: daily.clearsToday,
-      shuffleGranted: daily.playShuffleGranted,
+      dailyClaimable: this.session.getDailyTasksView().claimable,
     });
     this.pushMuteNavButton(
       chrome.settings.x,
@@ -3424,7 +3801,7 @@ export class WxCanvasGameApp {
 
     if (chrome.claim) {
       const claimBtn: UiButton = {
-        id: 'claim_shuffle',
+        id: 'daily_open',
         x: chrome.claim.x,
         y: chrome.claim.y,
         w: chrome.claim.w,
@@ -3506,6 +3883,13 @@ export class WxCanvasGameApp {
         gloss: true,
         fontSize: LOBBY_SIDE_ACTION_FONT,
       },
+      daily_open: {
+        top: '#ffe066',
+        bottom: '#f59f00',
+        border: '#ffffff',
+        gloss: true,
+        fontSize: LOBBY_SIDE_ACTION_FONT,
+      },
       leaderboard: {
         top: '#d0bfff',
         bottom: '#845ef7',
@@ -3522,18 +3906,49 @@ export class WxCanvasGameApp {
       },
     };
     for (const frame of frames) {
+      const dailyView = frame.id === 'daily_open' ? this.session.getDailyTasksView() : null;
       const btn: UiButton = {
         id: frame.id,
         x: frame.x,
         y: frame.y,
         w: frame.w,
         h: frame.h,
-        label: frame.label,
+        label: dailyView ? dailyTasksSideLabel(dailyView) : frame.label,
         hitPad: 6,
       };
       this.buttons.push(btn);
       this.drawCuteButton(btn, palettes[frame.id]);
+      if (frame.id === 'daily_open' && dailyView) {
+        const claimable = dailyView.claimable;
+        if (claimable > 0) {
+          this.drawRedDotBadge(frame.x + frame.w - 3, frame.y + 3, String(claimable));
+        } else if (!dailyView.chestClaimed && dailyView.tasks.some((task) => !task.done)) {
+          this.drawRedDotBadge(frame.x + frame.w - 3, frame.y + 3, '');
+        }
+      }
     }
+  }
+
+  private drawRedDotBadge(cx: number, cy: number, text: string): void {
+    const { ctx } = this;
+    const pulse = 1 + 0.08 * Math.sin((this.nowMs || Date.now()) * 0.008);
+    const r = (text ? 8 : 5) * pulse;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#fa5252';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+    if (text) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, cx, cy + 0.5);
+    }
+    ctx.restore();
   }
 
 
@@ -3689,7 +4104,9 @@ export class WxCanvasGameApp {
     });
 
     ctx.save();
-    ctx.fillStyle = 'rgba(40, 20, 55, 0.46)';
+    ctx.fillStyle = this.overlay === 'leaderboard'
+      ? 'rgba(28, 52, 96, 0.55)'
+      : 'rgba(40, 20, 55, 0.46)';
     ctx.fillRect(0, 0, width, height);
     ctx.restore();
 
@@ -3705,113 +4122,359 @@ export class WxCanvasGameApp {
       this.drawLeaderboardPanel();
       return;
     }
+    if (this.overlay === 'daily_tasks') {
+      this.drawDailyTasksPanel();
+      return;
+    }
     if (this.overlay === 'profile_welcome') {
       this.drawProfileWelcomePanel();
+      return;
+    }
+    if (this.overlay === 'mahjong_lock') {
+      this.drawMahjongHallLockPanel();
       return;
     }
     this.drawSettingsPanel();
   }
 
-  /** 好友排行：标题/奖励固定，玩家列表可滑动。 */
-  private drawLeaderboardPanel(): void {
-    this.ctx.font = '12px sans-serif';
-    const view = this.boardViewModel;
-    const layout = layoutLeaderboardPanel({
-      width: this.width,
-      height: this.height,
-      hint: view?.hint ?? '',
-      rewardText: view?.rewardText ?? '',
-      rows: view?.rows ?? [],
-      wrap: (text, maxWidth) => this.wrapText(text, maxWidth),
-    });
-    this.leaderboardScrollY = clampLeaderboardScroll(this.leaderboardScrollY, layout);
-    const { ctx } = this;
-    const { panel } = layout;
-    this.drawCuteCard(panel.x, panel.y, panel.w, panel.h, {
+  /** 未解锁麻将馆：说明条件（真机 Toast 常只显示小游戏名，必须用弹窗）。 */
+  private drawMahjongHallLockPanel(): void {
+    const { ctx, width, height } = this;
+    const panelW = Math.min(300, width - 48);
+    const body = mahjongHallLockPanelBody(this.session.getMaxClearedLevelId());
+    const bodyLines: string[] = [];
+    for (const paragraph of body.split('\n')) {
+      bodyLines.push(...this.wrapText(paragraph.trim(), panelW - 48));
+    }
+    const panelH = 168 + Math.max(0, bodyLines.length - 2) * 22;
+    const x = (width - panelW) / 2;
+    const y = Math.max(24, height * 0.26);
+
+    this.drawCuteCard(x, y, panelW, panelH, {
       radius: 24,
       fillTop: 'rgba(255,255,255,0.98)',
-      fillBottom: 'rgba(232, 248, 255, 0.97)',
-      border: 'rgba(116, 192, 252, 0.95)',
+      fillBottom: 'rgba(255, 236, 245, 0.97)',
+      border: 'rgba(255, 170, 210, 0.95)',
       borderWidth: 3,
       shadow: true,
       sparkle: true,
-      sparkleColor: '#a5d8ff',
+      sparkleColor: '#ffc9e8',
       nowMs: this.nowMs || Date.now(),
     });
+
+    this.paintPanelCornerChrome(panelCloseButton({ x, y, w: panelW }), '#c2255c');
+
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = 'bold 20px sans-serif';
-    ctx.fillStyle = '#1864ab';
-    ctx.fillText(layout.title, panel.x + panel.w / 2, panel.y + 28);
+    ctx.fillStyle = '#c2255c';
+    ctx.fillText('萌宠麻将馆未解锁', x + panelW / 2, y + 40);
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillStyle = '#862e4a';
+    let ty = y + 78;
+    for (const line of bodyLines) {
+      ctx.fillText(line, x + panelW / 2, ty);
+      ty += 22;
+    }
     ctx.restore();
 
-    let ty = layout.bodyTop;
-    for (const row of layout.headerRows) {
-      if (row.kind === 'reward') {
-        const rewardW = panel.w - 28;
-        ctx.font = '12px sans-serif';
-        const lines = this.wrapText(row.text, rewardW);
-        const rowH = Math.max(layout.metaRowH, lines.length * 16 + 8);
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        ctx.font = '12px sans-serif';
-        ctx.fillStyle = '#fa5252';
-        let ly = ty + 2;
-        const cx = panel.x + panel.w / 2;
-        for (const line of lines) {
-          ctx.fillText(line, cx, ly);
-          ly += 16;
-        }
-        ty += rowH + 6;
-        continue;
-      }
-      ctx.font = '12px sans-serif';
-      const lines = this.wrapText(row.text, layout.textWidth + 56);
-      const rowH = Math.max(layout.metaRowH, lines.length * 16 + 10);
-      ctx.fillStyle = '#74c0fc';
-      this.roundRectPath(layout.tagX, ty, 44, 24, 12);
+    const btnH = 44;
+    const btnY = y + panelH - btnH - 18;
+    this.buttons.push({
+      id: 'resume',
+      x: x + 24,
+      y: btnY,
+      w: panelW - 48,
+      h: btnH,
+      label: '知道了，先去闯关',
+    });
+    this.drawCuteButton(
+      { id: 'resume', x: x + 24, y: btnY, w: panelW - 48, h: btnH, label: '知道了，先去闯关' },
+      { top: '#74c0fc', bottom: '#1c7ed6', border: '#ffffff', gloss: true },
+      1,
+    );
+  }
+
+  /** 排行榜弹窗内景：天空渐变 + 云 + 名单区纸感底，与大厅糖果风一致。 */
+  private drawLeaderboardPanelBackdrop(layout: LeaderboardPanelLayout, nowMs: number): void {
+    const { ctx } = this;
+    const panel = layout.panel;
+    const { x, y, w, h } = panel;
+    const radius = 24;
+    const drift = Math.sin(nowMs * 0.00085) * 5;
+
+    ctx.save();
+    this.roundRectPath(x, y, w, h, radius);
+    ctx.clip();
+
+    const sky = ctx.createLinearGradient(x, y, x, y + h * 0.5);
+    sky.addColorStop(0, 'rgba(186, 230, 253, 0.72)');
+    sky.addColorStop(0.45, 'rgba(224, 242, 254, 0.35)');
+    sky.addColorStop(1, 'rgba(224, 242, 254, 0)');
+    ctx.fillStyle = sky;
+    ctx.fillRect(x, y, w, h * 0.52);
+
+    const candy = ctx.createLinearGradient(x, y + h * 0.35, x, y + h);
+    candy.addColorStop(0, 'rgba(237, 221, 255, 0)');
+    candy.addColorStop(0.35, 'rgba(208, 169, 255, 0.28)');
+    candy.addColorStop(1, 'rgba(165, 216, 255, 0.42)');
+    ctx.fillStyle = candy;
+    ctx.fillRect(x, y, w, h);
+
+    if (layout.podiumH > 0) {
+      const glow = ctx.createRadialGradient(
+        x + w / 2,
+        layout.listTop + layout.podiumH * 0.45,
+        6,
+        x + w / 2,
+        layout.listTop + layout.podiumH * 0.45,
+        w * 0.52,
+      );
+      glow.addColorStop(0, 'rgba(255, 212, 59, 0.38)');
+      glow.addColorStop(0.55, 'rgba(255, 243, 191, 0.12)');
+      glow.addColorStop(1, 'rgba(255, 243, 191, 0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(x + 8, layout.listTop - 6, w - 16, layout.podiumH + 16);
+    }
+
+    const listH = Math.max(0, layout.listBottom - layout.listTop);
+    if (listH > 0) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.48)';
+      this.roundRectPath(x + 10, layout.listTop - 2, w - 20, listH + 6, 16);
       ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 12px sans-serif';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.78)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.save();
+      ctx.globalAlpha = 0.07;
+      ctx.strokeStyle = '#74c0fc';
+      ctx.lineWidth = 1;
+      for (let row = layout.listTop + 18; row < layout.listBottom; row += 14) {
+        ctx.beginPath();
+        ctx.moveTo(x + 18, row);
+        ctx.lineTo(x + w - 18, row);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    const drawCloud = (
+      img: WxImage | undefined,
+      cx: number,
+      cy: number,
+      scale: number,
+      alpha: number,
+    ): void => {
+      if (!img || !(img.width > 0)) {
+        return;
+      }
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      const iw = img.width * scale;
+      const ih = img.height * scale;
+      ctx.drawImage(img, cx - iw / 2 + drift * (cx < x + w / 2 ? 1 : -1), cy - ih / 2, iw, ih);
+      ctx.restore();
+    };
+    drawCloud(this.uiIcons.get('ladder-cloud'), x + w * 0.14, y + h * 0.11, 0.34, 0.38);
+    drawCloud(this.uiIcons.get('ladder-cloudSm'), x + w * 0.86, y + h * 0.09, 0.42, 0.32);
+    drawCloud(this.uiIcons.get('ladder-cloudSm'), x + w * 0.78, y + h * 0.62, 0.48, 0.2);
+
+    const tw = nowMs * 0.004;
+    for (let i = 0; i < 4; i += 1) {
+      const sx = x + 22 + ((i * 71) % Math.max(40, w - 44));
+      const sy = y + 48 + ((i * 37) % Math.max(24, layout.listTop - y - 12));
+      ctx.save();
+      ctx.globalAlpha = 0.28 + 0.32 * Math.abs(Math.sin(tw + i * 1.3));
+      drawCandyStar(ctx, sx, sy, 4.5 + (i % 2), true);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  /** 排行榜：关卡榜 / 本周榜切换，名单可滑动，底部固定「我的排名」。 */
+  private drawLeaderboardPanel(): void {
+    const layout = this.resolveLeaderboardLayout();
+    this.leaderboardScrollY = clampLeaderboardScroll(this.leaderboardScrollY, layout);
+    const { ctx } = this;
+    const { panel } = layout;
+    const now = this.nowMs || Date.now();
+    this.drawCuteCard(panel.x, panel.y, panel.w, panel.h, {
+      radius: 24,
+      fillTop: 'rgba(248, 251, 255, 0.97)',
+      fillBottom: 'rgba(232, 240, 255, 0.96)',
+      border: 'rgba(132, 94, 247, 0.88)',
+      borderWidth: 3,
+      shadow: true,
+      sparkle: true,
+      sparkleColor: '#d0bfff',
+      nowMs: now,
+    });
+    this.drawLeaderboardPanelBackdrop(layout, now);
+
+    const titleY = panel.y + 26;
+    ctx.save();
+    const ribbonW = Math.min(panel.w - 40, 168);
+    const ribbonX = panel.x + (panel.w - ribbonW) / 2;
+    const ribbonG = ctx.createLinearGradient(ribbonX, titleY - 18, ribbonX, titleY + 18);
+    ribbonG.addColorStop(0, 'rgba(116, 192, 252, 0.92)');
+    ribbonG.addColorStop(1, 'rgba(28, 126, 214, 0.92)');
+    ctx.fillStyle = ribbonG;
+    this.roundRectPath(ribbonX, titleY - 18, ribbonW, 36, 18);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(21, 101, 192, 0.35)';
+    ctx.lineWidth = 4;
+    ctx.strokeText(layout.title, panel.x + panel.w / 2, titleY);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(layout.title, panel.x + panel.w / 2, titleY);
+    ctx.restore();
+
+    // 分段切换
+    for (const tab of layout.tabs) {
+      ctx.save();
+      this.roundRectPath(tab.x, tab.y, tab.w, tab.h, tab.h / 2);
+      if (tab.active) {
+        const g = ctx.createLinearGradient(tab.x, tab.y, tab.x, tab.y + tab.h);
+        g.addColorStop(0, '#74c0fc');
+        g.addColorStop(1, '#1c7ed6');
+        ctx.fillStyle = g;
+      } else {
+        ctx.fillStyle = 'rgba(208, 235, 255, 0.85)';
+      }
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = tab.active ? '#ffffff' : '#1c7ed6';
+      ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(row.tag, layout.tagX + 22, ty + 12);
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.font = '12px sans-serif';
-      ctx.fillStyle = '#1864ab';
-      let ly = ty + 2;
-      for (const line of lines) {
-        ctx.fillText(line, layout.textX - 20, ly);
-        ly += 16;
-      }
-      ty += rowH + 6;
+      ctx.fillText(tab.label, tab.x + tab.w / 2, tab.y + tab.h / 2 + 0.5);
+      ctx.restore();
     }
 
-    // 可滑动玩家列表
+    // 规则 + 本周结算 + 分档奖励
     ctx.save();
-    ctx.beginPath();
-    ctx.rect(panel.x + 6, layout.listTop, panel.w - 12, layout.listViewportH);
-    ctx.clip();
-    let py = layout.listTop - this.leaderboardScrollY;
-    for (const row of layout.playerRows) {
-      const rowH = layout.rowH;
-      const nextY = py + rowH + 6;
-      if (nextY > layout.listTop && py < layout.listBottom) {
-        this.drawLeaderboardPlayerRow(row, layout, py, rowH);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    let ly = layout.infoTop;
+    const cx = panel.x + panel.w / 2;
+    const innerX = panel.x + 14;
+    const innerW = panel.w - 28;
+
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = '#5c7cfa';
+    for (const line of layout.ruleLines) {
+      ctx.fillText(line, cx, ly);
+      ly += layout.infoLineH;
+    }
+    if (layout.settleLines.length > 0) {
+      ly += 2;
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillStyle = '#e67700';
+      for (const line of layout.settleLines) {
+        ctx.fillText(line, cx, ly);
+        ly += layout.infoLineH;
       }
-      py = nextY;
+    }
+    if (layout.settleNoteLines.length > 0) {
+      ctx.font = '11px sans-serif';
+      ctx.fillStyle = '#868e96';
+      for (const line of layout.settleNoteLines) {
+        ctx.fillText(line, cx, ly);
+        ly += layout.infoLineH;
+      }
+    }
+    if (layout.rewardTierLines.length > 0) {
+      ly += 4;
+      const titleH = layout.infoLineH;
+      const tierH = layout.rewardTierLines.length * layout.infoLineH;
+      const blockH = titleH + tierH + 10;
+      ctx.fillStyle = 'rgba(255, 243, 191, 0.72)';
+      this.roundRectPath(innerX, ly, innerW, blockH, 12);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 212, 59, 0.85)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillStyle = '#c92a2a';
+      ctx.fillText(layout.rewardTitle ?? '周奖励', cx, ly + 8);
+      ly += titleH + 2;
+      ctx.font = '11px sans-serif';
+      ctx.fillStyle = '#862e00';
+      for (const line of layout.rewardTierLines) {
+        ctx.fillText(line, cx, ly);
+        ly += layout.infoLineH;
+      }
+      ly += 6;
+    }
+    if (layout.gapHint) {
+      ctx.font = 'bold 12px sans-serif';
+      const w = Math.min(panel.w - 28, ctx.measureText(layout.gapHint).width + 24);
+      ctx.fillStyle = 'rgba(255, 243, 191, 0.95)';
+      this.roundRectPath(cx - w / 2, layout.gapY, w, 20, 10);
+      ctx.fill();
+      ctx.fillStyle = '#e67700';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(layout.gapHint, cx, layout.gapY + 10.5);
     }
     ctx.restore();
 
-    // 可滑时画右侧细滚动条
-    const maxScroll = Math.max(0, layout.listContentH - layout.listViewportH);
-    if (maxScroll > 4 && layout.listViewportH > 20) {
+    if (layout.playerRows.length === 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(panel.x + 6, layout.listTop, panel.w - 12, layout.listViewportH);
+      ctx.clip();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '13px sans-serif';
+      ctx.fillStyle = '#74c0fc';
+      const emptyY = layout.listTop + Math.min(36, layout.listViewportH / 2 - 8);
+      ctx.fillText(layout.emptyText, cx, emptyY);
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = '#91a7ff';
+      const tip = layout.activeTab === 'week'
+        ? '通关一关即可上榜'
+        : '邀请好友一起闯关 · 同关比累计分';
+      ctx.fillText(tip, cx, emptyY + 22);
+      ctx.restore();
+    } else {
+      if (layout.podiumH > 0) {
+        this.drawLeaderboardPodium(layout, cx);
+      }
+      const scrollTop = layout.listScrollTop;
+      const scrollH = layout.listScrollViewportH;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(panel.x + 6, scrollTop, panel.w - 12, scrollH);
+      ctx.clip();
+      let py = scrollTop - this.leaderboardScrollY;
+      const stride = layout.rowH + layout.rowGap;
+      const listRows = layout.podiumH > 0 ? layout.playerRows.slice(3) : layout.playerRows;
+      for (const row of listRows) {
+        if (py + stride > scrollTop && py < layout.listBottom) {
+          this.drawLeaderboardPlayerRow(row, layout, py, layout.rowH, false);
+        }
+        py += stride;
+      }
+      ctx.restore();
+    }
+
+    const scrollViewport = layout.listScrollViewportH > 0 ? layout.listScrollViewportH : layout.listViewportH;
+    const maxScroll = Math.max(0, layout.listContentH - scrollViewport);
+    if (maxScroll > 4 && scrollViewport > 20) {
       const trackX = panel.x + panel.w - 10;
-      const trackTop = layout.listTop + 4;
-      const trackH = layout.listViewportH - 8;
-      const thumbH = Math.max(18, (layout.listViewportH / layout.listContentH) * trackH);
+      const trackTop = (layout.podiumH > 0 ? layout.listScrollTop : layout.listTop) + 4;
+      const trackH = scrollViewport - 8;
+      const thumbH = Math.max(18, (scrollViewport / Math.max(1, layout.listContentH)) * trackH);
       const thumbY = trackTop + (this.leaderboardScrollY / maxScroll) * (trackH - thumbH);
       ctx.fillStyle = 'rgba(116, 192, 252, 0.25)';
       this.roundRectPath(trackX, trackTop, 3, trackH, 2);
@@ -3819,6 +4482,27 @@ export class WxCanvasGameApp {
       ctx.fillStyle = 'rgba(28, 126, 214, 0.55)';
       this.roundRectPath(trackX, thumbY, 3, thumbH, 2);
       ctx.fill();
+    }
+
+    // 固定在底部的我
+    if (layout.selfRow) {
+      const bar = layout.selfBar;
+      ctx.save();
+      ctx.shadowColor = 'rgba(28, 126, 214, 0.25)';
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetY = -2;
+      const g = ctx.createLinearGradient(bar.x, bar.y, bar.x, bar.y + bar.h);
+      g.addColorStop(0, '#e7f5ff');
+      g.addColorStop(1, '#a5d8ff');
+      ctx.fillStyle = g;
+      this.roundRectPath(bar.x, bar.y, bar.w, bar.h, 16);
+      ctx.fill();
+      ctx.shadowColor = 'transparent';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+      this.drawLeaderboardPlayerRow(layout.selfRow, layout, bar.y + (bar.h - layout.rowH) / 2, layout.rowH, true);
     }
 
     for (const spec of layout.buttons) {
@@ -3837,32 +4521,36 @@ export class WxCanvasGameApp {
         ctx.font = 'bold 22px sans-serif';
         ctx.fillStyle = '#74c0fc';
         ctx.fillText(spec.label, spec.x + spec.w / 2, spec.y + spec.h / 2);
-      } else {
-        this.drawCuteButton(btn, spec.palette);
+      } else if (spec.id === 'invite') {
+        this.drawCuteButton(btn, { top: '#8ce99a', bottom: '#37b24d', border: '#ffffff', gloss: true });
       }
     }
   }
 
-  private resolveLeaderboardLayout() {
+  private resolveLeaderboardLayout(): LeaderboardPanelLayout {
     const view = this.boardViewModel;
+    this.ctx.font = '12px sans-serif';
     return layoutLeaderboardPanel({
       width: this.width,
       height: this.height,
-      hint: view?.hint ?? '',
-      rewardText: view?.rewardText ?? '',
-      rows: view?.rows ?? [],
+      activeTab: this.leaderboardTab,
+      tab: view?.tabs?.[this.leaderboardTab] ?? null,
+      settleText: view?.settleText,
+      rewardText: view?.rewardText,
       wrap: (text, maxWidth) => this.wrapText(text, maxWidth),
     });
   }
 
   private beginLeaderboardScroll(x: number, y: number): void {
     const layout = this.resolveLeaderboardLayout();
-    const inList =
+    const scrollTop = layout.podiumH > 0 ? layout.listScrollTop : layout.listTop;
+    const inScroll =
       x >= layout.panel.x
       && x <= layout.panel.x + layout.panel.w
-      && y >= layout.listTop
+      && y >= scrollTop
       && y <= layout.listBottom;
-    if (!inList || layout.listContentH <= layout.listViewportH + 1) {
+    const scrollViewport = layout.listScrollViewportH > 0 ? layout.listScrollViewportH : layout.listViewportH;
+    if (!inScroll || layout.listContentH <= scrollViewport + 1) {
       this.leaderboardDrag = null;
       return;
     }
@@ -3894,6 +4582,438 @@ export class WxCanvasGameApp {
     const scrolled = !!this.leaderboardDrag?.scrolled;
     this.leaderboardDrag = null;
     return scrolled;
+  }
+
+  private resolveDailyTasksLayout(): DailyTasksPanelLayout {
+    return layoutDailyTasksPanel({
+      width: this.width,
+      height: this.height,
+      view: this.session.getDailyTasksView(),
+    });
+  }
+
+  private dailyTaskKindEmoji(id: DailyTaskKind): string {
+    switch (id) {
+      case 'clear_levels':
+        return '🎯';
+      case 'clear_tiles':
+        return '🐾';
+      case 'make_specials':
+        return '✨';
+      case 'combo_chain':
+        return '⚡';
+      case 'crush_rounds':
+        return '💥';
+      case 'collect_kind':
+        return '🎁';
+      case 'three_star':
+        return '⭐';
+      case 'use_boosters':
+        return '🔨';
+      default:
+        return '📋';
+    }
+  }
+
+  /** 进度条上扫光 + 尖端星点（每日任务专用）。 */
+  private drawDailyTaskBarFx(
+    barX: number,
+    barY: number,
+    barW: number,
+    barH: number,
+    ratio: number,
+    state: DailyTaskRowLayout['state'],
+    nowMs: number,
+    rowIndex: number,
+  ): void {
+    if (state === 'claimed' || ratio <= 0.001) {
+      return;
+    }
+    const { ctx } = this;
+    const inset = 3.5;
+    const innerH = Math.max(6, barH - inset * 2);
+    const innerMaxW = Math.max(0, barW - inset * 2);
+    let fillW = Math.floor(innerMaxW * Math.min(1, ratio));
+    if (fillW < innerH) {
+      fillW = Math.min(innerMaxW, Math.max(fillW, Math.floor(innerH * 0.95)));
+    }
+    const fx = barX + inset;
+    const fy = barY + inset;
+
+    ctx.save();
+    this.roundRectPath(fx, fy, fillW, innerH, innerH / 2);
+    ctx.clip();
+    const period = state === 'claim' ? 1600 : 2400;
+    const phase = ((nowMs + rowIndex * 380) % period) / period;
+    const bandW = Math.max(22, barH * 2.2);
+    const sx = fx + phase * (fillW + bandW) - bandW;
+    ctx.globalAlpha = state === 'claim' ? 0.55 : 0.38;
+    const shine = ctx.createLinearGradient(sx, fy, sx + bandW, fy);
+    shine.addColorStop(0, 'rgba(255,255,255,0)');
+    shine.addColorStop(0.45, 'rgba(255,255,255,0.92)');
+    shine.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = shine;
+    ctx.fillRect(fx - bandW, fy, fillW + bandW * 2, innerH);
+    ctx.restore();
+
+    const tipX = fx + fillW;
+    const tipY = barY + barH / 2;
+    const twinkle = 0.65 + 0.35 * Math.abs(Math.sin(nowMs * 0.009 + rowIndex));
+    if (state === 'claim' || (state === 'todo' && ratio < 1)) {
+      this.drawSparkleStar(tipX - 3, tipY, 3.8 + twinkle, twinkle);
+    }
+    if (state === 'claim') {
+      this.drawSparkleStar(fx + fillW * 0.42, fy + 2, 3.2, 0.5 + 0.5 * Math.sin(nowMs * 0.011));
+    }
+  }
+
+  /** 每日任务行左侧：渐变圆牌 + 投影，托住 emoji。 */
+  private drawDailyTaskIconBadge(
+    cx: number,
+    cy: number,
+    emoji: string,
+    tone: 'active' | 'claim' | 'claimed' | 'locked',
+    size = 22,
+    nowMs = 0,
+  ): void {
+    const { ctx } = this;
+    let drawCx = cx;
+    let drawCy = cy;
+    let scale = 1;
+    if (tone === 'claim') {
+      scale = 1 + 0.07 * Math.sin(nowMs * 0.009);
+      drawCy += Math.sin(nowMs * 0.007) * 1.8;
+    } else if (tone === 'active') {
+      scale = 1 + 0.025 * Math.sin(nowMs * 0.005 + cx * 0.04);
+    }
+    const r = size * scale;
+    const palettes: Record<
+      typeof tone,
+      { top: string; bottom: string; border: string; shadow: string }
+    > = {
+      active: { top: '#ffffff', bottom: '#ffe8cc', border: '#ffc078', shadow: '#8d6e3a' },
+      claim: { top: '#fff9db', bottom: '#ffd43b', border: '#f59f00', shadow: '#a65d00' },
+      claimed: { top: '#f8f9fa', bottom: '#dee2e6', border: '#ced4da', shadow: '#6c757d' },
+      locked: { top: '#f1f3f5', bottom: '#e9ecef', border: '#dee2e6', shadow: '#868e96' },
+    };
+    const p = palettes[tone];
+    ctx.save();
+    ctx.globalAlpha = tone === 'claimed' || tone === 'locked' ? 0.2 : 0.28;
+    ctx.fillStyle = p.shadow;
+    this.fillEllipse(drawCx + 1.5, drawCy + 3.5, r * 0.98, r * 0.9);
+    ctx.globalAlpha = 1;
+
+    if (tone === 'claim') {
+      ctx.save();
+      ctx.globalAlpha = 0.35 + 0.2 * Math.sin(nowMs * 0.008);
+      ctx.strokeStyle = '#ffd43b';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(drawCx, drawCy, r + 3, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    const body = ctx.createLinearGradient(drawCx, drawCy - r, drawCx, drawCy + r);
+    body.addColorStop(0, p.top);
+    body.addColorStop(0.55, p.bottom);
+    body.addColorStop(1, this.shadeHex(p.bottom, -12));
+    ctx.fillStyle = body;
+    this.fillEllipse(drawCx, drawCy, r - 1, (r - 1) * 0.94);
+    ctx.strokeStyle = p.border;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.save();
+    ctx.globalAlpha = 0.62;
+    ctx.fillStyle = '#ffffff';
+    this.fillEllipse(drawCx, drawCy - r * 0.42, r * 0.68, r * 0.32);
+    ctx.restore();
+
+    ctx.font = `${Math.round(r * 0.82)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.globalAlpha = tone === 'claimed' || tone === 'locked' ? 0.62 : 1;
+    ctx.fillText(emoji, drawCx, drawCy - 1);
+    ctx.restore();
+  }
+
+  private dailyTaskProgressColors(state: DailyTaskRowLayout['state']): {
+    track: string;
+    fillTop: string;
+    fillMid: string;
+    fillBottom: string;
+    border: string;
+  } {
+    if (state === 'claimed') {
+      return {
+        track: '#e9ecef',
+        fillTop: '#dee2e6',
+        fillMid: '#ced4da',
+        fillBottom: '#adb5bd',
+        border: '#ced4da',
+      };
+    }
+    if (state === 'claim') {
+      return {
+        track: '#fff3bf',
+        fillTop: '#ffe066',
+        fillMid: '#ffc078',
+        fillBottom: '#f08c00',
+        border: '#ffd43b',
+      };
+    }
+    return {
+      track: '#fff9db',
+      fillTop: '#ffe066',
+      fillMid: '#ffd43b',
+      fillBottom: '#f59f00',
+      border: '#ffc078',
+    };
+  }
+
+  /** 每日任务：4 行进度 + 活跃宝箱（参考同类小游戏任务页）。 */
+  private drawDailyTasksPanel(): void {
+    const layout = this.resolveDailyTasksLayout();
+    const { ctx } = this;
+    const { panel } = layout;
+    const now = this.nowMs || Date.now();
+    this.drawCuteCard(panel.x, panel.y, panel.w, panel.h, {
+      radius: 24,
+      fillTop: 'rgba(255,255,255,0.98)',
+      fillBottom: 'rgba(255, 248, 220, 0.97)',
+      border: 'rgba(255, 212, 59, 0.95)',
+      borderWidth: 3,
+      shadow: true,
+      sparkle: true,
+      sparkleColor: '#ffe066',
+      nowMs: now,
+    });
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillStyle = '#e67700';
+    ctx.fillText(layout.title, panel.x + panel.w / 2, panel.y + 26);
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = '#f59f00';
+    ctx.fillText(layout.subtitle, panel.x + panel.w / 2, panel.y + 48);
+    ctx.restore();
+
+    for (const row of layout.rows) {
+      const { task } = row;
+      ctx.save();
+      this.roundRectPath(row.x, row.y, row.w, row.h, 14);
+      ctx.fillStyle = row.state === 'claim'
+        ? 'rgba(255, 243, 191, 0.92)'
+        : row.state === 'claimed'
+          ? 'rgba(241, 243, 245, 0.92)'
+          : 'rgba(255, 255, 255, 0.88)';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      if (row.state === 'claim') {
+        ctx.strokeStyle = `rgba(245, 159, 0, ${0.5 + 0.35 * Math.sin(now * 0.008 + row.index)})`;
+        ctx.lineWidth = 2.5;
+        this.roundRectPath(row.x + 0.5, row.y + 0.5, row.w - 1, row.h - 1, 13);
+        ctx.stroke();
+      } else if (row.state === 'todo' && row.ratio > 0 && row.ratio < 1) {
+        ctx.strokeStyle = `rgba(255, 212, 59, ${0.35 + 0.2 * Math.sin(now * 0.006 + row.index * 0.7)})`;
+        ctx.lineWidth = 1.5;
+        this.roundRectPath(row.x + 0.5, row.y + 0.5, row.w - 1, row.h - 1, 13);
+        ctx.stroke();
+      }
+
+      const iconTone: 'active' | 'claim' | 'claimed' =
+        row.state === 'claimed' ? 'claimed' : row.state === 'claim' ? 'claim' : 'active';
+      this.drawDailyTaskIconBadge(
+        row.iconCx,
+        row.y + row.h / 2 - 2,
+        this.dailyTaskKindEmoji(task.id),
+        iconTone,
+        21,
+        now,
+      );
+
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillStyle = '#862e00';
+      ctx.fillText(task.title, row.textX, row.y + 18);
+      ctx.font = '11px sans-serif';
+      ctx.fillStyle = '#e67700';
+      const rewardLabel = formatDailyReward([task.reward]);
+      ctx.fillText(rewardLabel ? `奖励 ${rewardLabel}` : '', row.textX, row.y + 34);
+
+      const barPulse =
+        row.state === 'claim'
+          ? 1.03 + 0.025 * Math.sin(now * 0.01 + row.index)
+          : row.state === 'todo' && row.ratio > 0 && row.ratio < 1
+            ? 1 + 0.012 * Math.sin(now * 0.008 + row.index)
+            : 1;
+      this.drawCartoonProgressBar(
+        row.barX,
+        row.barY,
+        row.barW,
+        row.barH,
+        row.ratio,
+        this.dailyTaskProgressColors(row.state),
+        barPulse,
+      );
+      this.drawDailyTaskBarFx(row.barX, row.barY, row.barW, row.barH, row.ratio, row.state, now, row.index);
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillStyle = row.state === 'claimed' ? '#868e96' : '#d9480f';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'alphabetic';
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 2.5;
+      const progLabel = `${task.progress}/${task.target}`;
+      const progX = row.barX + row.barW - 2;
+      const progY = row.barY - 5;
+      ctx.strokeText(progLabel, progX, progY);
+      ctx.fillText(progLabel, progX, progY);
+
+      if (row.state === 'claimed') {
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillStyle = '#868e96';
+        ctx.fillText('已领', row.x + row.w - 38, row.y + row.h / 2);
+      } else if (row.state === 'todo') {
+        ctx.textAlign = 'center';
+        ctx.font = '12px sans-serif';
+        ctx.fillStyle = '#fab005';
+        const todoPulse = 0.88 + 0.12 * Math.sin(now * 0.007 + row.index);
+        ctx.globalAlpha = todoPulse;
+        ctx.fillText('进行中', row.x + row.w - 38, row.y + row.h / 2);
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+    }
+
+    const chest = layout.chest;
+    const chestRatio = chest.total > 0 ? chest.claimedCount / chest.total : 0;
+    ctx.save();
+    this.roundRectPath(chest.x, chest.y, chest.w, chest.h, 16);
+    const chestG = ctx.createLinearGradient(chest.x, chest.y, chest.x, chest.y + chest.h);
+    if (chest.state === 'ready') {
+      chestG.addColorStop(0, '#fff3bf');
+      chestG.addColorStop(1, '#ffd43b');
+    } else if (chest.state === 'claimed') {
+      chestG.addColorStop(0, '#f1f3f5');
+      chestG.addColorStop(1, '#dee2e6');
+    } else {
+      chestG.addColorStop(0, '#f8f9fa');
+      chestG.addColorStop(1, '#e9ecef');
+    }
+    ctx.fillStyle = chestG;
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    if (chest.state === 'ready') {
+      ctx.strokeStyle = `rgba(245, 159, 0, ${0.55 + 0.4 * Math.sin(now * 0.007)})`;
+      ctx.lineWidth = 3;
+      this.roundRectPath(chest.x + 1, chest.y + 1, chest.w - 2, chest.h - 2, 15);
+      ctx.stroke();
+    }
+    const chestIconTone: 'active' | 'claim' | 'claimed' | 'locked' =
+      chest.state === 'claimed'
+        ? 'claimed'
+        : chest.state === 'ready'
+          ? 'claim'
+          : 'locked';
+    this.drawDailyTaskIconBadge(
+      chest.iconCx,
+      chest.iconCy,
+      chest.state === 'claimed' ? '📦' : '🎁',
+      chestIconTone,
+      28,
+      now,
+    );
+    const chestBarX = chest.textX;
+    const chestBarW = chest.x + chest.w - chestBarX - 10;
+    const chestBarH = 9;
+    const chestBarY = chest.state === 'ready' ? chest.y + 42 : chest.y + chest.h - 16;
+    if (chest.state !== 'claimed') {
+      this.drawCartoonProgressBar(
+        chestBarX,
+        chestBarY,
+        chestBarW,
+        chestBarH,
+        chestRatio,
+        chest.state === 'ready'
+          ? this.dailyTaskProgressColors('claim')
+          : this.dailyTaskProgressColors('todo'),
+        chest.state === 'ready' ? 1.04 + 0.02 * Math.sin(now * 0.009) : 1,
+      );
+      this.drawDailyTaskBarFx(
+        chestBarX,
+        chestBarY,
+        chestBarW,
+        chestBarH,
+        chestRatio,
+        chest.state === 'ready' ? 'claim' : 'todo',
+        now,
+        99,
+      );
+    }
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillStyle = chest.state === 'ready' ? '#e67700' : '#495057';
+    ctx.fillText(noticeJson.dailyTasks.chest, chest.textX, chest.y + 22);
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = '#868e96';
+    const chestReward = formatDailyReward(this.session.getDailyTasksView().chest);
+    ctx.fillText(
+      chest.state === 'claimed' ? chest.hint : `${chest.hint} · ${chestReward}`,
+      chest.textX,
+      chest.y + 40,
+    );
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillStyle = '#f59f00';
+    ctx.fillText(
+      `${chest.claimedCount}/${chest.total} 已领`,
+      chest.textX,
+      chest.y + 58,
+    );
+    ctx.restore();
+
+    for (const spec of layout.buttons) {
+      const btn: UiButton = {
+        id: spec.id,
+        x: spec.x,
+        y: spec.y,
+        w: spec.w,
+        h: spec.h,
+        label: spec.label,
+        hitPad: 6,
+        ...(spec.id === 'daily_claim' && spec.index != null ? { levelId: spec.index } : {}),
+      };
+      this.buttons.push(btn);
+      if (isPanelCloseLabel(spec.label) || isPanelBackLabel(spec.label)) {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 22px sans-serif';
+        ctx.fillStyle = '#fab005';
+        ctx.fillText(spec.label, spec.x + spec.w / 2, spec.y + spec.h / 2);
+      } else if (spec.id === 'daily_claim') {
+        this.drawCuteButton(btn, {
+          top: '#ffe066',
+          bottom: '#f59f00',
+          border: '#ffffff',
+          gloss: true,
+          fontSize: 13,
+        });
+      } else if (spec.id === 'daily_chest' || spec.id === 'daily_chest_double') {
+        this.drawCuteButton(
+          btn,
+          spec.id === 'daily_chest_double'
+            ? { top: '#ffa8a8', bottom: '#f03e3e', border: '#ffffff', gloss: true, fontSize: 12 }
+            : { top: '#8ce99a', bottom: '#37b24d', border: '#ffffff', gloss: true, fontSize: 12 },
+        );
+      }
+    }
   }
 
   /** 首次进入：可选授权头像昵称（不强制）。 */
@@ -3950,31 +5070,151 @@ export class WxCanvasGameApp {
     ctx.fillText(skip.label, skip.x + skip.w / 2, skip.y + skip.h / 2);
   }
 
+  /** 前三名领奖台（固定在滚动区上方，不随列表滚动） */
+  private drawLeaderboardPodium(layout: LeaderboardPanelLayout, cx: number): void {
+    const { ctx } = this;
+    const panel = layout.panel;
+    const podiumH = layout.podiumH || LEADERBOARD_PODIUM_H;
+    const baseY = layout.listTop + podiumH;
+    const slots = [
+      { row: layout.playerRows[1], x: cx - 72, h: 38, medal: 'silver' as const },
+      { row: layout.playerRows[0], x: cx, h: 46, medal: 'gold' as const },
+      { row: layout.playerRows[2], x: cx + 72, h: 34, medal: 'bronze' as const },
+    ];
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(panel.x + 6, layout.listTop, panel.w - 12, podiumH);
+    ctx.clip();
+    for (const slot of slots) {
+      if (!slot.row) {
+        continue;
+      }
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#1864ab';
+      ctx.fillText(slot.row.nickName?.slice(0, 4) ?? '玩家', slot.x, layout.listTop + 12);
+      ctx.beginPath();
+      ctx.arc(slot.x, layout.listTop + podiumH - slot.h / 2, 14, 0, Math.PI * 2);
+      ctx.fillStyle = slot.medal === 'gold' ? '#ffd43b' : slot.medal === 'silver' ? '#dee2e6' : '#f2b98a';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.fillText(slot.row.tag, slot.x, layout.listTop + podiumH - slot.h / 2 + 0.5);
+    }
+    ctx.fillStyle = 'rgba(116, 192, 252, 0.35)';
+    ctx.fillRect(panel.x + 20, baseY - 4, panel.w - 40, 3);
+    ctx.restore();
+  }
+
+  /** 关卡榜第一名头像上的小皇冠 */
+  private drawLeaderboardCrown(cx: number, cy: number): void {
+    const { ctx } = this;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.beginPath();
+    ctx.moveTo(-11, 4);
+    ctx.lineTo(-8, -6);
+    ctx.lineTo(-4, 2);
+    ctx.lineTo(0, -9);
+    ctx.lineTo(4, 2);
+    ctx.lineTo(8, -6);
+    ctx.lineTo(11, 4);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, -9, 0, 6);
+    g.addColorStop(0, '#ffe066');
+    g.addColorStop(0.5, '#ffd43b');
+    g.addColorStop(1, '#f59f00');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    ctx.fillStyle = '#fa5252';
+    ctx.beginPath();
+    ctx.arc(-6, -2, 2.2, 0, Math.PI * 2);
+    ctx.arc(0, -5, 2.4, 0, Math.PI * 2);
+    ctx.arc(6, -2, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   private drawLeaderboardPlayerRow(
     row: LeaderboardLine,
-    layout: ReturnType<typeof layoutLeaderboardPanel>,
+    layout: LeaderboardPanelLayout,
     ty: number,
     rowH: number,
+    pinned: boolean,
   ): void {
     const { ctx } = this;
     const { panel } = layout;
-    if (row.highlight) {
-      ctx.fillStyle = 'rgba(208, 235, 255, 0.95)';
-      this.roundRectPath(panel.x + 8, ty - 2, panel.w - 16, rowH, 14);
-      ctx.fill();
+    const medal = leaderboardMedal(row.tag);
+    const medalColors = {
+      gold: { fill: '#ffd43b', deep: '#f59f00', row: 'rgba(255, 243, 191, 0.92)' },
+      silver: { fill: '#dee2e6', deep: '#868e96', row: 'rgba(241, 243, 245, 0.95)' },
+      bronze: { fill: '#f2b98a', deep: '#c0703a', row: 'rgba(255, 232, 214, 0.92)' },
+    } as const;
+    if (!pinned) {
+      if (row.highlight) {
+        ctx.fillStyle = 'rgba(208, 235, 255, 0.95)';
+        this.roundRectPath(panel.x + 8, ty - 2, panel.w - 16, rowH, 14);
+        ctx.fill();
+      } else if (medal) {
+        ctx.fillStyle = medalColors[medal].row;
+        this.roundRectPath(panel.x + 8, ty - 2, panel.w - 16, rowH, 14);
+        ctx.fill();
+      }
     }
-    // 排名圆
-    const rankCx = layout.tagX + 12;
+    // 名次：前三名奖牌，其余圆点，未上榜写字
+    const rankCx = layout.tagX + 13;
     const rankCy = ty + rowH / 2;
-    ctx.beginPath();
-    ctx.arc(rankCx, rankCy, 11, 0, Math.PI * 2);
-    ctx.fillStyle = row.highlight ? '#1c7ed6' : '#74c0fc';
-    ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 12px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(row.tag, rankCx, rankCy);
+    if (medal) {
+      const c = medalColors[medal];
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(rankCx - 7, rankCy - 18);
+      ctx.lineTo(rankCx - 2, rankCy - 6);
+      ctx.lineTo(rankCx + 2, rankCy - 6);
+      ctx.lineTo(rankCx + 7, rankCy - 18);
+      ctx.closePath();
+      ctx.fillStyle = '#ff6b6b';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(rankCx, rankCy + 2, 12, 0, Math.PI * 2);
+      const g = ctx.createLinearGradient(rankCx, rankCy - 10, rankCx, rankCy + 14);
+      g.addColorStop(0, c.fill);
+      g.addColorStop(1, c.deep);
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText(row.tag, rankCx, rankCy + 2.5);
+      ctx.restore();
+      if (medal === 'gold') {
+        this.drawLeaderboardCrown(layout.avatarX, rankCy - layout.avatarR - 3);
+      }
+    } else if (/^\d+$/.test(row.tag)) {
+      ctx.beginPath();
+      ctx.arc(rankCx, rankCy, 11, 0, Math.PI * 2);
+      ctx.fillStyle = row.highlight ? '#1c7ed6' : '#74c0fc';
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = row.tag.length >= 3 ? 'bold 10px sans-serif' : 'bold 12px sans-serif';
+      ctx.fillText(row.tag, rankCx, rankCy);
+    } else {
+      ctx.fillStyle = '#868e96';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText(row.tag, rankCx, rankCy);
+    }
 
     // 头像
     const ax = layout.avatarX;
@@ -4682,6 +5922,7 @@ export class WxCanvasGameApp {
     if (needReplayGate) {
       this.mahjongEntryGateLevel = level;
       this.leavingLobby = false;
+      this.statusText = '本关需消耗馆馆金币或看广告后再进';
       this.requestPaint();
       return;
     }
@@ -4692,22 +5933,31 @@ export class WxCanvasGameApp {
 
   /** 先加载五面壳 + 萌宠贴图，再进对局，避免第 1 关首帧空白/绿牌。 */
   private async openMahjongPlayWhenReady(): Promise<void> {
-    this.session.mahjong.enterFromHall();
-    this.mahjongWinShownAtMs = 0;
-    this.mahjongSuppressAutoNext = false;
-    resetMahjongSlotFlight(this.mahjongSlotFlight);
-    this.resetMahjongPileSway();
-    this.mahjongTimerPaintSec = -1;
-    this.mahjongDrawRecoverAttempted = false;
-    this.mahjongSlotFullOfferDismissed = false;
-    await this.ensureMahjongTileShellPackLoaded();
-    await this.syncMahjongThemeAssets();
-    void this.session.refreshMahjongThemeCatalog().finally(() => {
-      void this.syncMahjongThemeAssets();
-    });
-    this.mode = 'mahjong_play';
-    this.markUserActivity();
-    this.requestPaint();
+    try {
+      this.session.mahjong.enterFromHall();
+      this.mahjongWinShownAtMs = 0;
+      this.mahjongSuppressAutoNext = false;
+      this.resetMahjongSlotAnimations();
+      this.resetMahjongPileSway();
+      this.mahjongTimerPaintSec = -1;
+      this.mahjongDrawRecoverAttempted = false;
+      this.mahjongSlotFullOfferDismissed = false;
+      await this.ensureMahjongTileShellPackLoaded();
+      await this.syncMahjongThemeAssets();
+      void this.session.refreshMahjongThemeCatalog().finally(() => {
+        void this.syncMahjongThemeAssets();
+      });
+      this.mode = 'mahjong_play';
+      this.queueMahjongIntroBanner();
+      this.markUserActivity();
+      this.requestPaint();
+    } catch (err) {
+      console.error('[crush-crush] mahjong enter failed', err);
+      this.leavingLobby = false;
+      this.syncLobbyBanner();
+      this.notifyUser('麻将馆进不去，请稍后再试', '进馆失败');
+      this.requestPaint();
+    }
   }
 
   private mahjongShellLoadAttempts = 0;
@@ -4831,12 +6081,13 @@ export class WxCanvasGameApp {
     const next = game.level + 1;
     this.mahjongWinShownAtMs = 0;
     this.mahjongSuppressAutoNext = false;
-    resetMahjongSlotFlight(this.mahjongSlotFlight);
+    this.resetMahjongSlotAnimations();
     await this.session.mahjong.finishActive(true);
     this.session.mahjong.startLevel(next, false);
     this.session.mahjong.trackAutoNext(next);
     void this.syncMahjongThemeAssets();
     this.mode = 'mahjong_play';
+    this.queueMahjongIntroBanner();
     this.requestPaint();
     this.mahjongAutoNextInFlight = false;
   }
@@ -4847,13 +6098,14 @@ export class WxCanvasGameApp {
       this.mahjongEntryGateLevel = null;
       this.mahjongSlotFullOfferDismissed = false;
       this.mahjongSuppressAutoNext = false;
-      resetMahjongSlotFlight(this.mahjongSlotFlight);
+      this.resetMahjongSlotAnimations();
       if (fromLobbyGate) {
         this.leavingLobby = true;
         await this.openMahjongPlayWhenReady();
       } else {
         void this.syncMahjongThemeAssets();
         this.mode = 'mahjong_play';
+        this.queueMahjongIntroBanner();
       }
     } else if (result === 'skipped') {
       this.notifyUser('看完视频才能继续', '激励视频');
@@ -4899,6 +6151,10 @@ export class WxCanvasGameApp {
     }
     if (id === 'mahjong_slot_full_close') {
       this.mahjongSlotFullOfferDismissed = true;
+      const lostGame = this.session.mahjong.getActiveGame();
+      if (lostGame) {
+        this.syncMahjongFailStageBanner(lostGame);
+      }
       this.requestPaint();
       return;
     }
@@ -5010,7 +6266,7 @@ export class WxCanvasGameApp {
         this.requestPaint();
         return;
       }
-      resetMahjongSlotFlight(this.mahjongSlotFlight);
+      this.resetMahjongSlotAnimations();
       if (!game.useTool(tool)) {
         const hint =
           tool === 'reveal' ? '没有可翻开的扣牌' : '当前无法使用该道具';
@@ -5033,6 +6289,7 @@ export class WxCanvasGameApp {
       this.mahjongWinShownAtMs = 0;
       void this.syncMahjongThemeAssets();
       this.mode = 'mahjong_play';
+      this.queueMahjongIntroBanner();
       this.requestPaint();
       return;
     }
@@ -5043,6 +6300,7 @@ export class WxCanvasGameApp {
       await this.session.mahjong.clearSavedRun();
       this.session.mahjong.startLevel(level, false);
       this.mode = 'mahjong_play';
+      this.queueMahjongIntroBanner();
       this.requestPaint();
       return;
     }
@@ -5062,10 +6320,11 @@ export class WxCanvasGameApp {
       }
       this.mahjongSlotFullOfferDismissed = false;
       this.mahjongSuppressAutoNext = false;
-      resetMahjongSlotFlight(this.mahjongSlotFlight);
+      this.resetMahjongSlotAnimations();
       await this.session.mahjong.restartLevel(level);
       void this.syncMahjongThemeAssets();
       this.mode = 'mahjong_play';
+      this.queueMahjongIntroBanner();
       this.requestPaint();
       return;
     }
@@ -5088,6 +6347,7 @@ export class WxCanvasGameApp {
       this.mahjongSlotFullOfferDismissed = false;
       this.session.mahjong.startLevel(level, false);
       this.mode = 'mahjong_play';
+      this.queueMahjongIntroBanner();
       this.requestPaint();
       return;
     }
@@ -5108,7 +6368,10 @@ export class WxCanvasGameApp {
       id === 'recommend' ||
       id === 'post' ||
       id === 'invite' ||
-      id === 'claim_shuffle' ||
+      id === 'daily_open' ||
+      id === 'daily_claim' ||
+      id === 'lb_tab_level' ||
+      id === 'lb_tab_week' ||
       id === 'resume' ||
       id === 'mahjong_hall'
     ) {
@@ -5120,7 +6383,12 @@ export class WxCanvasGameApp {
         this.requestPaint();
       });
       if (!this.session.isMahjongHallUnlocked()) {
-        this.notifyUser(mahjongHallLockHint(), '萌宠麻将馆');
+        const cleared = this.session.getMaxClearedLevelId();
+        this.notifyUser(
+          mahjongHallLockHint(),
+          mahjongHallLockToastTitle(cleared),
+        );
+        this.openOverlay('mahjong_lock');
         return;
       }
       this.enterMahjongPlay();
@@ -5165,10 +6433,47 @@ export class WxCanvasGameApp {
       return;
     }
 
-    if (id === 'claim_shuffle') {
-      if (this.session.claimDailyShuffle()) {
-        this.notifyUser('重排 x1 已到账', '领取成功');
+    if (id === 'daily_open') {
+      this.openOverlay('daily_tasks');
+      return;
+    }
+
+    if (id === 'daily_claim') {
+      const task = this.session.getDailyTasksView().tasks[levelId ?? -1];
+      const text = task ? this.session.claimDailyTask(task.id) : null;
+      if (text) {
+        this.notifyUser(text, '任务奖励');
       }
+      this.requestPaint();
+      return;
+    }
+
+    if (id === 'daily_chest' || id === 'daily_chest_double') {
+      if (this.dailyChestBusy) {
+        return;
+      }
+      this.dailyChestBusy = true;
+      try {
+        const doubled = id === 'daily_chest_double';
+        const text = doubled
+          ? await this.runDuringAd(() => this.session.claimDailyChest(true))
+          : await this.session.claimDailyChest(false);
+        if (text) {
+          this.notifyUser(text, doubled ? '双倍宝箱' : '活跃宝箱');
+        } else if (doubled) {
+          this.notifyUser('看完视频才能领双倍，也可以直接领取', '宝箱');
+        }
+      } finally {
+        this.dailyChestBusy = false;
+        this.requestPaint();
+      }
+      return;
+    }
+
+    if (id === 'lb_tab_level' || id === 'lb_tab_week') {
+      this.leaderboardTab = id === 'lb_tab_week' ? 'week' : 'level';
+      this.leaderboardScrollY = 0;
+      this.requestPaint();
       return;
     }
 
@@ -5655,16 +6960,276 @@ export class WxCanvasGameApp {
     };
   }
 
+  private enqueueLevelBanner(banner: LevelBanner): void {
+    if (this.levelBanners.some((item) => item.kind === banner.kind)) {
+      return;
+    }
+    this.levelBanners.push(banner);
+    this.requestPaint();
+  }
+
+  private showLeaderboardRewardToast(): void {
+    const text = this.session.takeLeaderboardRewardToast();
+    if (text) {
+      this.notifyUser(text, '周榜奖励');
+    }
+  }
+
+  /** 棋盘中线的横幅：滑入 → 停留 → 滑出，队列里一条接一条。 */
+  private drawLevelBanner(): void {
+    if (this.mode !== 'playing') {
+      return;
+    }
+    const banner = this.levelBanners[0];
+    if (!banner) {
+      return;
+    }
+    const now = this.nowMs || Date.now();
+    if (banner.startMs === 0) {
+      banner.startMs = now;
+    }
+    const frame = bannerFrame(banner, now);
+    if (frame.done) {
+      this.levelBanners.shift();
+      return;
+    }
+    const { ctx, width } = this;
+    const pal = bannerPalette(banner.kind);
+    const board = this.session.getBoard();
+    let cy = this.height * 0.45;
+    if (board) {
+      const layout = this.computeBoardLayout(board);
+      cy = layout.originY - (board.size.rows * layout.cellSize) / 2;
+    }
+    const bandH = banner.subtitle ? 82 : 62;
+    const top = cy - bandH / 2;
+
+    ctx.save();
+    ctx.globalAlpha = frame.ribbon * 0.92;
+    const g = ctx.createLinearGradient(0, top, 0, top + bandH);
+    g.addColorStop(0, pal.top);
+    g.addColorStop(1, pal.bottom);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, top, width, bandH);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(0, top, width, 3);
+    ctx.fillRect(0, top + bandH - 3, width, 3);
+    const shimmer = bannerShimmerPhase(banner, now);
+    if (shimmer >= 0) {
+      const sx = top + shimmer * width;
+      const sg = ctx.createLinearGradient(sx - 40, top, sx + 40, top + bandH);
+      sg.addColorStop(0, 'rgba(255,255,255,0)');
+      sg.addColorStop(0.5, 'rgba(255,255,255,0.45)');
+      sg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = sg;
+      ctx.fillRect(sx - 50, top, 100, bandH);
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = frame.alpha;
+    ctx.translate(width / 2 + frame.offset * width, cy);
+    ctx.scale(frame.scale, frame.scale);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    const titleSize = banner.kind === 'intro' ? 34 : 30;
+    const ty = banner.subtitle ? -13 : 0;
+    ctx.font = `bold ${titleSize}px sans-serif`;
+    ctx.strokeStyle = pal.edge;
+    ctx.lineWidth = 7;
+    ctx.strokeText(banner.title, 0, ty);
+    ctx.fillStyle = pal.ink;
+    ctx.fillText(banner.title, 0, ty);
+    if (banner.subtitle) {
+      ctx.font = 'bold 14px sans-serif';
+      const sub = this.wrapText(banner.subtitle, width - 40)[0] ?? banner.subtitle;
+      ctx.strokeStyle = pal.edge;
+      ctx.lineWidth = 4;
+      ctx.strokeText(sub, 0, 22);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(sub, 0, 22);
+    }
+    ctx.restore();
+  }
+
+  /** 收集目标飞向 HUD；落进目标栏时让进度条跳一下。 */
+  private drawGoalFlyers(): void {
+    if (this.goalFlyers.length === 0) {
+      return;
+    }
+    if (this.mode !== 'playing') {
+      this.goalFlyers = [];
+      return;
+    }
+    const now = this.nowMs || Date.now();
+    const { ctx } = this;
+    let landed = false;
+    const keep: GoalFlyer[] = [];
+    for (const flyer of this.goalFlyers) {
+      const p = flyerPoint(flyer, now);
+      if (p.done) {
+        landed = true;
+        continue;
+      }
+      keep.push(flyer);
+      const img = p.started ? this.tileImages.get(flyer.kind) : undefined;
+      if (!img) {
+        continue;
+      }
+      const s = flyer.size * p.scale;
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      this.drawTileSprite(img, p.x - s / 2, p.y - s / 2, s);
+      ctx.restore();
+    }
+    this.goalFlyers = keep;
+    if (landed) {
+      this.hudBarPulse = Math.max(this.hudBarPulse, 260);
+      this.hudScorePunch = Math.max(this.hudScorePunch, 1.06);
+    }
+  }
+
+  /** 局内完成每日任务的小胶囊；结算页时挪到底部，避免压住胜利卡。 */
+  private drawDailyTaskPop(): void {
+    const pop = this.dailyTaskPop;
+    if (!pop) {
+      return;
+    }
+    const now = this.nowMs || Date.now();
+    const t = now - pop.startMs;
+    if (t >= 2400) {
+      this.dailyTaskPop = null;
+      return;
+    }
+    if (this.mode === 'lobby' || this.mode === 'mahjong_play') {
+      return;
+    }
+    const { ctx, width } = this;
+    const alpha = t < 200 ? t / 200 : t > 2000 ? (2400 - t) / 400 : 1;
+    const drop = t < 200 ? (1 - t / 200) * -12 : 0;
+    ctx.save();
+    ctx.font = 'bold 13px sans-serif';
+    const w = Math.min(width - 24, ctx.measureText(pop.text).width + 44);
+    const h = 30;
+    const x = (width - w) / 2;
+    const y = this.mode === 'result'
+      ? this.height - this.safeAreaBottom - h - 18 + drop
+      : this.getHudBottom() + 28 + drop;
+    ctx.globalAlpha = alpha;
+    const g = ctx.createLinearGradient(x, y, x, y + h);
+    g.addColorStop(0, '#fff9db');
+    g.addColorStop(1, '#ffe066');
+    ctx.fillStyle = g;
+    this.roundRectPath(x, y, w, h, h / 2);
+    ctx.fill();
+    ctx.strokeStyle = '#f59f00';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    drawCandyStar(ctx, x + 17, y + h / 2, 8, true);
+    ctx.fillStyle = '#d9480f';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.wrapText(pop.text, w - 38)[0] ?? pop.text, x + 30, y + h / 2 + 0.5);
+    ctx.restore();
+  }
+
+  /** 结算：星数文案 + 评星说明（与馆币 ⭐ 无关）。 */
+  private drawResultStarCaption(cx: number, starsCy: number, starSize: number): void {
+    const count = this.resultStars;
+    if (count <= 0) {
+      return;
+    }
+    const stars = count as LevelStarCount;
+    const { ctx } = this;
+    const baseY = starsCy + starSize * 1.85;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
+    ctx.lineWidth = 4;
+    ctx.strokeText(starClearLabel(stars), cx, baseY);
+    ctx.fillStyle = '#e67700';
+    ctx.fillText(starClearLabel(stars), cx, baseY);
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = '#868e96';
+    ctx.fillText(starsHint(stars), cx, baseY + 20);
+    ctx.restore();
+  }
+
+  /** 结算星星：空槽先在，金星逐颗弹进去，中间那颗更大更高。 */
+  private drawResultStars(cx: number, cy: number, size: number, now: number): void {
+    const count = this.resultStars;
+    if (count <= 0) {
+      return;
+    }
+    const { ctx } = this;
+    const elapsed = now - this.resultOpenedMs;
+    const gap = size * 2.25;
+    for (let i = 0; i < 3; i += 1) {
+      const x = cx + (i - 1) * gap;
+      const y = cy + (i === 1 ? -size * 0.4 : 0);
+      const r = i === 1 ? size * 1.2 : size;
+      drawCandyStar(ctx, x, y, r, false);
+      if (i >= count) {
+        continue;
+      }
+      const f = starPopFrame(i, elapsed);
+      if (!f.visible) {
+        continue;
+      }
+      ctx.save();
+      ctx.globalAlpha = f.alpha;
+      ctx.translate(x, y);
+      ctx.scale(f.scale, f.scale);
+      drawCandyStar(ctx, 0, 0, r, true);
+      ctx.restore();
+    }
+  }
+
+  /** 关卡条内横向三星（空槽 + 金星，居中一行）。 */
+  private drawLobbyBarStarRow(leftX: number, cy: number, r: number, earned: number): number {
+    const { ctx } = this;
+    const gap = r * 2.08;
+    for (let i = 0; i < 3; i += 1) {
+      const x = leftX + i * gap;
+      const y = cy + (i === 1 ? -r * 0.12 : 0);
+      const filled = i < earned;
+      ctx.save();
+      if (filled) {
+        ctx.shadowColor = 'rgba(255, 212, 59, 0.85)';
+        ctx.shadowBlur = r * 0.55;
+      }
+      drawCandyStar(ctx, x, y, r, filled);
+      ctx.restore();
+    }
+    return gap * 2 + r * 0.5;
+  }
+
   /** 6–20 进关/重试/下一关：艺术字「难度提升」。 */
   private applyLevelEntryTip(levelId: number): void {
-    const procedural = this.session.getLevelConfig()?.procedural;
+    this.levelBanners = [];
+    this.goalFlyers = [];
+    this.lowMovesWarned = false;
+    this.dailyTaskPop = null;
+    const level = this.session.getLevelConfig();
+    const goalText = formatHudGoals(this.session.getGoals()?.getSnapshots() ?? []).text;
+    const intro = makeLevelBanner(
+      'intro',
+      `第 ${levelId} 关`,
+      [goalText, level ? `${level.moves} 步` : ''].filter(Boolean).join(' · '),
+    );
+    this.enqueueLevelBanner(intro);
+    const procedural = level?.procedural;
     const art = levelDifficultyArt(levelId, procedural);
     if (art) {
       this.statusText = '';
       this.difficultyArt = {
         title: art.title,
         subtitle: art.subtitle,
-        startMs: this.nowMs || Date.now(),
+        startMs: (this.nowMs || Date.now()) + intro.durationMs,
         durationMs: 2800,
       };
       this.requestPaint();
@@ -5682,6 +7247,9 @@ export class WxCanvasGameApp {
     }
     const now = this.nowMs || Date.now();
     const elapsed = now - tip.startMs;
+    if (elapsed < 0) {
+      return;
+    }
     if (elapsed >= tip.durationMs) {
       this.difficultyArt = null;
       return;
@@ -5897,7 +7465,7 @@ export class WxCanvasGameApp {
         btn.id !== 'invite' &&
         btn.id !== 'howto' &&
         btn.id !== 'settings' &&
-        btn.id !== 'claim_shuffle' &&
+        btn.id !== 'daily_open' &&
         btn.id !== 'recommend' &&
         btn.id !== 'club'
       ) {
@@ -5980,6 +7548,15 @@ export class WxCanvasGameApp {
           void this.ensureMahjongTileShellPackLoaded().then(() => this.requestPaint());
         }
         const chrome = this.buildMahjongPlayChrome(game);
+        const now = this.nowMs || Date.now();
+        ctx.save();
+        if (this.shakeMs > 0) {
+          const mag = Math.min(5, this.shakeMs / 24);
+          ctx.translate(
+            Math.sin(now * 0.09) * mag,
+            Math.cos(now * 0.075) * mag,
+          );
+        }
         drawMahjongPlay(
           ctx,
           this.width,
@@ -5990,8 +7567,20 @@ export class WxCanvasGameApp {
           this.mahjongButtons,
           chrome,
           this.mahjongSlotFlight,
-          this.nowMs || Date.now(),
+          now,
         );
+        drawMahjongSlotClearRings(ctx, this.mahjongSlotClearRings, now);
+        this.drawMatchJuiceOverlays();
+        if (this.mahjongStageBanner) {
+          drawMahjongLevelStageBanner(
+            ctx,
+            this.width,
+            this.height,
+            this.mahjongStageBanner,
+            now,
+          );
+        }
+        ctx.restore();
         if (this.mahjongToolOffer && game.phase === 'playing') {
           drawMahjongToolOfferModal(
             ctx,
@@ -6003,7 +7592,12 @@ export class WxCanvasGameApp {
             mahjongCoinCost(),
           );
         }
-        if (game.phase === 'won' || game.phase === 'lost') {
+        const showMahjongResult =
+          (game.phase === 'won' || game.phase === 'lost') &&
+          !this.shouldDeferMahjongResultModal(game);
+        if (showMahjongResult) {
+          const revealStart =
+            game.phase === 'lost' ? this.mahjongResultRevealStartMs : 0;
           drawMahjongResult(
             ctx,
             this.width,
@@ -6015,6 +7609,7 @@ export class WxCanvasGameApp {
             this.nowMs || Date.now(),
             this.winCelebrate,
             chrome,
+            revealStart,
           );
         }
         return;
@@ -6061,24 +7656,33 @@ export class WxCanvasGameApp {
       }
       if (this.mode === 'playing') {
         this.drawBoosterBar();
+        this.drawGoalFlyers();
       }
       this.drawActionToast();
       this.drawDifficultyArtTip();
+      this.drawLevelBanner();
       if (this.hammerTargeting) {
         this.drawHammerCursor();
       }
       if (this.mode === 'result') {
         this.drawResultOverlay();
       }
+      this.drawDailyTaskPop();
       this.drawNavChips();
       this.drawPageOverlay();
     } catch (err) {
-      console.error('[crush-crush] draw failed', err);
+      this.logThrottledDrawError('[crush-crush] draw failed', err);
       try {
         ctx.fillStyle = this.mode === 'lobby' ? '#a7f0d4' : '#b6e8fc';
         ctx.fillRect(0, 0, this.width, this.height);
       } catch {
         // ignore
+      }
+    } finally {
+      try {
+        this.canvasPresent?.();
+      } catch (presentErr) {
+        console.warn('[crush-crush] canvas present failed', presentErr);
       }
     }
   }
@@ -6182,6 +7786,7 @@ export class WxCanvasGameApp {
         this.session.getLadderCoinsAvailable(),
         MAHJONG_REPLAY_COIN_COST,
         this.mahjongGateButtons,
+        now,
       );
     }
   }
@@ -6212,7 +7817,7 @@ export class WxCanvasGameApp {
       this.mahjongEntryGateLevel = null;
       this.leavingLobby = true;
       const level = this.session.mahjong.resolveEntryLevel();
-      resetMahjongSlotFlight(this.mahjongSlotFlight);
+      this.resetMahjongSlotAnimations();
       await this.session.mahjong.restartLevel(level);
       await this.openMahjongPlayWhenReady();
       this.requestPaint();
@@ -6471,22 +8076,13 @@ export class WxCanvasGameApp {
     }
 
     if (isCurrent) {
-      const star = this.uiIcons.get('ladder-star');
-      const badge = circleR * 0.7;
-      const bx = cx + circleR * 0.55;
-      const by = cy - circleR * 0.78;
-      if (star && (star.width || 0) > 0) {
-        const bob = Math.sin(nowMs * 0.006) * 2;
-        ctx.drawImage(star, bx - badge / 2, by - badge / 2 + bob, badge, badge);
-      }
       if ('startTop' in theme) {
         this.drawLobbyStartChip(node, theme.startTop, theme.startBottom);
       }
     } else if (cleared && unlocked) {
+      const stars = Math.min(3, Math.max(1, this.session.getLevelStars(node.levelId)));
       const score = this.session.getBestScore(node.levelId);
-      if (score > 0) {
-        this.drawLobbyScoreChip(node, score);
-      }
+      this.drawLobbyClearedBarMeta(node, stars, score);
     }
 
     ctx.restore();
@@ -6575,61 +8171,106 @@ export class WxCanvasGameApp {
     ctx.restore();
   }
 
-  private drawLobbyScoreChip(node: LobbyLevelNode, score: number): void {
+  /** 已通关条：白底胶囊内「三星 + 最高分 + 馆币」，与彩色条拉开对比。 */
+  private drawLobbyClearedBarMeta(node: LobbyLevelNode, stars: number, score: number): void {
     const { ctx } = this;
-    const label = String(Math.max(0, Math.floor(score)));
-    const coinLabel = formatMahjongGlobalCoinAmount(
-      this.session.getLadderCoinsForLevel(node.levelId),
-    );
-    ctx.save();
-    const fontSize = Math.max(11, Math.round(node.barH * 0.28));
-    ctx.font = `bold ${fontSize}px sans-serif`;
-    const tw = ctx.measureText(label).width;
-    const coinTw = ctx.measureText(coinLabel).width;
-    const chipH = Math.min(26, node.barH * 0.42);
-    const scoreChipW = tw + 18;
-    const coinChipW = coinTw + 22;
-    const gap = 4;
-    const totalW = scoreChipW + gap + coinChipW;
-    const chipX =
-      node.circleSide === 'left'
-        ? node.barX + node.barW * 0.42
-        : node.barX + node.barW * 0.22 - Math.max(0, totalW - node.barW * 0.5);
-    const chipY = node.y - chipH / 2;
+    const { barX, barW, barH, circleR, circleSide } = node;
+    const cy = node.y;
+    const starR = Math.max(8, barH * 0.24);
+    const scoreText = `${Math.max(0, Math.floor(score))}分`;
+    const coinText = formatLadderCoinChip(this.session.getLadderCoinsForLevel(node.levelId));
 
-    this.roundRectPath(chipX, chipY, scoreChipW, chipH, chipH / 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.94)';
+    let fontSize = Math.max(13, Math.round(barH * 0.38));
+    const coinPadX = 6;
+    const coinGap = 6;
+    ctx.save();
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    const starsBlockW = starR * 2.08 * 2 + starR;
+    const textGap = 8;
+    const measureTextBlock = (): number => {
+      const scoreW = ctx.measureText(scoreText).width;
+      const coinInner = ctx.measureText(coinText).width + coinPadX * 2;
+      return scoreW + coinGap + coinInner;
+    };
+    let textBlockW = measureTextBlock();
+    const pad = 10;
+    let chipH = Math.min(barH - 3, Math.max(30, barH * 0.92));
+    let chipW = pad * 2 + starsBlockW + textGap + textBlockW;
+
+    const circleReserve =
+      circleSide === 'left' ? circleR * 2 + 12 : circleR * 2 + 8;
+    const maxW = Math.max(40, barW - circleReserve - 10);
+    while (chipW > maxW && fontSize > 10) {
+      fontSize -= 1;
+      ctx.font = `bold ${fontSize}px sans-serif`;
+      textBlockW = measureTextBlock();
+      chipW = pad * 2 + starsBlockW + textGap + textBlockW;
+    }
+
+    let chipX =
+      circleSide === 'left'
+        ? barX + circleR * 2 + 10
+        : barX + 12;
+    chipX = Math.min(chipX, barX + barW - chipW - 6);
+    chipX = Math.max(chipX, barX + 6);
+    const chipY = cy - chipH / 2;
+
+    ctx.shadowColor = 'rgba(40, 60, 80, 0.28)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 2;
+    this.roundRectPath(chipX, chipY, chipW, chipH, chipH / 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.98)';
+    ctx.shadowColor = 'transparent';
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.98)';
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 212, 59, 0.45)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    const starLeft = chipX + pad + starR;
+    this.drawLobbyBarStarRow(starLeft, cy, starR, stars);
+
+    const textX = chipX + pad + starsBlockW + textGap;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.fillStyle = '#495057';
+    ctx.fillText(scoreText, textX, cy + 0.5);
+    const scoreW = ctx.measureText(scoreText).width;
+
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    const coinW = ctx.measureText(coinText).width;
+    const coinPadY = 3;
+    const coinBoxX = textX + scoreW + coinGap;
+    const coinBoxW = coinW + coinPadX * 2;
+    const coinBoxH = chipH - coinPadY * 2;
+    const coinBoxY = chipY + coinPadY;
+    const cg = ctx.createLinearGradient(coinBoxX, coinBoxY, coinBoxX, coinBoxY + coinBoxH);
+    cg.addColorStop(0, '#fff3bf');
+    cg.addColorStop(1, '#ffd43b');
+    this.roundRectPath(coinBoxX, coinBoxY, coinBoxW, coinBoxH, coinBoxH / 2);
+    ctx.fillStyle = cg;
+    ctx.fill();
+    ctx.strokeStyle = '#f59f00';
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    ctx.fillStyle = '#6b5b6e';
+    ctx.fillStyle = '#d9480f';
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, chipX + scoreChipW / 2, chipY + chipH / 2 + 0.5);
+    ctx.fillText(coinText, coinBoxX + coinBoxW / 2, cy + 0.5);
 
-    const coinX = chipX + scoreChipW + gap;
-    this.roundRectPath(coinX, chipY, coinChipW, chipH, chipH / 2);
-    ctx.fillStyle = 'rgba(255, 248, 220, 0.96)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255, 212, 59, 0.85)';
-    ctx.stroke();
-    ctx.fillStyle = '#e67700';
-    ctx.font = `bold ${Math.max(10, fontSize - 1)}px sans-serif`;
-    ctx.fillText(coinLabel, coinX + coinChipW / 2, chipY + chipH / 2 + 0.5);
     ctx.restore();
   }
 
 
   private lobbyContentTop(): number {
-    const daily = this.session.getDailyLoop();
     return layoutLobbyBottom({
       width: this.width,
       height: this.height,
       bannerReserve: this.mode === 'lobby' ? this.session.getLobbyBannerReservePx() : 0,
       safeBottom: this.safeAreaBottom,
-      clearsToday: daily.clearsToday,
-      shuffleGranted: daily.playShuffleGranted,
+      dailyClaimable: this.session.getDailyTasksView().claimable,
     }).contentTop;
   }
 
@@ -7691,6 +9332,9 @@ export class WxCanvasGameApp {
         iconSize,
       );
     }
+    this.hudGoalIconPos = collectSprite
+      ? { x: barX + 4 + iconSize / 2, y: barY + barH / 2 }
+      : null;
 
     ctx.font = goalLabel.length > 22 ? 'bold 10px sans-serif' : 'bold 12px sans-serif';
     ctx.textAlign = 'center';
@@ -9971,9 +11615,11 @@ export class WxCanvasGameApp {
       this.pendingResult === 'failed' ||
       this.session.fsm.getCurrent() === 'LevelFailed';
 
-    // 遮罩淡入（胜利弹窗稍深一点，突出居中卡片）
-    ctx.fillStyle = `rgba(40, 20, 50, ${anim.veilAlpha * (isFail ? 1 : 0.72)})`;
-    ctx.fillRect(0, 0, width, height);
+    drawResultSceneBackdrop(ctx, width, height, {
+      veilAlpha: anim.veilAlpha,
+      tone: 'pink',
+      isFail,
+    });
     this.resultFx.drawParticles(ctx, now);
 
     // 开场白闪
@@ -10064,6 +11710,14 @@ export class WxCanvasGameApp {
       );
     }
     ctx.restore();
+    if (!isFail) {
+      ctx.save();
+      ctx.globalAlpha = anim.panelAlpha;
+      const starCy = panelCy - panelH / 2 - 6;
+      this.drawResultStars(panelCx, starCy, 20, now);
+      this.drawResultStarCaption(panelCx, starCy, 20);
+      ctx.restore();
+    }
 
     // 按钮错落入场
     const revive = isFail ? this.session.getReviveOffer() : { allowed: false, movesGranted: 0 };
@@ -10243,6 +11897,14 @@ export class WxCanvasGameApp {
       ctx.fillStyle = '#d6336c';
       ctx.fillText(`粉碎加成 +${crushBonus}`, 0, 28);
     }
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = anim.panelAlpha;
+    const starSize = Math.min(22, card.w * 0.07);
+    const starCy = card.y + 4;
+    this.drawResultStars(card.cx, starCy, starSize, now);
+    this.drawResultStarCaption(card.cx, starCy, starSize);
     ctx.restore();
 
     const actionTop = panel.actionTop;

@@ -23,25 +23,25 @@ describe('lobbyNav', () => {
     assert.equal(LOBBY_NAV_CHIP_H, 36);
   });
 
-  it('左侧等宽列表含邀请/排行/怎么玩，左下角槽位与圈子齐平', () => {
+  it('左侧等宽列表含邀请/每日任务/排行/怎么玩，左下角槽位与圈子齐平', () => {
     const frames = layoutLobbySideActions(120, 390);
     assert.deepEqual(
       frames.map((frame) => frame.label),
-      ['邀请好友', '好友排行', '怎么玩'],
+      ['邀请好友', '每日任务', '排行榜', '怎么玩'],
     );
     assert.deepEqual(
       frames.map((frame) => frame.id),
-      ['invite', 'leaderboard', 'howto'],
+      ['invite', 'daily_open', 'leaderboard', 'howto'],
     );
     assert.equal(frames[0]?.h, LOBBY_FRIEND_ACTION_H);
-    assert.equal(frames[2]?.h, LOBBY_SOCIAL_ACTION_H);
+    assert.equal(frames[3]?.h, LOBBY_SOCIAL_ACTION_H);
     assert.equal(frames[0]?.w, frames[1]?.w);
     assert.equal(frames[0]?.h, frames[1]?.h);
     assert.ok((frames[0]?.w ?? 0) >= 72);
     assert.ok((frames[0]?.w ?? 0) <= 86);
     assert.ok((frames[1]?.y ?? 0) > (frames[0]?.y ?? 0) + (frames[0]?.h ?? 0));
-    assert.equal(frames[1]?.id, 'leaderboard');
-    assert.equal(frames[2]?.id, 'howto');
+    assert.equal(frames[2]?.id, 'leaderboard');
+    assert.equal(frames[3]?.id, 'howto');
     assert.ok((frames[0]?.x ?? 0) + (frames[0]?.w ?? 0) < 390 / 2);
     assert.equal(frames[0]?.h, 26);
 
@@ -50,8 +50,7 @@ describe('lobbyNav', () => {
       height: 844,
       bannerReserve: 0,
       safeBottom: 0,
-      clearsToday: 1,
-      shuffleGranted: false,
+      dailyClaimable: 1,
     });
     assert.equal(bottom.settings.id, 'settings');
     assert.equal(bottom.settings.w, LOBBY_GEAR_SIZE);
@@ -70,14 +69,13 @@ describe('lobbyNav', () => {
     assert.equal(LOBBY_SIDE_ACTION_FONT, 11);
   });
 
-  it('底部没有进度和库存，进度满 3 关才出现领取', () => {
+  it('底部有待领每日任务时出现领取条', () => {
     const mid = layoutLobbyBottom({
       width: 390,
       height: 844,
       bannerReserve: 0,
       safeBottom: 0,
-      clearsToday: 1,
-      shuffleGranted: false,
+      dailyClaimable: 0,
     });
     assert.equal(mid.claim, null);
     assert.equal(mid.chips.map((c) => c.label).join(','), '推荐,圈子');
@@ -87,11 +85,10 @@ describe('lobbyNav', () => {
       height: 844,
       bannerReserve: 0,
       safeBottom: 0,
-      clearsToday: 3,
-      shuffleGranted: false,
+      dailyClaimable: 2,
     });
     assert.ok(ready.claim);
-    assert.equal(ready.claim?.id, 'claim_shuffle');
+    assert.equal(ready.claim?.id, 'daily_open');
     assert.ok((ready.contentTop ?? 0) < ready.chips[0]!.y);
   });
 });

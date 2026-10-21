@@ -4,6 +4,8 @@
  * 原生广告只在手机微信创建，模拟器会刷 insertTextView parent not found。
  */
 
+import { isDouyinMiniGameHost, readMiniProgramEnvVersion } from './miniGameHost';
+
 const FALLBACK_WX_INFO: WxSystemInfo = {
   brand: '',
   model: '',
@@ -121,6 +123,17 @@ export function isWxDesktopClient(): boolean {
  * 不要用 benchmarkLevel === -1 判断：正式包 iPhone 经常是 -1，会把全部广告禁掉。
  */
 export function isWxDevtoolsHost(): boolean {
+  if (isDouyinMiniGameHost()) {
+    try {
+      const nav = (globalThis as { navigator?: { userAgent?: string } }).navigator;
+      const ua = nav?.userAgent || '';
+      if (/bytedance|devtools|ide/i.test(ua)) {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+  }
   const info = readWxInfo();
   const platform = platformOf(info);
   if (platform === 'devtools') {
@@ -154,18 +167,7 @@ export type WxMiniProgramEnvVersion = 'develop' | 'trial' | 'release';
 
 /** 微信小游戏版本：开发版 / 体验版 / 正式版。读不到则 null。 */
 export function readWxMiniProgramEnvVersion(): WxMiniProgramEnvVersion | null {
-  try {
-    if (typeof wx === 'undefined' || typeof wx.getAccountInfoSync !== 'function') {
-      return null;
-    }
-    const env = wx.getAccountInfoSync()?.miniProgram?.envVersion;
-    if (env === 'develop' || env === 'trial' || env === 'release') {
-      return env;
-    }
-  } catch {
-    // ignore
-  }
-  return null;
+  return readMiniProgramEnvVersion();
 }
 
 /**
@@ -186,17 +188,7 @@ export function shouldUnlockAllLevelsForPreview(): boolean {
 /**
  * 上屏主画布：运行时若已有 GameGlobal.canvas，再 createCanvas 会画到离屏导致黑屏。
  */
-export function resolveWxMainCanvas(): WxCanvas {
-  const g = globalThis as {
-    canvas?: WxCanvas;
-    GameGlobal?: { canvas?: WxCanvas };
-  };
-  const existing = g.GameGlobal?.canvas ?? g.canvas;
-  if (existing && typeof existing.getContext === 'function') {
-    return existing;
-  }
-  return wx.createCanvas();
-}
+export { bindMainCanvas2d, resolveWxMainCanvas } from './canvas2dBinding';
 
 /**
  * 真机平台判断。纯字符串，方便单测。

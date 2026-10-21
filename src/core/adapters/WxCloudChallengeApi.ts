@@ -11,6 +11,7 @@ import type {
   DailyTodayResponse,
   IChallengeApi,
   LeaderboardNotifyResponse,
+  LeaderboardRequestExtra,
   LeaderboardResponse,
   VerifyChallengeRequest,
   VerifyChallengeResponse,
@@ -84,7 +85,7 @@ export class WxCloudChallengeApi implements IChallengeApi {
   public async leaderboard(
     userId: string,
     maxClearedLevel = 0,
-    profile?: { nickName?: string; avatarUrl?: string },
+    extra?: LeaderboardRequestExtra,
   ): Promise<LeaderboardResponse> {
     if (!(await ensureCloud())) {
       return { ok: false, reason: 'cloud_unavailable' };
@@ -100,8 +101,11 @@ export class WxCloudChallengeApi implements IChallengeApi {
           userId,
           wxId: userId,
           maxLevel: Math.max(0, Math.floor(maxClearedLevel)),
-          nickName: profile?.nickName || '',
-          avatarUrl: profile?.avatarUrl || '',
+          totalScore: Math.max(0, Math.floor(extra?.totalScore ?? 0)),
+          weekKey: extra?.weekKey || '',
+          weekScore: Math.max(0, Math.floor(extra?.weekScore ?? 0)),
+          nickName: extra?.nickName || '',
+          avatarUrl: extra?.avatarUrl || '',
         },
       });
       const result = (res.result ?? {}) as LeaderboardResponse;

@@ -72,7 +72,7 @@ export function normalizeMahjongOps(raw: Partial<MahjongOpsConfig>): MahjongOpsC
             typeof o.typeCount === 'number' ? clampInt(o.typeCount, 6, 3, 20) : undefined,
           timeoutSec:
             typeof o.timeoutSec === 'number'
-              ? clampInt(o.timeoutSec, 120, 60, 3600)
+              ? clampInt(o.timeoutSec, 720, 60, 3600)
               : undefined,
           note: typeof o.note === 'string' ? o.note : undefined,
         }))
@@ -86,7 +86,7 @@ export function normalizeMahjongOps(raw: Partial<MahjongOpsConfig>): MahjongOpsC
       starPerTriple: clampInt(raw.economy?.starPerTriple, 1, 0, 100),
     },
     session: {
-      timeoutSec: clampInt(raw.session?.timeoutSec, 120, 60, 3600),
+      timeoutSec: clampInt(raw.session?.timeoutSec, 720, 60, 3600),
     },
     generation: {
       seedVersion: clampInt(gen.seedVersion, 1, 1, 10_000),

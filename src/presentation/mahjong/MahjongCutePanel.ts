@@ -1,5 +1,7 @@
 /** 麻将馆弹窗 / 遮罩：与主线 drawCuteCard 同系列，青绿系区分。 */
 
+import { drawResultSceneBackdrop } from '../fx/ResultSceneBackdrop';
+
 export interface MahjongCuteCardStyle {
   radius?: number;
   fillTop?: string;
@@ -130,15 +132,18 @@ export function drawMahjongPlaySceneBackground(
   ctx.restore();
 }
 
-/** 弹窗遮罩：对齐主线结果页紫幕，改为青绿暖色。 */
+/** 弹窗遮罩：与主线结算同系径向衬底，青绿调。 */
 export function drawMahjongModalVeil(
   ctx: WxCanvasRenderingContext2D,
   width: number,
   height: number,
   strength = 0.48,
+  tone: 'pink' | 'teal' = 'teal',
 ): void {
-  ctx.fillStyle = `rgba(28, 64, 58, ${strength})`;
-  ctx.fillRect(0, 0, width, height);
+  drawResultSceneBackdrop(ctx, width, height, {
+    veilAlpha: Math.min(1, strength / 0.48),
+    tone,
+  });
 }
 
 export function drawMahjongCuteCard(
@@ -496,16 +501,33 @@ export function drawMahjongPrimaryCapsuleButton(
   textColor = '#5c3d00',
   fontSize = 16,
 ): void {
+  const r = h / 2;
+  ctx.save();
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = '#4a3728';
+  roundRectPath(ctx, x + 1, y + 4, w, h, r);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
   const g = ctx.createLinearGradient(x, y, x, y + h);
   g.addColorStop(0, top);
   g.addColorStop(1, bottom);
   ctx.fillStyle = g;
-  roundRectPath(ctx, x, y, w, h, h / 2);
+  roundRectPath(ctx, x, y, w, h, r);
   ctx.fill();
+
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  roundRectPath(ctx, x + 4, y + 3, w - 8, h * 0.38, Math.max(4, r - 4));
+  ctx.fill();
+  ctx.restore();
+
   ctx.strokeStyle = 'rgba(255,255,255,0.85)';
   ctx.lineWidth = 2;
-  roundRectPath(ctx, x + 1, y + 1, w - 2, h - 2, h / 2 - 1);
+  roundRectPath(ctx, x + 1, y + 1, w - 2, h - 2, r - 1);
   ctx.stroke();
+  ctx.restore();
   drawMahjongCenterText(
     ctx,
     label,

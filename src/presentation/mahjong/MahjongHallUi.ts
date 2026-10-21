@@ -48,6 +48,7 @@ import {
 } from './MahjongTileFlyAnim';
 import type { MahjongToolIconLookup } from './MahjongToolIcons';
 import { drawMahjongPlaySceneBackgroundCached } from './MahjongPlaySceneBgCache';
+import { mahjongResultRevealFrame } from './MahjongStageFx';
 
 export type { MahjongTileHit, MahjongTilePose } from './MahjongPileLayout';
 
@@ -128,6 +129,51 @@ function drawMahjongPlayBackground(
   }
 }
 
+/** 青绿玻璃条：外投影 + 渐变槽 + 顶高光（麻将馆 HUD / 槽位共用）。 */
+function drawMahjongGlassBar3D(
+  ctx: WxCanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
+  ctx.save();
+  ctx.globalAlpha = 0.2;
+  ctx.fillStyle = P.tileShadow;
+  roundRect(ctx, x + 1.5, y + 4, w, h, r);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  const body = ctx.createLinearGradient(x, y, x, y + h);
+  body.addColorStop(0, 'rgba(255,255,255,0.38)');
+  body.addColorStop(0.42, P.glass);
+  body.addColorStop(1, P.glassDeep);
+  ctx.fillStyle = body;
+  roundRect(ctx, x, y, w, h, r);
+  ctx.fill();
+
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  const gloss = ctx.createLinearGradient(x, y, x, y + h * 0.55);
+  gloss.addColorStop(0, 'rgba(255,255,255,0.72)');
+  gloss.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gloss;
+  roundRect(ctx, x + 3, y + 2, w - 6, h * 0.42, Math.max(4, r - 4));
+  ctx.fill();
+  ctx.restore();
+
+  ctx.strokeStyle = P.glassStroke;
+  ctx.lineWidth = 2;
+  roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, r - 0.5);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.lineWidth = 1;
+  roundRect(ctx, x + 3, y + 3, w - 6, h - 6, Math.max(2, r - 3));
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawMahjongPlayHeader(
   ctx: WxCanvasRenderingContext2D,
   width: number,
@@ -135,6 +181,7 @@ function drawMahjongPlayHeader(
   ladderCoins: number,
   mahjongRunCoins: number,
   safeTop: number,
+  nowMs = 0,
 ): void {
   const leftReserve = mahjongPlayHeaderLeftReserve();
   const rightReserve = Math.max(118, width * 0.3);
@@ -142,33 +189,42 @@ function drawMahjongPlayHeader(
   const bannerW = Math.max(160, width - leftReserve - rightReserve);
   const by = safeTop + 4;
   const barH = 32;
-  const grad = ctx.createLinearGradient(bx, by, bx, by + barH);
-  grad.addColorStop(0, P.glass);
-  grad.addColorStop(1, P.glassDeep);
-  ctx.fillStyle = grad;
-  roundRect(ctx, bx, by, bannerW, barH, 12);
-  ctx.fill();
-  ctx.strokeStyle = P.glassStroke;
-  ctx.lineWidth = 1.5;
-  roundRect(ctx, bx, by, bannerW, barH, 12);
-  ctx.stroke();
+  drawMahjongGlassBar3D(ctx, bx, by, bannerW, barH, 12);
 
   const midY = by + barH / 2;
   ctx.save();
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = P.textPrimary;
   ctx.textAlign = 'left';
   ctx.font = 'bold 14px sans-serif';
   const levelLabel = `关卡 ${game.level}`;
   const levelX = bx + 12;
+  ctx.strokeStyle = 'rgba(8, 48, 44, 0.35)';
+  ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
+  ctx.strokeText(levelLabel, levelX, midY);
+  ctx.fillStyle = P.textPrimary;
   ctx.fillText(levelLabel, levelX, midY);
   const levelW = ctx.measureText(levelLabel).width;
   ctx.font = 'bold 13px sans-serif';
   const timerLabel = `⏱ ${formatTime(game.remainingMs)}`;
-  ctx.fillText(timerLabel, levelX + levelW + 10, midY);
+  const timerX = levelX + levelW + 10;
+  const urgent = game.remainingMs > 0 && game.remainingMs <= 45_000;
+  if (urgent) {
+    const pulse = 0.55 + 0.45 * Math.abs(Math.sin(nowMs * 0.012));
+    ctx.save();
+    ctx.globalAlpha = pulse;
+    ctx.fillStyle = 'rgba(255, 107, 107, 0.28)';
+    ctx.fillRect(timerX - 4, midY - 12, ctx.measureText(timerLabel).width + 8, 24);
+    ctx.restore();
+  }
+  ctx.fillStyle = urgent ? '#c92a2a' : P.textPrimary;
+  ctx.strokeText(timerLabel, timerX, midY);
+  ctx.fillText(timerLabel, timerX, midY);
   ctx.textAlign = 'right';
   ctx.font = 'bold 11px sans-serif';
   const coinLine = `梯子${formatMahjongGlobalCoinAmount(ladderCoins)} 本局${formatMahjongGlobalCoinAmount(mahjongRunCoins)}`;
+  ctx.strokeText(coinLine, bx + bannerW - 8, midY);
+  ctx.fillStyle = P.textSoft;
   ctx.fillText(coinLine, bx + bannerW - 8, midY);
   ctx.restore();
 }
@@ -180,34 +236,57 @@ function drawMahjongSlotBar(
   slotW: number,
   slotH: number,
   pad: number,
+  slotCount = 0,
+  maxSlots = 6,
+  nowMs = 0,
 ): void {
   const barPad = 6;
   const barH = slotH + barPad * 2;
   const barY = slotY - barPad;
-  ctx.fillStyle = P.glassDeep;
-  roundRect(ctx, pad - 4, barY, width - pad * 2 + 8, barH, 16);
-  ctx.fill();
-  ctx.strokeStyle = P.glassStroke;
-  ctx.lineWidth = 1.5;
-  roundRect(ctx, pad - 4, barY, width - pad * 2 + 8, barH, 16);
-  ctx.stroke();
+  const barX = pad - 4;
+  const barW = width - pad * 2 + 8;
+  drawMahjongGlassBar3D(ctx, barX, barY, barW, barH, 16);
+
+  const tight = maxSlots > 0 && slotCount >= Math.max(1, maxSlots - 1);
+  if (tight) {
+    const pulse = 0.35 + 0.35 * Math.abs(Math.sin(nowMs * 0.009));
+    ctx.save();
+    ctx.globalAlpha = pulse;
+    ctx.strokeStyle = slotCount >= maxSlots ? '#ff6b6b' : '#ff922b';
+    ctx.lineWidth = 3;
+    roundRect(ctx, barX + 1, barY + 1, barW - 2, barH - 2, 15);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   for (let i = 0; i < 7; i += 1) {
     const x = pad + i * (slotW + 5);
-    ctx.fillStyle = P.slotWell;
+    ctx.save();
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = '#000000';
+    roundRect(ctx, x + 1, slotY + 3, slotW, slotH, 8);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    const well = ctx.createLinearGradient(x, slotY, x, slotY + slotH);
+    well.addColorStop(0, 'rgba(18, 72, 68, 0.55)');
+    well.addColorStop(0.5, P.slotWell);
+    well.addColorStop(1, 'rgba(12, 48, 46, 0.62)');
+    ctx.fillStyle = well;
     roundRect(ctx, x, slotY, slotW, slotH, 8);
     ctx.fill();
     const wellShine = ctx.createLinearGradient(x, slotY, x, slotY + slotH);
-    wellShine.addColorStop(0, 'rgba(255,255,255,0.42)');
-    wellShine.addColorStop(0.55, 'rgba(255,255,255,0.08)');
+    wellShine.addColorStop(0, 'rgba(255,255,255,0.48)');
+    wellShine.addColorStop(0.55, 'rgba(255,255,255,0.1)');
     wellShine.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = wellShine;
-    roundRect(ctx, x, slotY, slotW, slotH * 0.55, 8);
+    roundRect(ctx, x + 1, slotY + 1, slotW - 2, slotH * 0.48, 7);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.32)';
-    ctx.lineWidth = 1;
-    roundRect(ctx, x, slotY, slotW, slotH, 8);
+    ctx.strokeStyle = 'rgba(255,255,255,0.38)';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, x + 0.5, slotY + 0.5, slotW - 1, slotH - 1, 7.5);
     ctx.stroke();
+    ctx.restore();
   }
 }
 
@@ -385,7 +464,7 @@ export function drawMahjongPlay(
     chrome,
     chrome.pileSway,
   );
-  drawMahjongPlayHeader(ctx, width, game, ladderCoins, game.coinsThisRun, m.safeTop);
+  drawMahjongPlayHeader(ctx, width, game, ladderCoins, game.coinsThisRun, m.safeTop, nowMs);
 
   const pileZMax = layoutMahjongPlay(width, height, game, tileHits, buttons);
   const tileDrawOptsBase = {
@@ -413,7 +492,23 @@ export function drawMahjongPlay(
     });
   }
 
-  drawMahjongSlotBar(ctx, width, m.slotY, m.slotW, m.slotH, m.pad);
+  const shownSlots = slotFlight
+    ? mahjongSlotsForDisplay(game.slots, slotFlight, nowMs, (slots, tile) =>
+        game.slotsAfterAppend(slots, tile),
+      )
+    : game.slots;
+
+  drawMahjongSlotBar(
+    ctx,
+    width,
+    m.slotY,
+    m.slotW,
+    m.slotH,
+    m.pad,
+    shownSlots.length,
+    game.maxSlots(),
+    nowMs,
+  );
 
   for (let i = 0; i < 7; i += 1) {
     const locked = i === 6 && !game.adSlotUnlocked;
@@ -433,11 +528,6 @@ export function drawMahjongPlay(
     }
   }
 
-  const shownSlots = slotFlight
-    ? mahjongSlotsForDisplay(game.slots, slotFlight, nowMs, (slots, tile) =>
-        game.slotsAfterAppend(slots, tile),
-      )
-    : game.slots;
   shownSlots.forEach((type, idx) => {
     if (idx >= game.maxSlots()) {
       return;
@@ -465,17 +555,17 @@ export function drawMahjongPlay(
 
   if (game.level === 1 && !game.guideShown) {
     const gy = m.headerBottom - 4;
-    ctx.fillStyle = P.glass;
-    roundRect(ctx, m.pad, gy, width - m.pad * 2, 26, 8);
-    ctx.fill();
-    ctx.strokeStyle = P.glassStroke;
-    ctx.lineWidth = 1;
-    roundRect(ctx, m.pad, gy, width - m.pad * 2, 26, 8);
-    ctx.stroke();
+    const gw = width - m.pad * 2;
+    drawMahjongGlassBar3D(ctx, m.pad, gy, gw, 26, 10);
     ctx.fillStyle = P.textPrimary;
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('点击麻将放入槽位，3 个相同自动消除', width / 2, gy + 17);
+    ctx.textBaseline = 'middle';
+    ctx.strokeStyle = 'rgba(8, 48, 44, 0.32)';
+    ctx.lineWidth = 2.5;
+    const tip = '点击麻将放入槽位，3 个相同自动消除';
+    ctx.strokeText(tip, width / 2, gy + 13);
+    ctx.fillText(tip, width / 2, gy + 13);
   }
 
   for (const btn of buttons) {
@@ -744,7 +834,16 @@ function drawMahjongSlotFullChallengeFailed(
   buttons: MahjongUiButton[],
   nowMs: number,
   chrome: MahjongPlayChrome,
+  resultRevealStartMs = 0,
 ): void {
+  ctx.save();
+  if (resultRevealStartMs > 0) {
+    const rev = mahjongResultRevealFrame(resultRevealStartMs, nowMs);
+    ctx.globalAlpha = rev.alpha;
+    ctx.translate(width / 2, height / 2 + rev.offsetY);
+    ctx.scale(rev.scale, rev.scale);
+    ctx.translate(-width / 2, -height / 2);
+  }
   drawMahjongModalVeil(ctx, width, height, 0.46);
 
   const cardW = Math.min(width * 0.86, 328);
@@ -835,6 +934,7 @@ function drawMahjongSlotFullChallengeFailed(
     '#37b24d',
     '#ffffff',
   );
+  ctx.restore();
 }
 
 
@@ -848,7 +948,7 @@ function drawMahjongWinCelebratePanel(
   nowMs: number,
   celebrateImage: WxImage,
 ): void {
-  drawMahjongModalVeil(ctx, width, height, 0.42);
+  drawMahjongModalVeil(ctx, width, height, 0.88, 'pink');
   const cardW = Math.min(width * 0.86, 328);
   const footerH = autoNextMs > 0 ? 132 : 112;
   const cardH = Math.min(Math.max(440, height * 0.56), height - 64);
@@ -951,13 +1051,22 @@ export function drawMahjongResult(
   nowMs = 0,
   celebrateImage?: WxImage | null,
   chrome: MahjongPlayChrome = {},
+  resultRevealStartMs = 0,
 ): void {
   buttons.length = 0;
   if (game.phase === 'lost' && game.failReason === 'slot_full') {
     if (!slotFullOfferDismissed) {
       drawMahjongSlotFullReviveOffer(ctx, width, height, game, chrome, buttons, nowMs);
     } else {
-      drawMahjongSlotFullChallengeFailed(ctx, width, height, buttons, nowMs, chrome);
+      drawMahjongSlotFullChallengeFailed(
+        ctx,
+        width,
+        height,
+        buttons,
+        nowMs,
+        chrome,
+        resultRevealStartMs,
+      );
     }
     return;
   }
@@ -974,6 +1083,14 @@ export function drawMahjongResult(
       celebrateImage,
     );
     return;
+  }
+  ctx.save();
+  if (resultRevealStartMs > 0) {
+    const rev = mahjongResultRevealFrame(resultRevealStartMs, nowMs);
+    ctx.globalAlpha = rev.alpha;
+    ctx.translate(width / 2, height / 2 + rev.offsetY);
+    ctx.scale(rev.scale, rev.scale);
+    ctx.translate(-width / 2, -height / 2);
   }
   drawMahjongModalVeil(ctx, width, height, won ? 0.42 : 0.48);
   const cardW = width * 0.82;
@@ -1081,6 +1198,7 @@ export function drawMahjongResult(
       btn.id === 'mahjong_back_lobby' ? '#495057' : '#ffffff',
     );
   }
+  ctx.restore();
 }
 
 function roundRect(
@@ -1123,6 +1241,7 @@ export function drawMahjongLadderCoinGateModal(
   ladderCoins: number,
   replayCost: number,
   buttons: MahjongUiButton[],
+  nowMs = 0,
 ): void {
   buttons.length = 0;
   const shortOnCoins = ladderCoins < replayCost;
@@ -1139,6 +1258,9 @@ export function drawMahjongLadderCoinGateModal(
     border: 'rgba(255, 190, 120, 0.95)',
     fillTop: 'rgba(255,255,255,0.98)',
     fillBottom: 'rgba(255,248,235,0.98)',
+    shadow: true,
+    sparkle: true,
+    nowMs,
   });
 
   drawMahjongCenterText(

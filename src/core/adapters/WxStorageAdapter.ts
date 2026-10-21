@@ -1,11 +1,34 @@
 import type { IStorage } from '../ports/IStorage';
+import { isDouyinMiniGameHost } from '../utils/miniGameHost';
 
 /**
  * 微信本地存储适配器。
  * 仅本文件允许调用 wx.* Storage API。
  */
 export class WxStorageAdapter implements IStorage {
+  private useSyncStorage(): boolean {
+    if (isDouyinMiniGameHost() && typeof wx.getStorageSync === 'function') {
+      return true;
+    }
+    return typeof wx.getStorageSync === 'function' && typeof wx.getStorage !== 'function';
+  }
+
+  private readSync<T>(key: string): T | null {
+    try {
+      const data = wx.getStorageSync(key);
+      if (data === undefined || data === '') {
+        return null;
+      }
+      return data as T;
+    } catch {
+      return null;
+    }
+  }
+
   public async get<T>(key: string): Promise<T | null> {
+    if (this.useSyncStorage()) {
+      return this.readSync<T>(key);
+    }
     return new Promise<T | null>((resolve, reject) => {
       wx.getStorage({
         key,
@@ -30,6 +53,10 @@ export class WxStorageAdapter implements IStorage {
   }
 
   public async set<T>(key: string, value: T): Promise<void> {
+    if (this.useSyncStorage()) {
+      wx.setStorageSync(key, value);
+      return;
+    }
     return new Promise<void>((resolve, reject) => {
       wx.setStorage({
         key,
@@ -41,6 +68,14 @@ export class WxStorageAdapter implements IStorage {
   }
 
   public async remove(key: string): Promise<void> {
+    if (this.useSyncStorage()) {
+      try {
+        wx.removeStorageSync(key);
+      } catch {
+        // ignore missing key
+      }
+      return;
+    }
     return new Promise<void>((resolve, reject) => {
       wx.removeStorage({
         key,
@@ -57,6 +92,10 @@ export class WxStorageAdapter implements IStorage {
   }
 
   public async clear(): Promise<void> {
+    if (this.useSyncStorage()) {
+      wx.clearStorageSync();
+      return;
+    }
     return new Promise<void>((resolve, reject) => {
       wx.clearStorage({
         success: () => resolve(),

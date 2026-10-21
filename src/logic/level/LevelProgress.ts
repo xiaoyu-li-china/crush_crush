@@ -18,6 +18,8 @@ export interface LevelProgressData {
   lastPlayedLevelId: number;
   /** 每关历史最高分（key 为关卡 id 字符串，便于 JSON 持久化） */
   levelScores?: Record<string, number>;
+  /** 每关历史最高星级 1–3（key 为关卡 id 字符串） */
+  levelStars?: Record<string, number>;
   /** 已在萌宠麻将馆等玩法中消耗掉的梯子金币 */
   ladderCoinsSpent?: number;
 }
@@ -71,6 +73,18 @@ export function normalizeLevelProgressData(raw: unknown): LevelProgressData {
       scores[String(Math.floor(id))] = score;
     }
   }
+  const stars: Record<string, number> = {};
+  const rawStars = data.levelStars;
+  if (rawStars && typeof rawStars === 'object') {
+    for (const [key, value] of Object.entries(rawStars)) {
+      const id = Number(key);
+      const n = Math.floor(Number(value));
+      if (!Number.isFinite(id) || id < 1 || !Number.isFinite(n) || n < 1) {
+        continue;
+      }
+      stars[String(Math.floor(id))] = Math.min(3, n);
+    }
+  }
   const scoreIds = Object.keys(scores).map((k) => Number(k));
   const maxScored = scoreIds.length > 0 ? Math.max(...scoreIds) : 0;
   let highest = asPositiveInt(data.highestLevelId, 1);
@@ -84,6 +98,7 @@ export function normalizeLevelProgressData(raw: unknown): LevelProgressData {
     totalScore: asNonNegInt(data.totalScore, 0),
     lastPlayedLevelId: lastPlayed,
     levelScores: scores,
+    levelStars: stars,
     ladderCoinsSpent: asNonNegInt(data.ladderCoinsSpent, 0),
   };
 }
@@ -103,7 +118,13 @@ export class LevelProgress {
     return {
       ...this.data,
       levelScores: { ...(this.data.levelScores ?? {}) },
+      levelStars: { ...(this.data.levelStars ?? {}) },
     };
+  }
+
+  /** 该关历史最高星级；没记录返回 0 */
+  public getStars(levelId: number): number {
+    return this.data.levelStars?.[String(levelId)] ?? 0;
   }
 
   public getHighestLevelId(): number {
@@ -146,10 +167,15 @@ export class LevelProgress {
   /**
    * 通关记账：刷新该关最高分，并推进可挑战关卡。
    */
-  public markLevelCleared(levelId: number, score: number): void {
+  public markLevelCleared(levelId: number, score: number, stars = 0): void {
     this.data.lastPlayedLevelId = levelId;
     const scores = this.data.levelScores ?? (this.data.levelScores = {});
     const key = String(levelId);
+    const starCount = Math.min(3, Math.max(0, Math.floor(stars)));
+    if (starCount > 0) {
+      const starMap = this.data.levelStars ?? (this.data.levelStars = {});
+      starMap[key] = Math.max(starMap[key] ?? 0, starCount);
+    }
     const prev = scores[key] ?? 0;
     if (score > prev) {
       scores[key] = score;

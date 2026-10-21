@@ -1,0 +1,26 @@
+{
+  "rewarded_revive": {
+    "adUnitId": "TODO_DOUYIN_REWARDED_REVIVE",
+    "maxPerLevel": 0
+  },
+  "rewarded_crush_extend": {
+    "adUnitId": "TODO_DOUYIN_REWARDED_CRUSH_EXTEND",
+    "extraMs": 5000
+  },
+  "interstitial_settle": {
+    "adUnitId": "TODO_DOUYIN_INTERSTITIAL_SETTLE",
+    "everyNLevels": 2,
+    "cooldownSeconds": 60
+  },
+  "interstitial_launch": {
+    "enabled": true,
+    "delayMs": 2500,
+    "retryMs": 2500,
+    "timeoutMs": 45000
+  },
+  "banner_lobby": {
+    "adUnitId": "TODO_DOUYIN_BANNER_LOBBY",
+    "enabled": true
+  },
+  "_comment": "在抖音开放平台 → 流量主 / 广告管理 创建广告位后，替换 TODO_* 为真实 adUnitId，再 npm run build:douyin。"
+}

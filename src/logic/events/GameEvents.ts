@@ -66,7 +66,11 @@ export type GameEvent =
     }
   | { type: 'InviteReward'; kind: 'invitee' | 'inviter'; hammers: number }
   /** 通关公告文案更新（如好友排行提示异步返回） */
-  | { type: 'PostClearAnnouncement' };
+  | { type: 'PostClearAnnouncement' }
+  /** 局内刚好达成一个每日任务（奖励回大厅领） */
+  | { type: 'DailyTaskCompleted'; title: string }
+  /** 上周本周榜结算到账（文案用 takeLeaderboardRewardToast 取） */
+  | { type: 'LeaderboardReward' };
 
 export type GameEventListener = (event: GameEvent) => void;
 

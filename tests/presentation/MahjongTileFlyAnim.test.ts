@@ -77,6 +77,17 @@ describe('麻将飞牌动画', () => {
     assert.deepEqual(mahjongSlotsForDisplay(actual, flight, 1400, appendTriple), actual);
   });
 
+  it('落地回调携带三消信息', () => {
+    const flight = createMahjongSlotFlight();
+    launchMahjongSlotFlight(flight, [1, 1], fly(1, 1000));
+    const lands: number[] = [];
+    pruneMahjongSlotFlight(flight, 1300, appendTriple, (ev) => {
+      lands.push(ev.removedCount);
+    });
+    assert.deepEqual(lands, [3]);
+    assert.deepEqual(flight.baseSlots, []);
+  });
+
   it('槽位被其它操作改动时直接显示真实槽位', () => {
     const flight = createMahjongSlotFlight();
     launchMahjongSlotFlight(flight, [4], fly(5, 1000));

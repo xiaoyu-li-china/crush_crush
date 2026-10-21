@@ -1,10 +1,9 @@
 /**
  * 大厅导航。
- * 左上角竖排：邀请好友 / 怎么玩。
- * 底部：音效开关（左下，与推荐/圈子同高）、领取（满进度时）、推荐 / 圈子。
+ * 左上角竖排：邀请好友 / 每日任务 / 排行榜 / 怎么玩。
+ * 底部：音效开关（左下，与推荐/圈子同高）、每日任务待领条（有奖励可领时）、推荐 / 圈子。
  * 热区要比绘制更大，并避开 Home 条。
  */
-import { lobbyDailyProgress } from '../../logic/economy/DailyLoop';
 
 export const LOBBY_GEAR_SIZE = 34;
 /** 左侧入口列表：小胶囊，贴左上角。 */
@@ -41,7 +40,7 @@ export const LOBBY_NAV_CHIP_H = 36;
 export const LOBBY_NAV_CHIP_MIN_W = 68;
 export const LOBBY_NAV_HIT_PAD = 16;
 
-export const LOBBY_CLAIM_LABEL = '点击领取 重排 x1';
+export const LOBBY_DAILY_BAR_LABEL = '每日任务 · {n} 个奖励待领取';
 
 export interface LobbyGearFrame {
   id: 'settings';
@@ -51,7 +50,7 @@ export interface LobbyGearFrame {
   h: number;
 }
 
-export type LobbySideActionId = 'invite' | 'howto' | 'leaderboard';
+export type LobbySideActionId = 'invite' | 'howto' | 'leaderboard' | 'daily_open';
 
 export interface LobbySideActionFrame {
   id: LobbySideActionId;
@@ -63,7 +62,7 @@ export interface LobbySideActionFrame {
 }
 
 export interface LobbyBarFrame {
-  id: 'claim_shuffle';
+  id: 'daily_open';
   label: string;
   x: number;
   y: number;
@@ -91,7 +90,8 @@ export interface LobbyBottomChrome {
 
 const LOBBY_SIDE_ACTIONS: ReadonlyArray<Pick<LobbySideActionFrame, 'id' | 'label'>> = [
   { id: 'invite', label: '邀请好友' },
-  { id: 'leaderboard', label: '好友排行' },
+  { id: 'daily_open', label: '每日任务' },
+  { id: 'leaderboard', label: '排行榜' },
   { id: 'howto', label: '怎么玩' },
 ];
 
@@ -149,14 +149,14 @@ export function lobbyNavBottomGap(bannerReserve: number, safeBottom: number): nu
   return Math.max(24, safe + 14);
 }
 
-/** 底部：设置齿轮、领取（满 3 关时）、推荐 / 圈子。 */
+/** 底部：设置齿轮、每日任务待领条（有奖励可领时）、推荐 / 圈子。 */
 export function layoutLobbyBottom(input: {
   width: number;
   height: number;
   bannerReserve: number;
   safeBottom: number;
-  clearsToday: number;
-  shuffleGranted: boolean;
+  /** 每日任务里已完成未领取的数量（含宝箱） */
+  dailyClaimable: number;
 }): LobbyBottomChrome {
   const side = 12;
   const gap = 12;
@@ -184,12 +184,12 @@ export function layoutLobbyBottom(input: {
     h: chipH,
   }));
 
-  const progressState = lobbyDailyProgress(input.clearsToday, input.shuffleGranted);
+  const claimable = Math.max(0, Math.floor(input.dailyClaimable) || 0);
   const claimH = 36;
-  const claim: LobbyBarFrame | null = progressState.readyToClaim
+  const claim: LobbyBarFrame | null = claimable > 0
     ? {
-        id: 'claim_shuffle',
-        label: LOBBY_CLAIM_LABEL,
+        id: 'daily_open',
+        label: LOBBY_DAILY_BAR_LABEL.replace('{n}', String(claimable)),
         x: side,
         y: chipY - gap - claimH,
         w: input.width - side * 2,

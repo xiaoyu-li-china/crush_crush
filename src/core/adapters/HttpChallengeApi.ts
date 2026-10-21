@@ -11,6 +11,7 @@ import type {
   DailyTodayResponse,
   IChallengeApi,
   LeaderboardNotifyResponse,
+  LeaderboardRequestExtra,
   LeaderboardResponse,
   VerifyChallengeRequest,
   VerifyChallengeResponse,
@@ -82,19 +83,24 @@ export class HttpChallengeApi implements IChallengeApi {
   public async leaderboard(
     userId: string,
     maxClearedLevel = 0,
-    profile?: { nickName?: string; avatarUrl?: string },
+    extra?: LeaderboardRequestExtra,
   ): Promise<LeaderboardResponse> {
     // scope=all：返回所有玩过本小游戏的用户；附带资料便于服务端入库展示
     const qs = [
       `user_id=${encodeURIComponent(userId)}`,
       `max_level=${Math.max(0, Math.floor(maxClearedLevel))}`,
+      `total_score=${Math.max(0, Math.floor(extra?.totalScore ?? 0))}`,
+      `week_score=${Math.max(0, Math.floor(extra?.weekScore ?? 0))}`,
       'scope=all',
     ];
-    if (profile?.nickName) {
-      qs.push(`nick_name=${encodeURIComponent(profile.nickName)}`);
+    if (extra?.weekKey) {
+      qs.push(`week_key=${encodeURIComponent(extra.weekKey)}`);
     }
-    if (profile?.avatarUrl) {
-      qs.push(`avatar_url=${encodeURIComponent(profile.avatarUrl)}`);
+    if (extra?.nickName) {
+      qs.push(`nick_name=${encodeURIComponent(extra.nickName)}`);
+    }
+    if (extra?.avatarUrl) {
+      qs.push(`avatar_url=${encodeURIComponent(extra.avatarUrl)}`);
     }
     const url = `${this.base()}/api/leaderboard?${qs.join('&')}`;
     if (!this.baseUrl) {

@@ -5,6 +5,7 @@ import {
 } from '../economy/BoosterEconomy';
 import type { BoosterStock } from '../economy/BoosterInventory';
 import { EMPTY_DAILY_LOOP, type DailyLoopData } from '../economy/DailyLoop';
+import { mergeDailyTaskCounters } from '../economy/DailyTasks';
 import {
   mergeInviteCloud,
   parseInviteCloudSlice,
@@ -33,12 +34,17 @@ export function mergeLevelProgress(
       scores[key] = value;
     }
   }
+  const stars: Record<string, number> = { ...(a.levelStars ?? {}) };
+  for (const [key, value] of Object.entries(b.levelStars ?? {})) {
+    stars[key] = Math.max(stars[key] ?? 0, value);
+  }
   return normalizeLevelProgressData({
     highestLevelId: Math.max(a.highestLevelId, b.highestLevelId),
     totalScore: Math.max(a.totalScore, b.totalScore),
     lastPlayedLevelId:
       a.highestLevelId >= b.highestLevelId ? a.lastPlayedLevelId : b.lastPlayedLevelId,
     levelScores: scores,
+    levelStars: stars,
     ladderCoinsSpent: Math.max(ladderCoinsSpent(a), ladderCoinsSpent(b)),
   });
 }
@@ -80,6 +86,7 @@ export function mergeDaily(local: DailyLoopData, remote: DailyLoopData): DailyLo
     shareGroupExtra: flagsA.shareGroupExtra || flagsB.shareGroupExtra,
     playShuffleGranted: flagsA.playShuffleGranted || flagsB.playShuffleGranted,
     playExtraGranted: flagsA.playExtraGranted || flagsB.playExtraGranted,
+    tasks: mergeDailyTaskCounters(a.tasks, b.tasks),
   };
 }
 

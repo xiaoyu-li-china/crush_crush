@@ -6,7 +6,7 @@
     "starPerTriple": 1
   },
   "session": {
-    "timeoutSec": 120
+    "timeoutSec": 720
   },
   "generation": {
     "seedVersion": 1,
